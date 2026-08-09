@@ -1,0 +1,10 @@
+User-Agent: *
+Disallow: /dashboard
+Disallow: /app
+Disallow: /admin
+Disallow: /auth
+Disallow: /settings
+Disallow: /activate
+Disallow: /ganti-password
+Disallow: /forgot-password
+Disallow: /reset-password

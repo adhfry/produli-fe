@@ -1,0 +1,46 @@
+{
+  "name": "kopipu-smart-frontend",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@formkit/auto-animate": "^0.10.0",
+    "@iconify-json/lucide": "^1.2.121",
+    "@nuxt/fonts": "^0.14.0",
+    "@nuxt/icon": "^2.4.1",
+    "@nuxt/image": "^2.1.0",
+    "@nuxt/ui": "^4.10.0",
+    "@nuxtjs/sitemap": "^8.3.2",
+    "@pinia/nuxt": "^1.0.1",
+    "@turf/turf": "^7.4.0",
+    "@vite-pwa/nuxt": "^1.1.1",
+    "@vueuse/core": "^14.4.0",
+    "@vueuse/nuxt": "^14.4.0",
+    "axios": "^1.19.0",
+    "chart.js": "^4.5.1",
+    "flatpickr": "^4.6.13",
+    "maplibre-gl": "^6.1.0",
+    "motion-v": "^2.3.0",
+    "nuxt": "^4.5.1",
+    "nuxt-lucide-icons": "^2.1.0",
+    "osmtogeojson": "^3.0.0-beta.5",
+    "pinia": "^4.0.2",
+    "pinia-plugin-persistedstate": "^4.7.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vue": "^3.5.40",
+    "vue-chartjs": "^5.3.4",
+    "vue-router": "^5.2.0",
+    "vue-sonner": "^2.0.9",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2"
+  }
+}

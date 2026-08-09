@@ -1,0 +1,207 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+/* Design tokens resmi — docs/planning/07-design-tokens-dan-koreksi-referensi.md §1.
+   Hex verbatim dari user, JANGAN diubah/improvisasi. @theme (bukan tailwind.config.js)
+   supaya otomatis jadi class bg-primary-500, text-accent-900, dst — cara Tailwind v4. */
+@theme {
+  --color-primary-50: #f0fcfb;
+  --color-primary-100: #ccf7f3;
+  --color-primary-200: #99efe9;
+  --color-primary-300: #5ce3da;
+  --color-primary-400: #2bd3c8;
+  --color-primary-500: #00a59a;
+  --color-primary-600: #00857d;
+  --color-primary-700: #006b65;
+  --color-primary-800: #00544f;
+  --color-primary-900: #004541;
+  --color-primary-950: #002927;
+  --color-primary: #00a59a;
+
+  --color-secondary-50: #f6fcf1;
+  --color-secondary-100: #eaf8df;
+  --color-secondary-200: #d0f0ba;
+  --color-secondary-300: #aee48d;
+  --color-secondary-400: #8cd35f;
+  --color-secondary-500: #65b32e;
+  --color-secondary-600: #4f8f23;
+  --color-secondary-700: #3b6d19;
+  --color-secondary-800: #2a4f12;
+  --color-secondary-900: #234211;
+  --color-secondary-950: #112306;
+  --color-secondary: #65b32e;
+
+  --color-accent-50: #f0f6fa;
+  --color-accent-100: #daeaf3;
+  --color-accent-200: #badae8;
+  --color-accent-300: #8bc3da;
+  --color-accent-400: #57a4c6;
+  --color-accent-500: #3385aa;
+  --color-accent-600: #23698b;
+  --color-accent-700: #1d5471;
+  --color-accent-800: #19465e;
+  --color-accent-900: #003b5c;
+  --color-accent-950: #051d2e;
+  --color-accent: #003b5c;
+
+  --color-surface-50: #f4fbf9;
+  --color-surface-100: #e1f5f0;
+  --color-surface-200: #c2ebe0;
+  --color-surface-300: #9ddbcb;
+  --color-surface-400: #73c4b2;
+  --color-surface-500: #4ea693;
+  --color-surface-600: #388574;
+  --color-surface-700: #2e6b5e;
+  --color-surface-800: #26554b;
+  --color-surface-900: #21473f;
+  --color-surface-950: #102722;
+  --color-surface: #f4fbf9;
+
+  --color-danger-50: #fef2f2;
+  --color-danger-100: #fee2e2;
+  --color-danger-200: #fecaca;
+  --color-danger-300: #fca5a5;
+  --color-danger-400: #f87171;
+  --color-danger-500: #ef4444;
+  --color-danger-600: #dc2626;
+  --color-danger-700: #b91c1c;
+  --color-danger-800: #991b1b;
+  --color-danger-900: #7f1d1d;
+  --color-danger-950: #450a0a;
+  --color-danger: #ef4444;
+
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-200: #fde68a;
+  --color-warning-300: #fcd34d;
+  --color-warning-400: #fbbf24;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
+  --color-warning-800: #92400e;
+  --color-warning-900: #78350f;
+  --color-warning-950: #451a03;
+  --color-warning: #f59e0b;
+
+  --color-neutral-50: #f8fafc;
+  --color-neutral-100: #f1f5f9;
+  --color-neutral-200: #e2e8f0;
+  --color-neutral-300: #cbd5e1;
+  --color-neutral-400: #94a3b8;
+  --color-neutral-500: #64748b;
+  --color-neutral-600: #475569;
+  --color-neutral-700: #334155;
+  --color-neutral-800: #1e293b;
+  --color-neutral-900: #0f172a;
+  --color-neutral-950: #020617;
+  --color-neutral: #64748b;
+
+  --color-info-50: #f0f9ff;
+  --color-info-100: #e0f2fe;
+  --color-info-200: #bae6fd;
+  --color-info-300: #7dd3fc;
+  --color-info-400: #38bdf8;
+  --color-info-500: #0284c7;
+  --color-info-600: #0369a1;
+  --color-info-700: #075985;
+  --color-info-800: #0c4a6e;
+  --color-info-900: #082f49;
+  --color-info-950: #041f33;
+  --color-info: #0284c7;
+
+  --color-success-50: #ecfdf5;
+  --color-success-100: #d1fae5;
+  --color-success-200: #a7f3d0;
+  --color-success-300: #6ee7b7;
+  --color-success-400: #34d399;
+  --color-success-500: #10b981;
+  --color-success-600: #059669;
+  --color-success-700: #047857;
+  --color-success-800: #065f46;
+  --color-success-900: #064e3b;
+  --color-success-950: #022c22;
+  --color-success: #10b981;
+
+  --font-sans: "Plus Jakarta Sans", sans-serif;
+  --font-heading: "Outfit", sans-serif;
+
+  --shadow-glass: 0 8px 32px 0 rgb(0 59 92 / 0.07);
+  --shadow-glow: 0 0 20px rgb(0 165 154 / 0.5);
+  --shadow-card: 0 4px 24px -4px rgb(0 59 92 / 0.1);
+
+  --animate-blob: blob 7s infinite;
+  --animate-fade-in-up: fade-in-up 0.8s ease-out forwards;
+  --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes blob {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(30px, -50px) scale(1.1);
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.9);
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+@keyframes fade-in-up {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Kekayaan visual (docs/planning/06 §6) — motif dot-grid dari logo, diulang sebagai elemen
+   dekoratif halus, dari warna brand (accent navy) bukan abu-abu generik. */
+.pattern-dots {
+  background-image: radial-gradient(rgb(0 59 92 / 0.08) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+.pattern-grid {
+  background-image:
+    linear-gradient(to right, rgb(0 59 92 / 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(0 59 92 / 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.pattern-grid-2 {
+  background-size: 40px 40px;
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.05) 1px, transparent 1px);
+}
+
+.glass-panel {
+  background: rgb(255 255 255 / 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgb(255 255 255 / 0.5);
+}
+.glass-dark {
+  background: rgb(15 23 42 / 0.6);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgb(255 255 255 / 0.1);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Konfigurasi Dark Mode Native (Selector-based) untuk Tailwind v4 */
+@custom-variant dark (&:is(.dark *));
+
