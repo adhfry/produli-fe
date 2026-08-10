@@ -603,6 +603,15 @@ function triggerCardAnimations() {
   animateNumber(progressValue.value, 'targetValue', 'displayValue')
 }
 
+// Reload otomatis begitu sinkronisasi SiLAKES berhasil (dipicu dari sidebar ATAU dari
+// halaman detail pasien) -- tanpa ini kartu/peta di halaman ini tetap versi lama sampai
+// user refresh manual walau sync barusan sukses. loadDashboardSummary() sendiri sudah
+// membaca ulang filter puskesmas/tanggal yang sedang aktif, jadi filter tidak ikut ter-reset.
+const silakesSyncSignal = useSilakesSyncSignal()
+watch(silakesSyncSignal, () => {
+  loadDashboardSummary()
+})
+
 onMounted(async () => {
   loadAnnouncements()
   loadPuskesmasScopeLabel()

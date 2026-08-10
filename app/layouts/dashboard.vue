@@ -294,7 +294,10 @@ async function confirmLogout() {
 const toast = useToast()
 const isSuperAdmin = computed(() => (authStore.roles ?? []).includes('super_admin'))
 const isSyncing = ref(false)
-const lastSyncedAt = ref<string | null>(null)
+// State DIBAGI (bukan ref lokal) -- sync bisa dipicu dari sini ATAU dari tombol
+// "Sinkronisasi Sekarang" di halaman detail pasien, label ini harus tetap akurat dari
+// manapun sync-nya dipicu.
+const lastSyncedAt = useSilakesLastSyncedAt()
 
 function formatLastSynced(iso: string | null): string {
   if (!iso) return 'Belum pernah sinkron'
@@ -325,13 +328,16 @@ async function triggerSilakesSync() {
   try {
     const api = useApi()
     const res = await api('/silakes/sync', { method: 'POST' }) as ApiSuccessEnvelope<{ last_synced_at: string, result: { patients_synced: number, lab_results_synced: number, patients_classified: number } }>
-    lastSyncedAt.value = res.data.last_synced_at
     const { patients_synced, patients_classified } = res.data.result
     toast.add({
       title: 'Sinkronisasi SiLAKES berhasil',
       description: `${patients_synced} pasien diproses, ${patients_classified} diklasifikasi ulang.`,
       color: 'success'
     })
+    // Update label waktu + beritahu halaman aktif (dashboard/dashboard-pasien/detail
+    // pasien) untuk reload datanya sendiri -- tanpa ini angka di halaman tetap versi lama
+    // sampai user refresh manual, padahal sync barusan sukses.
+    signalSilakesSyncCompleted(res.data.last_synced_at)
   } catch (e) {
     toast.add({
       title: 'Sinkronisasi SiLAKES gagal',

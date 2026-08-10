@@ -9,6 +9,48 @@ useHead({
   title: 'Keamanan & Sandi'
 })
 
+const authStore = useAuthStore()
+const toast = useToast()
+
+// --- Akun Google (GET /auth/google/link/redirect, DELETE /auth/google/unlink) -- SEBELUMNYA
+// status "Belum Tertaut" hardcode total, tombol tanpa @click. Pola sama dengan
+// /dashboard/profil/pengaturan (sisi staf).
+const isGoogleConnected = computed(() => !!authStore.user?.google_id)
+const isLinkingGoogle = ref(false)
+const isUnlinkingGoogle = ref(false)
+const googleError = ref('')
+
+async function linkGoogle() {
+  isLinkingGoogle.value = true
+  googleError.value = ''
+  try {
+    const api = useApi()
+    const res = await api('/auth/google/link/redirect')
+    window.location.href = res.data.redirect_url
+  } catch (err) {
+    googleError.value = err instanceof ApiError ? err.message : 'Gagal memulai proses tautkan akun Google.'
+    isLinkingGoogle.value = false
+  }
+}
+
+async function unlinkGoogle() {
+  if (!confirm('Lepas tautan akun Google? Anda tetap bisa login dengan email/password.')) return
+  isUnlinkingGoogle.value = true
+  googleError.value = ''
+  try {
+    const api = useApi()
+    await api('/auth/google/unlink', { method: 'DELETE' })
+    if (authStore.user) authStore.user = { ...authStore.user, google_id: null }
+    toast.add({ title: 'Akun Google berhasil dilepas', color: 'success' })
+  } catch (err) {
+    googleError.value = err instanceof ApiError ? err.message : 'Gagal melepas tautan akun Google.'
+  } finally {
+    isUnlinkingGoogle.value = false
+  }
+}
+
+// --- Ubah Password (POST /auth/change-password) -- SEBELUMNYA cuma setTimeout+alert(), tidak
+// pernah memanggil API sama sekali.
 const currentPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
@@ -16,19 +58,38 @@ const showCurrent = ref(false)
 const showNew = ref(false)
 
 const isSaving = ref(false)
-const updatePassword = () => {
+const passwordError = ref('')
+
+async function updatePassword() {
+  passwordError.value = ''
+  if (newPassword.value.length < 8) {
+    passwordError.value = 'Kata sandi baru minimal 8 karakter.'
+    return
+  }
+  if (newPassword.value === currentPassword.value) {
+    passwordError.value = 'Kata sandi baru harus berbeda dari kata sandi lama.'
+    return
+  }
   if (newPassword.value !== confirmPassword.value) {
-    alert("Konfirmasi kata sandi baru tidak cocok!")
+    passwordError.value = 'Konfirmasi kata sandi baru tidak cocok.'
     return
   }
   isSaving.value = true
-  setTimeout(() => {
-    isSaving.value = false
-    alert("Kata sandi berhasil diperbarui!")
+  try {
+    const api = useApi()
+    await api('/auth/change-password', {
+      method: 'POST',
+      body: { current_password: currentPassword.value, new_password: newPassword.value }
+    })
     currentPassword.value = ''
     newPassword.value = ''
     confirmPassword.value = ''
-  }, 1000)
+    toast.add({ title: 'Kata sandi berhasil diperbarui', color: 'success' })
+  } catch (err) {
+    passwordError.value = err instanceof ApiError ? err.message : 'Gagal mengganti kata sandi.'
+  } finally {
+    isSaving.value = false
+  }
 }
 </script>
 
@@ -54,17 +115,36 @@ const updatePassword = () => {
             </div>
             <div>
                <h3 class="font-bold text-slate-800 dark:text-slate-200 text-base transition-colors">Google</h3>
-               <p class="text-xs text-danger font-medium mt-0.5">Belum Tertaut</p>
+               <p class="text-xs font-medium mt-0.5" :class="isGoogleConnected ? 'text-success' : 'text-danger'">
+                 {{ isGoogleConnected ? 'Tertaut' : 'Belum Tertaut' }}
+               </p>
             </div>
          </div>
-         <button class="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-xs active:scale-95 transition-all">
+         <button
+           v-if="isGoogleConnected"
+           @click="unlinkGoogle"
+           :disabled="isUnlinkingGoogle"
+           class="px-4 py-2 bg-danger/10 text-danger rounded-xl font-bold text-xs active:scale-95 transition-all disabled:opacity-50 flex items-center gap-1.5"
+         >
+            <LucideLoader2 v-if="isUnlinkingGoogle" class="w-3.5 h-3.5 animate-spin" />
+            Lepas Tautan
+         </button>
+         <button
+           v-else
+           @click="linkGoogle"
+           :disabled="isLinkingGoogle"
+           class="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-xs active:scale-95 transition-all disabled:opacity-50 flex items-center gap-1.5"
+         >
+            <LucideLoader2 v-if="isLinkingGoogle" class="w-3.5 h-3.5 animate-spin" />
             Tautkan
          </button>
       </div>
+      <p v-if="googleError" class="text-xs font-semibold text-danger -mt-6 mb-8">{{ googleError }}</p>
 
       <!-- Ubah Kata Sandi -->
       <h3 class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">Ubah Kata Sandi</h3>
       <div class="space-y-4 mb-8">
+        <p v-if="passwordError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-4 py-3">{{ passwordError }}</p>
         <div>
           <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Kata Sandi Saat Ini</label>
           <div class="relative">

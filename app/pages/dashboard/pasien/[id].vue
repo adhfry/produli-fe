@@ -34,6 +34,15 @@ async function loadPatient() {
 
 onMounted(loadPatient)
 
+// Reload otomatis begitu sinkronisasi SiLAKES berhasil (dipicu dari sidebar ATAU tombol
+// "Sinkronisasi Sekarang" di riwayat pengajuan pada halaman ini sendiri) -- biodata,
+// wilayah, status risiko, DAN riwayat pengajuan semuanya perlu dimuat ulang bersamaan.
+const silakesSyncSignal = useSilakesSyncSignal()
+watch(silakesSyncSignal, () => {
+  loadPatient()
+  loadUpdateHistory()
+})
+
 useHead({
   title: computed(() => patient.value ? `Detail Pasien - ${patient.value.nama}` : 'Detail Pasien')
 })
@@ -203,9 +212,12 @@ async function triggerSyncFromHistory() {
   isTriggeringSync.value = true
   try {
     const api = useApi()
-    await api('/silakes/sync', { method: 'POST' })
+    const res = await api('/silakes/sync', { method: 'POST' }) as ApiSuccessEnvelope<{ last_synced_at: string }>
     toast.add({ title: 'Sinkronisasi SiLAKES berhasil', description: 'Data pasien ini sudah dimuat ulang dengan versi terbaru.', color: 'success' })
-    await Promise.all([loadPatient(), loadUpdateHistory()])
+    // Tidak perlu reload manual di sini -- signalSilakesSyncCompleted() memicu watcher
+    // silakesSyncSignal di bawah, yang sudah memanggil loadPatient()+loadUpdateHistory()
+    // (satu jalur reload, dipakai baik trigger dari sini maupun dari sidebar).
+    signalSilakesSyncCompleted(res.data.last_synced_at)
   } catch (e) {
     toast.add({
       title: 'Sinkronisasi SiLAKES gagal',

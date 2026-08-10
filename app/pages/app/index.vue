@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { ApiSuccessEnvelope, Kader } from '~/types/api'
+
 definePageMeta({
   layout: 'pwa',
   middleware: 'auth'
@@ -20,6 +22,34 @@ const currentTime = ref('')
 const currentDate = ref('')
 const activeLocation = ref('Mendeteksi lokasi...')
 
+// Identitas kader ASLI -- SEBELUMNYA hardcode "Siti Aminah" + inisial "SA" statis di template,
+// tidak pernah diambil dari sesi login sama sekali.
+const authStore = useAuthStore()
+const kaderName = computed(() => authStore.user?.name ?? '...')
+const kaderInitials = computed(() => {
+  const name = authStore.user?.name ?? ''
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('') || '?'
+})
+
+// GET /kader/profile -- dipakai kartu "Kontak Puskesmas" di bawah (nomor telepon/WA
+// puskesmas sendiri, bukan data pasien).
+const kaderPuskesmas = ref<{ id: number, nama: string, no_telp?: string | null, no_wa?: string | null, alamat?: string | null } | null>(null)
+async function loadKaderPuskesmas() {
+  try {
+    const api = useApi()
+    const res = await api('/kader/profile') as ApiSuccessEnvelope<Kader>
+    if (res.data.puskesmas) {
+      const detail = await api(`/puskesmas/${res.data.puskesmas.id}`) as ApiSuccessEnvelope<{ id: number, nama: string, no_telp: string | null, no_wa: string | null, alamat: string | null }>
+      kaderPuskesmas.value = detail.data
+    }
+  } catch (e) {
+    console.error('Gagal memuat data puskesmas', e)
+  }
+}
+onMounted(loadKaderPuskesmas)
+
+const showKontakPuskesmasModal = ref(false)
+
 const updateTime = () => {
   const now = new Date()
   const hour = now.getHours()
@@ -34,7 +64,6 @@ const updateTime = () => {
 }
 
 let timer: ReturnType<typeof setInterval>
-const progressDashOffset = ref(251.2) // Start empty (100% offset)
 
 const fetchLocation = () => {
   if (navigator.geolocation) {
@@ -66,11 +95,6 @@ onMounted(() => {
   updateTime()
   timer = setInterval(updateTime, 1000)
   fetchLocation()
-  
-  // Animate progress ring to 80% (251.2 * 0.2 = 50.24) after a short delay
-  setTimeout(() => {
-    progressDashOffset.value = 50.24
-  }, 300)
 })
 
 onUnmounted(() => {
@@ -93,6 +117,38 @@ const todayAssignments = computed(() =>
 const todayAssignmentsWithLocation = computed(() =>
   todayAssignments.value.filter((a) => a.patient?.latitude !== null && a.patient?.latitude !== undefined && a.patient?.longitude !== null && a.patient?.longitude !== undefined)
 )
+
+// Statistik ASLI dari assignmentStore -- SEBELUMNYA "Ada 3 Tugas Baru!", progress ring 80%,
+// dan "12/15 Kunjungan" semua angka hardcode di template, tidak pernah dihitung dari data
+// tugas yang sebenarnya sudah di-fetch di halaman ini.
+const activeTasksCount = computed(() =>
+  assignmentStore.assignments.filter((a) => ['pending', 'in_progress'].includes(a.status)).length
+)
+
+const monthlyAssignments = computed(() => {
+  const now = new Date()
+  return assignmentStore.assignments.filter((a) => {
+    const d = new Date(a.scheduled_date)
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+  })
+})
+const monthlyCompletedCount = computed(() => monthlyAssignments.value.filter((a) => a.status === 'completed').length)
+const monthlyTotalCount = computed(() => monthlyAssignments.value.length)
+const monthlyProgressPercent = computed(() =>
+  monthlyTotalCount.value > 0 ? Math.round((monthlyCompletedCount.value / monthlyTotalCount.value) * 100) : 0
+)
+// stroke-dasharray lingkaran = 251.2 (SVG r=40) -- offset dihitung dari persentase asli,
+// mengecil dari penuh (251.2, kosong) ke nilai sebenarnya. Transisi CSS (lihat template,
+// transition-all duration-1000) sudah cukup untuk efek "mengisi", tidak perlu animasi
+// setTimeout palsu lagi.
+const progressDashOffset = computed(() => 251.2 - (251.2 * monthlyProgressPercent.value) / 100)
+
+// GET draft offline tertunda (docs/planning/10 §3) -- pola sama dengan /app/tugas.
+const offlineQueue = useOfflineQueue()
+const draftCount = ref(0)
+async function loadDraftCount() {
+  draftCount.value = (await offlineQueue.getAllDrafts()).length
+}
 
 const isDownloadingMap = ref(false)
 const mapDownloadProgress = ref({ current: 0, total: 0 })
@@ -132,6 +188,7 @@ onMounted(async () => {
     await assignmentStore.fetchAll()
   }
   await refreshCachedTileInfo()
+  await loadDraftCount()
 })
 </script>
 
@@ -145,7 +202,7 @@ onMounted(async () => {
       <div class="flex items-center justify-between transition-all duration-500 ease-in-out" :class="isScrolled ? 'mb-4' : 'mb-8'">
         <div>
           <p class="font-medium text-slate-500 dark:text-slate-400 transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-[10px] mb-0 opacity-80' : 'text-sm mb-1'">{{ greeting }}</p>
-          <h1 class="font-extrabold text-accent dark:text-white transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-lg' : 'text-2xl'">Siti Aminah</h1>
+          <h1 class="font-extrabold text-accent dark:text-white transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-lg' : 'text-2xl'">{{ kaderName }}</h1>
         </div>
         
         <div class="flex items-center gap-3">
@@ -159,8 +216,9 @@ onMounted(async () => {
              </button>
           </div>
           
-          <div class="bg-primary/10 rounded-full flex items-center justify-center border-2 border-primary/20 shadow-sm relative shrink-0 transition-all duration-500 ease-in-out" :class="isScrolled ? 'w-10 h-10' : 'w-14 h-14'">
-            <span class="text-primary font-black transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-sm' : 'text-xl'">SA</span>
+          <div class="bg-primary/10 rounded-full flex items-center justify-center border-2 border-primary/20 shadow-sm relative shrink-0 overflow-hidden transition-all duration-500 ease-in-out" :class="isScrolled ? 'w-10 h-10' : 'w-14 h-14'">
+            <img v-if="authStore.user?.avatar_url" :src="authStore.user.avatar_url" alt="Foto profil" class="w-full h-full object-cover" />
+            <span v-else class="text-primary font-black transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-sm' : 'text-xl'">{{ kaderInitials }}</span>
             <div class="absolute bg-success rounded-full border-2 border-white dark:border-slate-900 transition-all duration-500 ease-in-out" :class="isScrolled ? 'w-2.5 h-2.5 -top-0.5 -right-0.5' : 'w-3.5 h-3.5 top-0 right-0'"></div>
           </div>
         </div>
@@ -198,31 +256,36 @@ onMounted(async () => {
               <LucideBell class="text-white transition-all duration-500 ease-in-out" :class="isScrolled ? 'w-4 h-4' : 'w-6 h-6'" />
             </div>
             <div>
-              <h2 class="font-bold leading-tight transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-sm' : 'text-lg mb-1'">Ada 3 Tugas Baru!</h2>
+              <h2 class="font-bold leading-tight transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-sm' : 'text-lg mb-1'">
+                {{ activeTasksCount > 0 ? `Ada ${activeTasksCount} Tugas Aktif!` : 'Semua Tugas Selesai' }}
+              </h2>
               <div class="transition-all duration-500 ease-in-out overflow-hidden" :class="isScrolled ? 'max-h-0 opacity-0' : 'max-h-20 opacity-100'">
-                 <p class="text-sm text-primary-100 opacity-90 leading-tight">Kunjungan pasien Prolanis minggu ini belum diselesaikan.</p>
+                 <p class="text-sm text-primary-100 opacity-90 leading-tight">
+                   {{ activeTasksCount > 0 ? 'Kunjungan pasien Prolanis belum diselesaikan.' : 'Tidak ada kunjungan yang tertunda saat ini.' }}
+                 </p>
               </div>
             </div>
           </div>
-          <NuxtLink to="/app/tugas" class="bg-white text-primary text-center font-extrabold shadow-sm active:scale-[0.98] transition-all duration-500 ease-in-out shrink-0" 
+          <NuxtLink to="/app/tugas" class="bg-white text-primary text-center font-extrabold shadow-sm active:scale-[0.98] transition-all duration-500 ease-in-out shrink-0"
                     :class="isScrolled ? 'py-1.5 px-4 rounded-lg text-xs' : 'block w-full py-3 rounded-xl text-base'">
-            <span v-if="isScrolled">Lihat (3)</span>
+            <span v-if="isScrolled">Lihat{{ activeTasksCount > 0 ? ` (${activeTasksCount})` : '' }}</span>
             <span v-else>Lihat Tugas Sekarang</span>
           </NuxtLink>
         </div>
       </div>
     </div>
-  
+
     <div class="px-5 space-y-6">
 
-      <!-- Draf Offline Notification -->
-      <div class="bg-warning/10 border border-warning/20 rounded-3xl p-4 flex items-center justify-between shadow-sm">
+      <!-- Draf Offline Notification -- cuma tampil kalau BENAR ada draf tertunda (SEBELUMNYA
+           selalu tampil dengan angka "3" hardcode, terlepas ada draf sungguhan atau tidak). -->
+      <div v-if="draftCount > 0" class="bg-warning/10 border border-warning/20 rounded-3xl p-4 flex items-center justify-between shadow-sm">
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 bg-warning/20 text-warning-700 rounded-2xl flex items-center justify-center">
             <LucideCloudOff class="w-5 h-5" />
           </div>
           <div>
-            <h3 class="font-bold text-warning-800 dark:text-warning-500 text-sm">3 Draf Tertunda</h3>
+            <h3 class="font-bold text-warning-800 dark:text-warning-500 text-sm">{{ draftCount }} Draf Tertunda</h3>
             <p class="text-xs text-warning-700/80 dark:text-warning-600/80">Belum disinkronkan</p>
           </div>
         </div>
@@ -283,16 +346,18 @@ onMounted(async () => {
               <circle class="text-success stroke-current drop-shadow-md transition-all duration-1000 ease-out" stroke-width="8" stroke-linecap="round" cx="50" cy="50" r="40" fill="transparent" stroke-dasharray="251.2" :stroke-dashoffset="progressDashOffset"></circle>
             </svg>
             <div class="absolute inset-0 flex flex-col items-center justify-center">
-              <span class="text-lg font-black text-slate-800 dark:text-white leading-none transition-colors">80%</span>
+              <span class="text-lg font-black text-slate-800 dark:text-white leading-none transition-colors">{{ monthlyProgressPercent }}%</span>
             </div>
           </div>
           <div>
-            <p class="font-black text-slate-800 dark:text-white text-xl mb-0.5 transition-colors">12 <span class="text-base text-slate-500 font-bold">/ 15 Kunjungan</span></p>
-            <p class="text-base text-slate-500 font-medium leading-relaxed">3 kunjungan lagi untuk mencapai target bulan ini. Semangat!</p>
+            <p class="font-black text-slate-800 dark:text-white text-xl mb-0.5 transition-colors">{{ monthlyCompletedCount }} <span class="text-base text-slate-500 font-bold">/ {{ monthlyTotalCount }} Kunjungan</span></p>
+            <p v-if="monthlyTotalCount === 0" class="text-base text-slate-500 font-medium leading-relaxed">Belum ada kunjungan terjadwal bulan ini.</p>
+            <p v-else-if="monthlyCompletedCount >= monthlyTotalCount" class="text-base text-slate-500 font-medium leading-relaxed">Semua kunjungan bulan ini sudah selesai. Kerja bagus!</p>
+            <p v-else class="text-base text-slate-500 font-medium leading-relaxed">{{ monthlyTotalCount - monthlyCompletedCount }} kunjungan lagi untuk mencapai target bulan ini. Semangat!</p>
           </div>
         </div>
       </div>
-      
+
       <!-- Quick Actions -->
       <div>
         <h3 class="text-base font-bold text-slate-800 dark:text-slate-300 uppercase tracking-widest mb-3 transition-colors">Pintasan Cepat</h3>
@@ -304,25 +369,29 @@ onMounted(async () => {
             </div>
             <span class="text-base font-bold text-slate-700 dark:text-slate-300 transition-colors">Mulai Kunjungan</span>
           </NuxtLink>
-          
-          <!-- Item 2: Riwayat Medis (Spin) -->
-          <button class="group bg-white dark:bg-slate-800 p-5 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center gap-3 active:bg-slate-50 dark:active:bg-slate-700 transition-colors duration-300">
+
+          <!-- Item 2: Riwayat Pengajuan -- SEBELUMNYA "Riwayat Medis" tanpa @click sama sekali
+               (tombol mati), diganti ke halaman yang sungguhan sudah ada. -->
+          <NuxtLink to="/app/profil/riwayat-pengajuan" class="group bg-white dark:bg-slate-800 p-5 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center gap-3 active:bg-slate-50 dark:active:bg-slate-700 transition-colors duration-300">
             <div class="w-12 h-12 bg-warning/10 text-warning rounded-2xl flex items-center justify-center group-hover:bg-warning group-hover:text-white transition-colors duration-300">
               <LucideHistory class="w-6 h-6 group-hover:animate-spin" style="animation-direction: reverse;" />
             </div>
-            <span class="text-base font-bold text-slate-700 dark:text-slate-300 transition-colors">Riwayat Medis</span>
-          </button>
-          
-          <!-- Item 3: Pasien Binaan (Pulse Scale) -->
-          <button class="group bg-white dark:bg-slate-800 p-5 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center gap-3 active:bg-slate-50 dark:active:bg-slate-700 transition-colors duration-300">
+            <span class="text-base font-bold text-slate-700 dark:text-slate-300 transition-colors">Riwayat Pengajuan</span>
+          </NuxtLink>
+
+          <!-- Item 3: Pasien Binaan -- SEBELUMNYA tombol mati tanpa @click. Daftar pasien binaan
+               kader = daftar tugas kunjungannya sendiri (assignment selalu terikat 1 pasien),
+               jadi cukup arahkan ke /app/tugas, bukan halaman baru terpisah. -->
+          <NuxtLink to="/app/tugas" class="group bg-white dark:bg-slate-800 p-5 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center gap-3 active:bg-slate-50 dark:active:bg-slate-700 transition-colors duration-300">
             <div class="w-12 h-12 bg-info/10 text-info rounded-2xl flex items-center justify-center group-hover:bg-info group-hover:text-white transition-colors duration-300">
               <LucideUsers class="w-6 h-6 group-hover:scale-125 transition-transform duration-300" />
             </div>
             <span class="text-base font-bold text-slate-700 dark:text-slate-300 transition-colors">Pasien Binaan</span>
-          </button>
-          
-          <!-- Item 4: Kontak Pusk. (Wiggle / Vibrate) -->
-          <button class="group bg-white dark:bg-slate-800 p-5 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center gap-3 active:bg-slate-50 dark:active:bg-slate-700 transition-colors duration-300">
+          </NuxtLink>
+
+          <!-- Item 4: Kontak Pusk. -- SEBELUMNYA tombol mati. Sekarang buka modal berisi
+               kontak puskesmas ASLI (GET /puskesmas/{id}, dimuat lewat loadKaderPuskesmas()). -->
+          <button @click="showKontakPuskesmasModal = true" class="group bg-white dark:bg-slate-800 p-5 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center gap-3 active:bg-slate-50 dark:active:bg-slate-700 transition-colors duration-300">
             <div class="w-12 h-12 bg-danger/10 text-danger rounded-2xl flex items-center justify-center group-hover:bg-danger group-hover:text-white transition-colors duration-300">
               <LucidePhoneCall class="w-6 h-6 group-hover:animate-[wiggle_0.3s_ease-in-out_infinite]" />
             </div>
@@ -331,62 +400,34 @@ onMounted(async () => {
         </div>
       </div>
       
-      <!-- Jadwal Kegiatan Mendatang -->
-      <div>
-        <h3 class="text-base font-bold text-slate-800 dark:text-slate-300 uppercase tracking-widest mb-3 transition-colors">Kegiatan Mendatang</h3>
-        <div class="bg-white dark:bg-slate-800 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-700 transition-colors duration-300 active:scale-[0.98] cursor-pointer">
-          <div class="flex items-center gap-4">
-             <div class="w-14 h-14 bg-success/10 rounded-2xl flex flex-col items-center justify-center shrink-0 border border-success/20">
-                <span class="text-[10px] font-bold text-success uppercase tracking-widest mb-0.5">Agt</span>
-                <span class="text-lg font-black text-success leading-none">12</span>
-             </div>
-             <div>
-                <h4 class="font-bold text-slate-800 dark:text-white text-base mb-1.5 transition-colors">Senam Prolanis Bersama</h4>
-                <div class="flex items-center gap-1.5 mb-1">
-                   <LucideClock class="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
-                   <span class="text-base font-medium text-slate-500 dark:text-slate-400 transition-colors">07:00 - 09:00 WIB</span>
-                </div>
-                <div class="flex items-center gap-1.5">
-                   <LucideMapPin class="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
-                   <span class="text-base font-medium text-slate-500 dark:text-slate-400 transition-colors line-clamp-1">Halaman Pusk. Pamolokan</span>
-                </div>
-             </div>
+    </div>
+
+    <!-- Modal Kontak Puskesmas -- data ASLI (GET /puskesmas/{id}), diganti dari tombol mati
+         "Kontak Pusk." sebelumnya. -->
+    <div v-if="showKontakPuskesmasModal" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4" @click="showKontakPuskesmasModal = false">
+      <div class="bg-white dark:bg-slate-800 rounded-3xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in slide-in-from-bottom-4 sm:zoom-in duration-200" @click.stop>
+        <div class="p-6 text-center">
+          <div class="w-16 h-16 rounded-2xl bg-danger/10 text-danger flex items-center justify-center mx-auto mb-4">
+            <LucidePhoneCall class="w-8 h-8" />
+          </div>
+          <h3 class="font-black text-slate-800 dark:text-white text-lg mb-1">{{ kaderPuskesmas?.nama ?? 'Memuat...' }}</h3>
+          <p v-if="kaderPuskesmas?.alamat" class="text-base text-slate-500 dark:text-slate-400 leading-relaxed mb-4">{{ kaderPuskesmas.alamat }}</p>
+          <p v-else class="text-base text-slate-400 mb-4">Alamat belum diisi admin puskesmas.</p>
+
+          <div class="space-y-2">
+            <a v-if="kaderPuskesmas?.no_telp" :href="`tel:${kaderPuskesmas.no_telp}`" class="w-full py-3.5 rounded-2xl font-bold text-white bg-primary active:bg-primary-600 transition-colors flex items-center justify-center gap-2">
+              <LucidePhoneCall class="w-4 h-4" /> Telepon {{ kaderPuskesmas.no_telp }}
+            </a>
+            <a v-if="kaderPuskesmas?.no_wa" :href="`https://wa.me/${kaderPuskesmas.no_wa.replace(/^0/, '62').replace(/\D/g, '')}`" target="_blank" rel="noopener" class="w-full py-3.5 rounded-2xl font-bold text-success bg-success/10 active:bg-success/20 transition-colors flex items-center justify-center gap-2">
+              WhatsApp {{ kaderPuskesmas.no_wa }}
+            </a>
+            <p v-if="kaderPuskesmas && !kaderPuskesmas.no_telp && !kaderPuskesmas.no_wa" class="text-sm text-slate-400">Nomor kontak belum diisi admin puskesmas.</p>
           </div>
         </div>
+        <button @click="showKontakPuskesmasModal = false" class="w-full py-4 border-t border-slate-100 dark:border-slate-700 font-bold text-slate-500 dark:text-slate-400 active:bg-slate-50 dark:active:bg-slate-700 transition-colors">
+          Tutup
+        </button>
       </div>
-
-      <!-- Info & Tips Kesehatan -->
-      <div>
-        <div class="flex items-center justify-between mb-3">
-           <h3 class="text-base font-bold text-slate-800 dark:text-slate-300 uppercase tracking-widest transition-colors">Tips Kesehatan</h3>
-           <button class="text-base font-bold text-primary px-2 py-1 bg-primary/10 rounded-lg active:bg-primary/20 transition-colors">Lihat Semua</button>
-        </div>
-        
-        <div class="flex gap-4 overflow-x-auto pb-4 -mx-5 px-5 snap-x snap-mandatory no-scrollbar">
-           <div class="min-w-[240px] bg-white dark:bg-slate-800 rounded-3xl p-4 shadow-sm border border-slate-100 dark:border-slate-700 snap-center transition-colors duration-300 active:scale-[0.98] cursor-pointer">
-              <div class="w-full h-32 bg-slate-100 dark:bg-slate-700/50 rounded-2xl mb-4 flex items-center justify-center transition-colors">
-                 <LucideHeartPulse class="w-10 h-10 text-danger/40" />
-              </div>
-              <h4 class="font-bold text-slate-800 dark:text-white text-base mb-1.5 transition-colors line-clamp-2 leading-snug">Pentingnya Membatasi Konsumsi Garam bagi Pasien Hipertensi</h4>
-              <div class="flex items-center justify-between">
-                <span class="text-base text-slate-500 dark:text-slate-400 font-medium transition-colors">Ahli Gizi</span>
-                <span class="text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-md transition-colors">3 mnt baca</span>
-              </div>
-           </div>
-           
-           <div class="min-w-[240px] bg-white dark:bg-slate-800 rounded-3xl p-4 shadow-sm border border-slate-100 dark:border-slate-700 snap-center transition-colors duration-300 active:scale-[0.98] cursor-pointer">
-              <div class="w-full h-32 bg-slate-100 dark:bg-slate-700/50 rounded-2xl mb-4 flex items-center justify-center transition-colors">
-                 <LucideApple class="w-10 h-10 text-success/40" />
-              </div>
-              <h4 class="font-bold text-slate-800 dark:text-white text-base mb-1.5 transition-colors line-clamp-2 leading-snug">Atur Pola Makan Cerdas Khusus Penderita Diabetes Mellitus</h4>
-              <div class="flex items-center justify-between">
-                <span class="text-base text-slate-500 dark:text-slate-400 font-medium transition-colors">Dr. Umum</span>
-                <span class="text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-md transition-colors">5 mnt baca</span>
-              </div>
-           </div>
-        </div>
-      </div>
-      
     </div>
   </div>
 </template>

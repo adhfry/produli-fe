@@ -478,6 +478,30 @@ export interface PatientFieldUpdates {
   jenis_perokok?: string
 }
 
+// GET /kader/update-requests -- riwayat pengajuan pembaruan data pasien milik KADER SENDIRI
+// (/app), terpisah dari PatientFieldUpdateHistoryItem (itu di-scope per pasien, dipakai staf
+// via /dashboard/pasien/{id}). Dua lapis status: push_status (lokal, berhasil terkirim ke
+// SiLAKES atau tidak) dan fields[].status (SiLAKES, disetujui/ditolak staf Labkesda).
+export interface KaderUpdateRequestField {
+  kategori: 'geo' | 'kontak' | 'identitas'
+  field_name: string | null
+  old_value: string | null
+  new_value: string | null
+  status: 'pending_review' | 'approved' | 'rejected'
+  reviewed_at: string | null
+  catatan_reviewer: string | null
+}
+
+export interface KaderUpdateRequest {
+  visit_report_id: number
+  patient_id: number
+  patient_nama: string
+  kunjungan_tanggal: string | null
+  push_status: 'pending' | 'synced' | 'failed'
+  push_error: string | null
+  fields: KaderUpdateRequestField[]
+}
+
 // GET /patients/{id}/update-history -- dibaca LIVE dari SiLAKES (patient_field_updates,
 // difilter sumber kopipu_*), bukan disimpan lokal di KOPIPU.
 export interface PatientFieldUpdateHistoryItem {

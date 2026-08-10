@@ -94,6 +94,14 @@ onMounted(() => {
   loadPatients()
   lockKecamatanToOwnPuskesmas()
 })
+
+// Reload otomatis begitu sinkronisasi SiLAKES berhasil -- tetap di halaman & filter yang
+// sama (loadPatients(currentPage.value) pakai filter/halaman yang sedang aktif di ref,
+// bukan reset ke halaman 1).
+const silakesSyncSignal = useSilakesSyncSignal()
+watch(silakesSyncSignal, () => {
+  loadPatients(currentPage.value)
+})
 // Ganti filter apa pun -> selalu balik ke halaman 1 (halaman 5 hasil filter lama biasanya
 // tidak nyambung sama sekali dengan hasil filter baru).
 watch(filterRisk, () => loadPatients(1))
@@ -163,6 +171,24 @@ const getWilayahLabel = (status) => {
   if (status === 'unresolved') return 'Belum Cocok'
   if (status === 'out_of_scope') return 'Luar Cakupan'
   return 'Tidak Diketahui'
+}
+
+// jenis_prolanis BISA null walau is_prolanis=true (SiLAKES cuma tahu pasien ikut Prolanis,
+// jenisnya belum tercatat) -- ditangani sebagai "Belum Diketahui" secara eksplisit, BUKAN
+// dikosongkan begitu saja, supaya jelas bedanya dari data yang genuinely tidak ada vs field
+// yang lupa ditampilkan.
+const getProlanisLabel = (jenis: string | null) => {
+  if (jenis === 'DM') return 'Diabetes Mellitus'
+  if (jenis === 'HT') return 'Hipertensi'
+  if (jenis === 'DM_HT') return 'DM & Hipertensi'
+  return 'Belum Diketahui'
+}
+
+const getProlanisColor = (jenis: string | null) => {
+  if (jenis === 'DM') return 'bg-danger/10 text-danger border border-danger/20'
+  if (jenis === 'HT') return 'bg-warning/10 text-warning border border-warning/20'
+  if (jenis === 'DM_HT') return 'bg-secondary/10 text-secondary border border-secondary/20'
+  return 'bg-slate-100 text-slate-500 border border-slate-200'
 }
 
 // Ringkasan kalimat gabungan SEMUA filter aktif (risiko + status wilayah + kata kunci +
@@ -348,13 +374,14 @@ function closeNikNotFoundModal() {
 
       <!-- Table -->
       <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse min-w-[950px]">
+        <table class="w-full text-left border-collapse min-w-[1150px]">
           <thead>
             <tr class="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
               <th class="py-4 px-5 font-semibold">Nama Pasien</th>
               <th class="py-4 px-5 font-semibold">No. Registrasi</th>
               <th class="py-4 px-5 font-semibold text-center">Usia / JK</th>
-              <th class="py-4 px-5 font-semibold">Lokasi</th>
+              <th class="py-4 px-5 font-semibold">Alamat & Lokasi</th>
+              <th class="py-4 px-5 font-semibold">Status Prolanis</th>
               <th class="py-4 px-5 font-semibold">Tingkat Risiko</th>
               <th class="py-4 px-5 font-semibold text-center">Status Wilayah</th>
               <th class="py-4 px-5 font-semibold text-right">Aksi</th>
@@ -362,7 +389,7 @@ function closeNikNotFoundModal() {
           </thead>
           <tbody class="divide-y divide-slate-100">
             <tr v-if="isLoading">
-               <td colspan="7" class="py-12 text-center text-slate-400">
+               <td colspan="8" class="py-12 text-center text-slate-400">
                   <LucideLoader2 class="w-6 h-6 mx-auto mb-2 animate-spin" />
                   Memuat data pasien...
                </td>
@@ -373,7 +400,10 @@ function closeNikNotFoundModal() {
                      <div class="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm shadow-sm border border-primary/20 shrink-0">
                         {{ patient.nama.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase() }}
                      </div>
-                     <span class="font-bold text-slate-800">{{ patient.nama }}</span>
+                     <div>
+                        <span class="font-bold text-slate-800 block">{{ patient.nama }}</span>
+                        <span v-if="patient.phone" class="text-[11px] font-medium text-slate-500">{{ patient.phone }}</span>
+                     </div>
                   </div>
                </td>
                <td class="py-4 px-5 text-sm font-medium text-slate-600">{{ patient.no_reg || '-' }}</td>
@@ -381,9 +411,14 @@ function closeNikNotFoundModal() {
                   <template v-if="calculateAge(patient.tgl_lahir)">{{ calculateAge(patient.tgl_lahir) }} thn <span class="text-slate-400 font-normal">/</span> {{ patient.gender || '-' }}</template>
                   <span v-else class="text-slate-300">-</span>
                </td>
+               <td class="py-4 px-5 max-w-[220px]">
+                  <p class="text-sm font-semibold text-slate-700 truncate" :title="patient.alamat || undefined">{{ patient.alamat || '-' }}</p>
+                  <p class="text-[11px] font-medium text-slate-500 mt-0.5">{{ patient.kecamatan_raw || '-' }} &middot; Desa {{ patient.kel_desa_raw || '-' }}</p>
+               </td>
                <td class="py-4 px-5">
-                  <p class="text-sm font-bold text-slate-700">{{ patient.kecamatan_raw || '-' }}</p>
-                  <p class="text-[11px] font-medium text-slate-500 mt-0.5">Desa {{ patient.kel_desa_raw || '-' }}</p>
+                  <span class="px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider inline-block" :class="getProlanisColor(patient.jenis_prolanis)">
+                     {{ getProlanisLabel(patient.jenis_prolanis) }}
+                  </span>
                </td>
                <td class="py-4 px-5">
                   <span class="px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider" :class="getRiskColor(patient.risk_level)">
@@ -402,7 +437,7 @@ function closeNikNotFoundModal() {
                </td>
             </tr>
             <tr v-if="!isLoading && patients.length === 0">
-               <td colspan="7" class="py-12 text-center">
+               <td colspan="8" class="py-12 text-center">
                  <div class="flex flex-col items-center justify-center text-slate-400">
                     <LucideSearchX class="w-10 h-10 mb-3 text-slate-300" />
                     <p class="font-medium">Tidak ada data pasien yang ditemukan.</p>
