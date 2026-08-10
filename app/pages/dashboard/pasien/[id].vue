@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, Patient, PatientFieldUpdates } from '~/types/api'
+import type { ApiSuccessEnvelope, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem } from '~/types/api'
 
 definePageMeta({
   layout: 'dashboard',
@@ -122,10 +122,98 @@ async function submitProposeUpdate() {
     await api(`/patients/${route.params.id}/propose-update`, { method: 'PATCH', body: payload })
     showUpdateModal.value = false
     toast.add({ title: 'Usulan perubahan data pasien berhasil diajukan', color: 'success' })
+    // Usulan baru muncul di riwayat dengan status pending_review -- muat ulang supaya
+    // langsung terlihat, bukan menunggu reload halaman manual.
+    loadUpdateHistory()
   } catch (e) {
     updateError.value = e instanceof ApiError ? e.message : 'Gagal mengajukan usulan perubahan.'
   } finally {
     isSavingUpdate.value = false
+  }
+}
+
+// --- Riwayat Pengajuan Perubahan Data (GET /patients/{id}/update-history) ------------------
+// Dibaca LIVE dari SiLAKES (patient_field_updates, sumber kopipu_*) -- KOPIPU tidak menyimpan
+// salinan lokal status approval, SiLAKES tetap satu-satunya sumber kebenaran. Gerbang akses
+// SAMA dengan canProposeUpdate (kalau boleh mengajukan, boleh lihat riwayatnya).
+const updateHistory = ref<PatientFieldUpdateHistoryItem[]>([])
+const isLoadingHistory = ref(false)
+const historyError = ref('')
+
+async function loadUpdateHistory() {
+  if (!canProposeUpdate.value) return
+  isLoadingHistory.value = true
+  historyError.value = ''
+  try {
+    const api = useApi()
+    const res = await api(`/patients/${route.params.id}/update-history`) as ApiSuccessEnvelope<PatientFieldUpdateHistoryItem[]>
+    updateHistory.value = res.data
+  } catch (e) {
+    historyError.value = e instanceof ApiError ? e.message : 'Gagal memuat riwayat pengajuan.'
+  } finally {
+    isLoadingHistory.value = false
+  }
+}
+
+// canProposeUpdate baru pasti terisi SETELAH patient.value ada (bergantung puskesmas pasien) --
+// watch, bukan langsung onMounted, supaya tidak memuat riwayat sebelum gerbang aksesnya jelas.
+watch(canProposeUpdate, (allowed) => {
+  if (allowed) loadUpdateHistory()
+}, { immediate: true })
+
+const HISTORY_STATUS_LABELS: Record<string, string> = {
+  pending_review: 'Menunggu Peninjauan',
+  approved: 'Disetujui',
+  rejected: 'Ditolak'
+}
+const HISTORY_STATUS_COLORS: Record<string, string> = {
+  pending_review: 'bg-warning/10 text-warning border border-warning/20',
+  approved: 'bg-success/10 text-success border border-success/20',
+  rejected: 'bg-danger/10 text-danger border border-danger/20'
+}
+const HISTORY_KATEGORI_LABELS: Record<string, string> = { geo: 'Titik Lokasi', kontak: 'Kontak/Alamat', identitas: 'Identitas' }
+
+function historyItemLabel(item: PatientFieldUpdateHistoryItem): string {
+  if (item.kategori === 'geo') return 'Titik Lokasi Rumah'
+  return item.field_name ?? HISTORY_KATEGORI_LABELS[item.kategori] ?? item.kategori
+}
+
+function formatHistoryDate(iso: string | null): string {
+  if (!iso) return '-'
+  return new Date(iso).toLocaleString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+// Usulan disetujui SiLAKES SETELAH sinkronisasi lokal terakhir -- berarti data pasien di
+// KOPIPU masih versi lama, belum menangkap perubahan yang baru disetujui itu (dibandingkan
+// lewat reviewed_at vs patient.last_synced_at, bukan cuma "ada status approved" -- approval
+// LAMA yang sudah tertangkap sync sebelumnya tidak perlu terus disarankan sync ulang).
+const pendingSyncSuggestion = computed(() => {
+  if (!patient.value) return false
+  const lastSynced = patient.value.last_synced_at ? new Date(patient.value.last_synced_at).getTime() : 0
+  return updateHistory.value.some((item) =>
+    item.status === 'approved' && item.reviewed_at && new Date(item.reviewed_at).getTime() > lastSynced
+  )
+})
+
+const isSuperAdminForSync = computed(() => (authStore.roles ?? []).includes('super_admin'))
+const isTriggeringSync = ref(false)
+
+async function triggerSyncFromHistory() {
+  if (isTriggeringSync.value) return
+  isTriggeringSync.value = true
+  try {
+    const api = useApi()
+    await api('/silakes/sync', { method: 'POST' })
+    toast.add({ title: 'Sinkronisasi SiLAKES berhasil', description: 'Data pasien ini sudah dimuat ulang dengan versi terbaru.', color: 'success' })
+    await Promise.all([loadPatient(), loadUpdateHistory()])
+  } catch (e) {
+    toast.add({
+      title: 'Sinkronisasi SiLAKES gagal',
+      description: e instanceof ApiError ? e.message : 'Terjadi kesalahan tidak terduga.',
+      color: 'error'
+    })
+  } finally {
+    isTriggeringSync.value = false
   }
 }
 </script>
@@ -273,6 +361,84 @@ async function submitProposeUpdate() {
                <p class="text-xs text-slate-400 mt-1">Lihat daftar laporan kunjungan lengkap di menu Data Kunjungan.</p>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Riwayat Pengajuan Perubahan Data -- GET /patients/{id}/update-history, dibaca LIVE
+           dari SiLAKES (bukan salinan lokal), cuma tampil untuk role yang boleh mengajukan
+           (canProposeUpdate: super_admin/admin_puskesmas/pj_prolanis sepuskesmas). -->
+      <div v-if="canProposeUpdate" class="bg-white rounded-2xl border border-slate-100 shadow-card p-5">
+        <div class="flex items-center justify-between mb-5 border-b border-slate-100 pb-4">
+          <h3 class="font-bold text-accent text-base flex items-center gap-2">
+            <LucideHistory class="w-4 h-4 text-secondary" />
+            Riwayat Pengajuan Perubahan Data
+          </h3>
+        </div>
+
+        <!-- Saran sinkronisasi -- muncul kalau ada usulan yang DISETUJUI SETELAH sync lokal
+             terakhir (data pasien di KOPIPU masih versi lama). super_admin: tombol langsung
+             memicu sinkronisasi. Role lain: cuma teks anjuran, mereka tidak berwenang sync. -->
+        <div v-if="pendingSyncSuggestion" class="mb-5 flex items-center gap-3 bg-success/5 border border-success/20 rounded-2xl px-5 py-3.5">
+          <div class="w-9 h-9 rounded-xl bg-success/10 text-success flex items-center justify-center shrink-0">
+            <LucideCheckCircle2 class="w-4.5 h-4.5" />
+          </div>
+          <p class="flex-1 text-sm font-semibold text-accent">
+            Ada usulan yang <span class="text-success">disetujui SiLAKES</span> namun belum tercermin di data pasien ini.
+            <template v-if="isSuperAdminForSync">Jalankan sinkronisasi untuk memperbarui.</template>
+            <template v-else>Hubungi super_admin untuk menjalankan sinkronisasi manual, atau tunggu jadwal otomatis (tiap 48 jam).</template>
+          </p>
+          <button
+            v-if="isSuperAdminForSync"
+            type="button"
+            :disabled="isTriggeringSync"
+            @click="triggerSyncFromHistory"
+            class="shrink-0 flex items-center gap-1.5 text-xs font-bold text-success hover:text-success/80 bg-white border border-success/30 rounded-lg px-3 py-2 transition-colors disabled:opacity-60"
+          >
+            <LucideLoader2 v-if="isTriggeringSync" class="w-3.5 h-3.5 animate-spin" />
+            <LucideRefreshCw v-else class="w-3.5 h-3.5" />
+            {{ isTriggeringSync ? 'Menyinkronkan...' : 'Sinkronisasi Sekarang' }}
+          </button>
+        </div>
+
+        <div v-if="isLoadingHistory" class="py-10 text-center text-slate-400">
+          <LucideLoader2 class="w-5 h-5 mx-auto mb-2 animate-spin" />
+          Memuat riwayat pengajuan...
+        </div>
+        <p v-else-if="historyError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ historyError }}</p>
+        <div v-else-if="updateHistory.length === 0" class="py-10 text-center text-slate-400">
+          <LucideHistory class="w-10 h-10 mx-auto mb-3 text-slate-200" />
+          <p class="font-medium text-slate-500">Belum ada usulan perubahan yang pernah diajukan untuk pasien ini.</p>
+        </div>
+        <div v-else class="overflow-x-auto">
+          <table class="w-full text-left border-collapse min-w-[760px]">
+            <thead>
+              <tr class="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                <th class="py-3 px-3 font-semibold">Field</th>
+                <th class="py-3 px-3 font-semibold">Nilai Lama → Usulan</th>
+                <th class="py-3 px-3 font-semibold">Sumber</th>
+                <th class="py-3 px-3 font-semibold">Diajukan</th>
+                <th class="py-3 px-3 font-semibold text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <tr v-for="item in updateHistory" :key="item.id" class="hover:bg-slate-50/80 transition-colors">
+                <td class="py-3 px-3 text-sm font-bold text-slate-800">{{ historyItemLabel(item) }}</td>
+                <td class="py-3 px-3 text-xs text-slate-600">
+                  <span class="text-slate-400 line-through">{{ item.old_value || '(kosong)' }}</span>
+                  <span class="mx-1 text-slate-300">→</span>
+                  <span class="font-semibold text-slate-700">{{ item.new_value || '-' }}</span>
+                </td>
+                <td class="py-3 px-3 text-xs font-medium text-slate-600">{{ item.kopipu_kader_nama || 'Staf KOPIPU' }}</td>
+                <td class="py-3 px-3 text-xs text-slate-500">{{ formatHistoryDate(item.created_at) }}</td>
+                <td class="py-3 px-3 text-center">
+                  <span class="px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider inline-block" :class="HISTORY_STATUS_COLORS[item.status]">
+                    {{ HISTORY_STATUS_LABELS[item.status] }}
+                  </span>
+                  <p v-if="item.catatan_reviewer" class="text-[10px] text-slate-400 mt-1 max-w-[160px] mx-auto" :title="item.catatan_reviewer">{{ item.catatan_reviewer }}</p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </template>

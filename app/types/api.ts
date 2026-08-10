@@ -115,6 +115,12 @@ export interface ChangePasswordPayload {
 export type RiskLevel = 'ringan' | 'sedang' | 'berat'
 export type WilayahStatus = 'resolved' | 'unresolved' | 'unknown' | 'out_of_scope'
 
+export interface Kecamatan {
+  id: number
+  nama: string
+  kode_kemendagri: string | null
+}
+
 export interface Patient {
   id: number
   external_patient_id: number
@@ -134,6 +140,7 @@ export interface Patient {
   wilayah_status: WilayahStatus
   puskesmas_resolution_method: 'desa' | 'kecamatan_fallback' | 'manual' | 'kader_verified' | 'unresolvable' | null
   desa?: { id: number, nama: string }
+  kecamatan?: { id: number, nama: string } | null
   puskesmas?: { id: number, nama: string }
   geo_status: 'unknown' | 'approximate' | 'verified'
   geo_source: 'desa_centroid' | 'patient_reported' | 'kader_verified' | null
@@ -469,6 +476,23 @@ export interface PatientFieldUpdates {
   no_bpjs?: string
   jenis_prolanis?: string
   jenis_perokok?: string
+}
+
+// GET /patients/{id}/update-history -- dibaca LIVE dari SiLAKES (patient_field_updates,
+// difilter sumber kopipu_*), bukan disimpan lokal di KOPIPU.
+export interface PatientFieldUpdateHistoryItem {
+  id: number
+  kategori: 'geo' | 'kontak' | 'identitas'
+  field_name: string | null
+  old_value: string | null
+  new_value: string | null
+  sumber: string
+  kopipu_visit_id: number | null
+  kopipu_kader_nama: string | null
+  status: 'pending_review' | 'approved' | 'rejected'
+  reviewed_at: string | null
+  catatan_reviewer: string | null
+  created_at: string
 }
 
 export interface VisitReportPemeriksaan {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, PaginatedData, Patient, SearchPatientByNikPayload } from '~/types/api'
+import type { ApiSuccessEnvelope, PaginatedData, Patient, SearchPatientByNikPayload, Kecamatan } from '~/types/api'
 
 definePageMeta({
   layout: 'dashboard',
@@ -9,21 +9,29 @@ useHead({
   title: 'Data Pasien'
 })
 
-// GET /api/v1/patients (docs/planning/05) -- backend cuma dukung filter wilayah_status/risk_level
-// + pagination (per_page dibatasi 100), tidak ada search/kecamatan di query. Search & filter
-// kecamatan di bawah cuma jalan di window yang sudah ke-fetch (100 pertama), BUKAN seluruh data --
-// sama seperti pola filter kecamatan di modal bulk-assignment /dashboard/kunjungan.
+// GET /api/v1/patients -- SEMUA filter (wilayah_status/risk_level/kecamatan_id/search) SEKARANG
+// diterapkan SERVER-SIDE, termasuk kecamatan_id yang match ke kolom patients_cache.kecamatan_id
+// (id kanonik hasil WilayahResolver, BUKAN teks bebas kecamatan_raw). SEBELUMNYA kecamatan &
+// pencarian cuma menyaring window 100 pasien pertama yang ke-fetch -- itu sebabnya hasilnya
+// beda-beda tergantung filter LAIN yang aktif (bug nyata: "Semua Status Wilayah" + Gapura tampil
+// 3 pasien, "Wilayah Cocok" + Gapura tampil 47 -- padahal "Semua" seharusnya superset, bukan
+// subset). Backend sekarang selalu mengembalikan hasil gabungan filter yang benar dari SELURUH
+// data, bukan cuma yang kebetulan sudah dimuat di klien.
 const patients = ref<Patient[]>([])
 const totalCount = ref(0)
+const currentPage = ref(1)
+const lastPage = ref(1)
 const isLoading = ref(false)
 const loadError = ref('')
+const PER_PAGE = 50
 
 const authStore = useAuthStore()
 const isSuperAdmin = computed(() => (authStore.roles ?? []).includes('super_admin'))
 
 const searchQuery = ref('')
 const filterRisk = ref('')
-const filterKecamatan = ref('')
+const filterKecamatanId = ref<number | null>(null)
+const filterWilayahStatus = ref('')
 
 // admin_puskesmas/pj_prolanis: kecamatan filter OTOMATIS terkunci ke kecamatan puskesmas
 // mereka sendiri (docs/planning §7 lanjutan) -- backend GET /patients SUDAH scope ke puskesmas
@@ -33,9 +41,9 @@ async function lockKecamatanToOwnPuskesmas() {
   if (isSuperAdmin.value || !authStore.user?.puskesmas_id) return
   try {
     const api = useApi()
-    const res = await api(`/puskesmas/${authStore.user.puskesmas_id}`) as ApiSuccessEnvelope<{ kecamatan: { nama: string } | null }>
+    const res = await api(`/puskesmas/${authStore.user.puskesmas_id}`) as ApiSuccessEnvelope<{ kecamatan: { id: number, nama: string } | null }>
     if (res.data.kecamatan) {
-      filterKecamatan.value = res.data.kecamatan.nama
+      filterKecamatanId.value = res.data.kecamatan.id
     }
   } catch (e) {
     console.error('Gagal memuat kecamatan puskesmas sendiri', e)
@@ -51,19 +59,25 @@ if (typeof route.query.risk_level === 'string' && VALID_RISK_LEVELS.includes(rou
   filterRisk.value = route.query.risk_level
 }
 
-async function loadPatients() {
+async function loadPatients(page = 1) {
   isLoading.value = true
   loadError.value = ''
   try {
     const api = useApi()
     const res = await api('/patients', {
       query: {
-        per_page: 100,
-        ...(filterRisk.value ? { risk_level: filterRisk.value } : {})
+        per_page: PER_PAGE,
+        page,
+        ...(filterRisk.value ? { risk_level: filterRisk.value } : {}),
+        ...(filterWilayahStatus.value ? { wilayah_status: filterWilayahStatus.value } : {}),
+        ...(filterKecamatanId.value ? { kecamatan_id: filterKecamatanId.value } : {}),
+        ...(searchQuery.value.trim() ? { search: searchQuery.value.trim() } : {})
       }
     }) as ApiSuccessEnvelope<PaginatedData<Patient>>
     patients.value = res.data.items
     totalCount.value = res.data.pagination.total
+    currentPage.value = res.data.pagination.current_page
+    lastPage.value = res.data.pagination.last_page
   } catch (e) {
     loadError.value = e instanceof ApiError ? e.message : 'Gagal memuat data pasien.'
   } finally {
@@ -71,11 +85,32 @@ async function loadPatients() {
   }
 }
 
+function goToPage(page: number) {
+  if (page < 1 || page > lastPage.value || page === currentPage.value || isLoading.value) return
+  loadPatients(page)
+}
+
 onMounted(() => {
   loadPatients()
   lockKecamatanToOwnPuskesmas()
 })
-watch(filterRisk, loadPatients)
+// Ganti filter apa pun -> selalu balik ke halaman 1 (halaman 5 hasil filter lama biasanya
+// tidak nyambung sama sekali dengan hasil filter baru).
+watch(filterRisk, () => loadPatients(1))
+watch(filterWilayahStatus, () => loadPatients(1))
+watch(filterKecamatanId, () => loadPatients(1))
+
+// Debounce pencarian nama/no. registrasi -- SERVER-SIDE sekarang, jangan panggil API di setiap
+// ketukan huruf.
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+watch(searchQuery, () => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(() => loadPatients(1), 350)
+})
+
+function formatId(n: number): string {
+  return n.toLocaleString('id-ID')
+}
 
 function calculateAge(dob) {
   if (!dob) return null
@@ -83,47 +118,25 @@ function calculateAge(dob) {
   return Math.abs(new Date(diffMs).getUTCFullYear() - 1970)
 }
 
-// Opsi kecamatan SEBELUMNYA diturunkan dari 100 pasien pertama yang ke-fetch -- makanya
-// pilihannya cuma sedikit walau Sumenep py 27 kecamatan. Sekarang ambil daftar LENGKAP dari
-// /sumenep.geojson (sumber kebenaran nama kecamatan yang SAMA dipakai peta dashboard), bukan
-// diturunkan dari data pasien yang kebetulan ter-load.
-const kecamatanFullList = ref<string[]>([])
-async function loadKecamatanFullList() {
+// Daftar kecamatan KANONIK dari GET /api/v1/kecamatan (id asli 27 kecamatan Sumenep) -- filter
+// sekarang kirim kecamatan_id ke backend, bukan lagi cocokkan teks bebas kecamatan_raw yang
+// kapitalisasi/ejaannya beda-beda dari SiLAKES (lihat catatan bug di atas).
+const kecamatanList = ref<Kecamatan[]>([])
+async function loadKecamatanList() {
   try {
-    const geo = await (await fetch('/sumenep.geojson')).json()
-    kecamatanFullList.value = geo.features
-      .map((f: any) => f.properties?.name as string)
-      .filter(Boolean)
-      .sort()
+    const api = useApi()
+    const res = await api('/kecamatan') as ApiSuccessEnvelope<Kecamatan[]>
+    kecamatanList.value = res.data
   } catch (e) {
     console.error('Gagal memuat daftar kecamatan', e)
   }
 }
-onMounted(loadKecamatanFullList)
+onMounted(loadKecamatanList)
 
-const kecamatanOptions = computed(() => {
-  if (kecamatanFullList.value.length > 0) return kecamatanFullList.value
-  const set = new Set(patients.value.map((p) => p.kecamatan_raw).filter(Boolean))
-  return [...set].sort()
-})
-// USelectMenu (Nuxt UI) -- typeahead, cari nama kecamatan langsung sambil ketik daripada
-// scroll dropdown panjang 27 opsi. value-key eksplisit -- default USelectMenu tanpa value-key
-// mengembalikan OBJEK item utuh, bukan string filterKecamatan yang dipakai computed di atas.
-// TIDAK ada item sentinel "Semua Kecamatan" bervalue '' -- ComboboxItem menolak value string
-// kosong (dipakai secara internal utk clear-selection), placeholder sudah cukup mewakili
-// "belum pilih apa-apa" begitu v-model kosong (lihat props di template).
-const kecamatanSelectItems = computed(() => kecamatanOptions.value.map((k) => ({ label: k, value: k })))
-
-const filteredPatients = computed(() => {
-  return patients.value.filter((p) => {
-    const q = searchQuery.value.toLowerCase()
-    const matchSearch = q
-      ? p.nama.toLowerCase().includes(q) || (p.no_reg ?? '').toLowerCase().includes(q)
-      : true
-    const matchKecamatan = filterKecamatan.value ? p.kecamatan_raw === filterKecamatan.value : true
-    return matchSearch && matchKecamatan
-  })
-})
+// USelectMenu (Nuxt UI) -- typeahead, cari nama kecamatan langsung sambil ketik daripada scroll
+// dropdown panjang 27 opsi. value-key eksplisit -- default USelectMenu tanpa value-key
+// mengembalikan OBJEK item utuh, bukan number id yang dipakai filterKecamatanId.
+const kecamatanSelectItems = computed(() => kecamatanList.value.map((k) => ({ label: k.nama, value: k.id })))
 
 const getRiskColor = (risk) => {
   if (risk === 'berat') return 'bg-danger/10 text-danger border border-danger/20'
@@ -151,6 +164,41 @@ const getWilayahLabel = (status) => {
   if (status === 'out_of_scope') return 'Luar Cakupan'
   return 'Tidak Diketahui'
 }
+
+// Ringkasan kalimat gabungan SEMUA filter aktif (risiko + status wilayah + kata kunci +
+// kecamatan), mis. "122 Data Pasien dengan Risiko Sedang dan Status Wilayah Cocok di Kecamatan
+// Gapura" -- totalCount dari pagination.total (hasil query TERFILTER backend, bukan window
+// klien), jadi selalu akurat gabungan seluruh filter, bukan cuma yang kebetulan sudah dimuat.
+const RISK_LABELS: Record<string, string> = { berat: 'Risiko Berat', sedang: 'Risiko Sedang', ringan: 'Risiko Ringan' }
+const WILAYAH_STATUS_LABELS: Record<string, string> = {
+  resolved: 'Status Wilayah Cocok',
+  unresolved: 'Status Wilayah Belum Cocok',
+  unknown: 'Status Wilayah Tidak Diketahui',
+  out_of_scope: 'Status Luar Cakupan'
+}
+
+const filterSummaryText = computed(() => {
+  const qualifiers: string[] = []
+  if (filterRisk.value && RISK_LABELS[filterRisk.value]) qualifiers.push(RISK_LABELS[filterRisk.value])
+  if (filterWilayahStatus.value && WILAYAH_STATUS_LABELS[filterWilayahStatus.value]) {
+    qualifiers.push(WILAYAH_STATUS_LABELS[filterWilayahStatus.value])
+  }
+  if (searchQuery.value.trim()) qualifiers.push(`kata kunci "${searchQuery.value.trim()}"`)
+
+  let sentence = `${formatId(totalCount.value)} Data Pasien`
+  if (qualifiers.length === 1) {
+    sentence += ` dengan ${qualifiers[0]}`
+  } else if (qualifiers.length === 2) {
+    sentence += ` dengan ${qualifiers[0]} dan ${qualifiers[1]}`
+  } else if (qualifiers.length > 2) {
+    sentence += ` dengan ${qualifiers.slice(0, -1).join(', ')}, dan ${qualifiers[qualifiers.length - 1]}`
+  }
+
+  const kecamatanNama = kecamatanSelectItems.value.find((k) => k.value === filterKecamatanId.value)?.label
+  if (kecamatanNama) sentence += ` di Kecamatan ${kecamatanNama}`
+
+  return sentence
+})
 
 // --- Pencarian by NIK (POST /patients/search-nik) -----------------------------------------
 // KOPIPU tidak pernah menyimpan NIK asli (patients_cache cuma punya nik_hash HMAC dari
@@ -264,8 +312,15 @@ function closeNikNotFoundModal() {
             <option value="sedang">Risiko Sedang</option>
             <option value="ringan">Risiko Ringan</option>
           </select>
+          <select v-model="filterWilayahStatus" class="flex-1 md:w-48 py-2.5 px-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white">
+            <option value="">Semua Status Wilayah</option>
+            <option value="resolved">Wilayah Cocok</option>
+            <option value="unresolved">Belum Cocok</option>
+            <option value="unknown">Wilayah Tidak Diketahui</option>
+            <option value="out_of_scope">Luar Cakupan</option>
+          </select>
           <USelectMenu
-            v-model="filterKecamatan"
+            v-model="filterKecamatanId"
             :items="kecamatanSelectItems"
             value-key="value"
             placeholder="Semua Kecamatan"
@@ -273,6 +328,22 @@ function closeNikNotFoundModal() {
             class="flex-1 md:w-48"
           />
         </div>
+      </div>
+
+      <!-- Ringkasan hasil filter -- selalu tampil, kalimatnya menyesuaikan filter apa saja yang
+           aktif (risiko/status wilayah/kata kunci/kecamatan), angka dari pagination.total (query
+           TERFILTER backend, akurat gabungan semua filter, bukan cuma window yang ke-fetch).
+           SAAT isLoading: tampilkan status "Sedang Mencari Data..." dulu, BUKAN teks lama --
+           filterKecamatanId/filterRisk dkk sudah berubah duluan (v-model reaktif instan) sebelum
+           totalCount hasil fetch baru datang, jadi tanpa ini sempat muncul kombinasi
+           menyesatkan (mis. total lama "174" digabung nama kecamatan BARU "Gapura"). -->
+      <div class="px-5 py-3 border-b border-slate-100 bg-primary/5 flex items-center gap-2">
+        <LucideLoader2 v-if="isLoading" class="w-4 h-4 text-primary shrink-0 animate-spin" />
+        <LucideMapPin v-else class="w-4 h-4 text-primary shrink-0" />
+        <span class="text-sm font-semibold text-slate-700">
+          <template v-if="isLoading">Sedang Mencari Data...</template>
+          <template v-else>{{ filterSummaryText }}</template>
+        </span>
       </div>
 
       <!-- Table -->
@@ -296,7 +367,7 @@ function closeNikNotFoundModal() {
                   Memuat data pasien...
                </td>
             </tr>
-            <tr v-for="patient in filteredPatients" :key="patient.id" class="hover:bg-slate-50/80 transition-colors group">
+            <tr v-for="patient in patients" :key="patient.id" class="hover:bg-slate-50/80 transition-colors group">
                <td class="py-4 px-5">
                   <div class="flex items-center gap-3">
                      <div class="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm shadow-sm border border-primary/20 shrink-0">
@@ -330,7 +401,7 @@ function closeNikNotFoundModal() {
                   </NuxtLink>
                </td>
             </tr>
-            <tr v-if="!isLoading && filteredPatients.length === 0">
+            <tr v-if="!isLoading && patients.length === 0">
                <td colspan="7" class="py-12 text-center">
                  <div class="flex flex-col items-center justify-center text-slate-400">
                     <LucideSearchX class="w-10 h-10 mb-3 text-slate-300" />
@@ -342,12 +413,33 @@ function closeNikNotFoundModal() {
         </table>
       </div>
 
-      <!-- Ringkasan -->
+      <!-- Ringkasan + Pagination -- totalCount/currentPage/lastPage dari pagination.total hasil
+           query TERFILTER backend (bukan window klien), jadi selalu akurat gabungan semua filter
+           aktif (search/risiko/status wilayah/kecamatan). -->
       <div class="p-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4 bg-slate-50/50">
         <span class="text-sm text-slate-500">
-          Menampilkan <b class="text-slate-700">{{ filteredPatients.length }}</b> dari <b class="text-slate-700">{{ patients.length }}</b> pasien dimuat
-          <template v-if="totalCount > patients.length"> (total <b class="text-slate-700">{{ totalCount }}</b> pasien di sistem — cari nama/no. registrasi kalau tidak ditemukan di halaman ini)</template>
+          Menampilkan <b class="text-slate-700">{{ patients.length }}</b> dari total <b class="text-slate-700">{{ formatId(totalCount) }}</b> pasien
+          <template v-if="lastPage > 1"> (halaman {{ currentPage }} dari {{ lastPage }})</template>
         </span>
+        <div v-if="lastPage > 1" class="flex items-center gap-1.5">
+          <button
+            type="button"
+            :disabled="currentPage <= 1 || isLoading"
+            @click="goToPage(currentPage - 1)"
+            class="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-white hover:text-primary disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-600 transition-colors"
+          >
+            <LucideChevronLeft class="w-4 h-4" />
+          </button>
+          <span class="text-xs font-semibold text-slate-600 px-2">{{ currentPage }} / {{ lastPage }}</span>
+          <button
+            type="button"
+            :disabled="currentPage >= lastPage || isLoading"
+            @click="goToPage(currentPage + 1)"
+            class="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-white hover:text-primary disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-600 transition-colors"
+          >
+            <LucideChevronRight class="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
     </div>

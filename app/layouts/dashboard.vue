@@ -283,6 +283,67 @@ async function confirmLogout() {
     showLogoutConfirm.value = false
   }
 }
+
+// --- Sinkronisasi SiLAKES manual (sidebar) -- super_admin saja -----------------------------
+// GET /silakes/sync-status + POST /silakes/sync (backend baru, SilakesSyncController) --
+// tombol ini SEBELUMNYA statis (tidak ada handler klik, "Terakhir sinkronisasi: 10 menit lalu"
+// hardcode, tidak digerbangi role). Sekarang: hanya tampil untuk super_admin, klik memicu
+// sync SUNGGUHAN (synchronous di request HTTP, throttle 48 jam TIDAK berlaku untuk trigger
+// manual ini -- operator secara eksplisit minta sync sekarang), dan label waktu diambil dari
+// integration_sync_logs yang sesungguhnya.
+const toast = useToast()
+const isSuperAdmin = computed(() => (authStore.roles ?? []).includes('super_admin'))
+const isSyncing = ref(false)
+const lastSyncedAt = ref<string | null>(null)
+
+function formatLastSynced(iso: string | null): string {
+  if (!iso) return 'Belum pernah sinkron'
+  const diffMin = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  if (diffMin < 1) return 'Baru saja'
+  if (diffMin < 60) return `${diffMin} menit lalu`
+  const diffHour = Math.floor(diffMin / 60)
+  if (diffHour < 24) return `${diffHour} jam lalu`
+  const diffDay = Math.floor(diffHour / 24)
+  return `${diffDay} hari lalu`
+}
+const lastSyncedLabel = computed(() => formatLastSynced(lastSyncedAt.value))
+
+async function loadSyncStatus() {
+  if (!isSuperAdmin.value) return
+  try {
+    const api = useApi()
+    const res = await api('/silakes/sync-status') as ApiSuccessEnvelope<{ last_synced_at: string | null }>
+    lastSyncedAt.value = res.data.last_synced_at
+  } catch (e) {
+    console.error('Gagal memuat status sinkronisasi SiLAKES', e)
+  }
+}
+
+async function triggerSilakesSync() {
+  if (isSyncing.value) return
+  isSyncing.value = true
+  try {
+    const api = useApi()
+    const res = await api('/silakes/sync', { method: 'POST' }) as ApiSuccessEnvelope<{ last_synced_at: string, result: { patients_synced: number, lab_results_synced: number, patients_classified: number } }>
+    lastSyncedAt.value = res.data.last_synced_at
+    const { patients_synced, patients_classified } = res.data.result
+    toast.add({
+      title: 'Sinkronisasi SiLAKES berhasil',
+      description: `${patients_synced} pasien diproses, ${patients_classified} diklasifikasi ulang.`,
+      color: 'success'
+    })
+  } catch (e) {
+    toast.add({
+      title: 'Sinkronisasi SiLAKES gagal',
+      description: e instanceof ApiError ? e.message : 'Terjadi kesalahan tidak terduga.',
+      color: 'error'
+    })
+  } finally {
+    isSyncing.value = false
+  }
+}
+
+onMounted(loadSyncStatus)
 </script>
 
 <template>
@@ -324,13 +385,20 @@ async function confirmLogout() {
         </div>
       </div>
 
-      <!-- Bottom Button -->
-      <div class="p-4 shrink-0 border-t border-white/10">
-        <button class="w-full flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white rounded-xl py-3 transition-colors border border-white/10">
-          <LucideRefreshCw class="w-4 h-4" />
-          <span class="text-sm font-semibold">Sinkronisasi SiLAKES</span>
+      <!-- Bottom Button -- sinkronisasi manual SiLAKES, super_admin saja (lihat script:
+           triggerSilakesSync). admin_puskesmas/pj_prolanis/kader TIDAK melihat tombol ini sama
+           sekali -- mereka bukan yang mengelola integrasi SiLAKES. -->
+      <div v-if="isSuperAdmin" class="p-4 shrink-0 border-t border-white/10">
+        <button
+          type="button"
+          :disabled="isSyncing"
+          @click="triggerSilakesSync"
+          class="w-full flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white rounded-xl py-3 transition-colors border border-white/10 disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          <LucideRefreshCw class="w-4 h-4" :class="{ 'animate-spin': isSyncing }" />
+          <span class="text-sm font-semibold">{{ isSyncing ? 'Menyinkronkan...' : 'Sinkronisasi SiLAKES' }}</span>
         </button>
-        <p class="text-center text-[10px] text-slate-400 mt-2">Terakhir sinkronisasi: 10 menit lalu</p>
+        <p class="text-center text-[10px] text-slate-400 mt-2">Terakhir sinkronisasi: {{ lastSyncedLabel }}</p>
       </div>
     </aside>
 

@@ -131,6 +131,17 @@ async function loadDashboardSummary() {
         percentage: Math.round((k.berat / maxBerat) * 100),
         colorClass: TOP_DISTRICT_COLORS[idx] ?? 'bg-primary/60'
       }))
+
+    // Reload akibat filter puskesmas/tanggal berubah -- animasikan count-up lagi supaya angka
+    // baru tidak nyangkut di displayValue lama '0' (bug ditemukan: sebelumnya animateNumber
+    // cuma pernah dipanggil SEKALI, di dalam onMounted -- jadi tiap kali filter diganti, objek
+    // stats/riskDistribution/dst dibuat ULANG dengan displayValue direset ke '0' tapi tidak ada
+    // yang memicu animasinya lagi, kartu jadi permanen menampilkan 0 walau data & peta sudah
+    // benar). Load PERTAMA sengaja dilewati di sini -- onMounted yang urus lewat delay 800ms
+    // supaya entrance animation (donut/progress bar) tetap serempak seperti semula.
+    if (hasLoadedOnce.value) {
+      triggerCardAnimations()
+    }
   } catch (e) {
     summaryError.value = e instanceof ApiError ? e.message : 'Gagal memuat ringkasan dashboard.'
     console.error(e)
@@ -214,6 +225,23 @@ async function loadPuskesmasOptions() {
 
 function onPuskesmasFilterChange() {
   loadDashboardSummary()
+}
+
+// USelectMenu (Nuxt UI) -- typeahead, super_admin cari nama puskesmas langsung sambil ketik
+// daripada scroll dropdown panjang (31 puskesmas), pola sama seperti filter kecamatan di
+// /dashboard/pasien. Tidak ada item sentinel "Semua Puskesmas" (value null ditolak Combobox
+// sebagai item sungguhan) -- clear-selection bawaan komponen sudah cukup, placeholder mewakili
+// "belum pilih apa-apa".
+const puskesmasSelectItems = computed(() => puskesmasOptions.value.map((p) => ({ label: p.nama, value: p.id })))
+
+// Nama puskesmas terpilih -- dipakai banner personalisasi di bawah header.
+const selectedPuskesmasName = computed(() =>
+  puskesmasOptions.value.find((p) => p.id === selectedPuskesmasId.value)?.nama ?? null
+)
+
+function resetPuskesmasFilter() {
+  selectedPuskesmasId.value = null
+  onPuskesmasFilterChange()
 }
 
 // Filter rentang tanggal -- kebutuhan enterprise/audit (docs/planning §7 lanjutan). Kosong
@@ -563,6 +591,18 @@ const animateNumber = (obj: any, keyTarget: string, keyDisplay: string, duration
   requestAnimationFrame(update)
 }
 
+// Dipanggil sekali di onMounted (lewat delay 800ms, entrance animation) DAN tiap kali
+// loadDashboardSummary() selesai memuat ulang akibat filter puskesmas/tanggal berubah --
+// lihat catatan bug di loadDashboardSummary().
+const hasLoadedOnce = ref(false)
+function triggerCardAnimations() {
+  stats.value.forEach(s => animateNumber(s, 'targetValue', 'displayValue'))
+  riskDistribution.value.forEach(r => animateNumber(r, 'targetValue', 'displayValue'))
+  topDistricts.value.forEach(d => animateNumber(d, 'targetValue', 'displayValue'))
+  animateNumber(totalRiskValue.value, 'targetValue', 'displayValue')
+  animateNumber(progressValue.value, 'targetValue', 'displayValue')
+}
+
 onMounted(async () => {
   loadAnnouncements()
   loadPuskesmasScopeLabel()
@@ -572,14 +612,9 @@ onMounted(async () => {
 
   setTimeout(() => {
     isLoaded.value = true
+    triggerCardAnimations()
+    hasLoadedOnce.value = true
 
-    stats.value.forEach(s => animateNumber(s, 'targetValue', 'displayValue'))
-    riskDistribution.value.forEach(r => animateNumber(r, 'targetValue', 'displayValue'))
-    topDistricts.value.forEach(d => animateNumber(d, 'targetValue', 'displayValue'))
-    
-    animateNumber(totalRiskValue.value, 'targetValue', 'displayValue')
-    animateNumber(progressValue.value, 'targetValue', 'displayValue')
-    
     // Load search index
     fetch('/sumenep_search_index.json')
       .then(res => res.json())
@@ -795,25 +830,45 @@ const initMap = () => {
           <LucideChevronDown v-else class="w-4 h-4 text-slate-400 shrink-0" />
         </div>
 
-        <!-- Filter puskesmas -- super_admin: dropdown NYATA (seluruh puskesmas + opsi "Semua
-             Puskesmas"). admin_puskesmas/pj_prolanis: label saja, sudah terkunci di backend. -->
+        <!-- Filter puskesmas -- super_admin: USelectMenu typeahead (cari di antara 31 puskesmas
+             sambil ketik). admin_puskesmas/pj_prolanis: label saja, sudah terkunci di backend. -->
         <div v-if="isSuperAdmin" class="relative flex items-center gap-2 bg-white border border-slate-200 pl-4 pr-3 py-2 rounded-xl text-sm font-medium text-slate-700 shadow-sm">
           <LucideBuilding2 class="w-4 h-4 text-slate-400 shrink-0" />
-          <select
+          <USelectMenu
             v-model="selectedPuskesmasId"
-            @change="onPuskesmasFilterChange"
-            class="outline-none bg-transparent cursor-pointer text-sm max-w-40 sm:max-w-none appearance-none pr-5"
-          >
-            <option :value="null">Semua Puskesmas</option>
-            <option v-for="p in puskesmasOptions" :key="p.id" :value="p.id">{{ p.nama }}</option>
-          </select>
-          <LucideChevronDown class="w-4 h-4 text-slate-400 shrink-0 -ml-5 pointer-events-none" />
+            :items="puskesmasSelectItems"
+            :loading="isLoadingPuskesmasOptions"
+            value-key="value"
+            placeholder="Semua Puskesmas"
+            class="w-44 sm:w-56"
+            @update:model-value="onPuskesmasFilterChange"
+          />
         </div>
         <div v-else class="flex items-center gap-2 bg-white border border-slate-200 px-4 py-2 rounded-xl text-sm font-medium text-slate-700 shadow-sm">
           <LucideBuilding2 class="w-4 h-4 text-slate-400" />
           <span>{{ puskesmasScopeLabel }}</span>
         </div>
       </div>
+    </div>
+
+    <!-- Banner personalisasi -- muncul saat super_admin memfilter ke 1 puskesmas spesifik,
+         supaya jelas seluruh kartu/peta/grafik di bawah ini terbatas ke wilayah kerja itu,
+         bukan gambaran Kabupaten Sumenep secara keseluruhan. -->
+    <div v-if="isSuperAdmin && selectedPuskesmasId !== null" class="flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-2xl px-5 py-3.5">
+      <div class="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+        <LucideBuilding2 class="w-4.5 h-4.5" />
+      </div>
+      <p class="flex-1 text-sm font-semibold text-accent">
+        Data Dipersonalisasi Khusus <span class="text-primary">{{ selectedPuskesmasName ?? 'Puskesmas Terpilih' }}</span> — seluruh ringkasan, peta, dan statistik di bawah ini terbatas pada wilayah kerja puskesmas ini.
+      </p>
+      <button
+        type="button"
+        @click="resetPuskesmasFilter"
+        class="shrink-0 flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary-600 bg-white border border-primary/30 rounded-lg px-3 py-2 transition-colors"
+      >
+        <LucideRotateCcw class="w-3.5 h-3.5" />
+        Tampilkan Semua Puskesmas
+      </button>
     </div>
 
     <!-- Top Stats (6 Cards) -->
