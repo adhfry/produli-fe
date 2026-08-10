@@ -86,7 +86,7 @@ export default defineNuxtConfig({
   },
 
   app: {
-    pageTransition: { name: 'page', mode: 'out-in' },
+    pageTransition: { name: "page", mode: "out-in" },
     head: {
       link: [
         { rel: "icon", type: "image/x-icon", href: "/favicon.ico" },
@@ -127,6 +127,7 @@ export default defineNuxtConfig({
     },
     workbox: {
       navigateFallback: null,
+      maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       globPatterns: ["**/*.{js,css,html,png,svg,ico,woff2}"],
       // docs/planning/10 §5 + docs/planning/11 -- tile server sendiri (bukan CARTO/Google lagi,
       // lihat NUXT_PUBLIC_TILE_SERVER_URL), StaleWhileRevalidate: tampilkan versi ter-cache dulu
