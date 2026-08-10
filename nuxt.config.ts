@@ -39,8 +39,12 @@ export default defineNuxtConfig({
   // bulk/offline caching) — dipakai semua peta MapLibre GL di app ini (dashboard & /app/kunjungan).
   runtimeConfig: {
     public: {
-      apiBase: "http://localhost:8033/api/v1",
-      tileServerUrl: "https://tiles.labkesdasumenep.cloud",
+      apiBase:
+        process.env.NUXT_PUBLIC_API_BASE || "http://localhost:8033/api/v1",
+
+      tileServerUrl:
+        process.env.NUXT_PUBLIC_TILE_SERVER_URL ||
+        "https://tiles.labkesdasumenep.cloud",
     },
   },
 
