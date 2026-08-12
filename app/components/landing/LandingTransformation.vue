@@ -75,7 +75,7 @@ const riskLevels = [
     color: "amber",
     parameters: ["Gula Darah Puasa", "Cholesterol", "Trigliserida", "LDL"],
     indikator:
-      "Salah satu dari Gula Darah Puasa, Cholesterol, Trigliserida, atau LDL melebihi nilai rujukan (bukan cuma GDP sendirian).",
+      "Seluruh parameter (Gula Darah Puasa, Cholesterol, Trigliserida, dan LDL) yang diuji harus melebihi nilai rujukan, bukan salah satu saja.",
     extra:
       "Jalur independen: Creatinine 1,7–1,9 mg/dL juga langsung menghasilkan Sedang, tanpa perlu parameter lain ikut melebihi.",
   },
