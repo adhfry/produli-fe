@@ -68,25 +68,25 @@ const riskLevels = [
     color: "emerald",
     parameters: ["Gula Darah Puasa"],
     indikator:
-      "HANYA Gula Darah Puasa yang melebihi nilai rujukan -- parameter kombinasi lain normal atau belum pernah diperiksa.",
+      "Hanya parameter Gula Darah Puasa yang melebihi nilai rujukan; parameter kombinasi lainnya berada dalam batas normal atau belum pernah diperiksa.",
   },
   {
     level: "Sedang",
     color: "amber",
     parameters: ["Gula Darah Puasa", "Cholesterol", "Trigliserida", "LDL"],
     indikator:
-      "Seluruh parameter (Gula Darah Puasa, Cholesterol, Trigliserida, dan LDL) yang diuji harus melebihi nilai rujukan, bukan salah satu saja.",
+      "Seluruh parameter yang diuji (Gula Darah Puasa, Cholesterol, Trigliserida, dan LDL) harus melebihi nilai rujukan secara bersamaan, bukan hanya salah satu di antaranya.",
     extra:
-      "Jalur independen: Creatinine 1,7–1,9 mg/dL juga langsung menghasilkan Sedang, tanpa perlu parameter lain ikut melebihi.",
+      "Sebagai jalur independen, nilai Creatinine pada rentang 1,7–1,9 mg/dL juga secara langsung menghasilkan klasifikasi Sedang, tanpa memerlukan parameter lain turut melebihi nilai rujukan.",
   },
   {
     level: "Berat",
     color: "rose",
     parameters: ["Gula Darah Puasa", "Cholesterol", "Trigliserida", "LDL", "Urea"],
     indikator:
-      "KELIMA parameter kombinasi di atas harus lengkap tersedia DAN seluruhnya melebihi nilai rujukan sekaligus.",
+      "Kelima parameter kombinasi tersebut harus tersedia secara lengkap dan seluruhnya melebihi nilai rujukan secara bersamaan.",
     extra:
-      "Jalur independen: Creatinine ≥ 2,0 mg/dL juga langsung menghasilkan Berat, sendirian tanpa perlu 5 parameter lain.",
+      "Sebagai jalur independen, nilai Creatinine sebesar ≥ 2,0 mg/dL juga secara langsung menghasilkan klasifikasi Berat, tanpa memerlukan kelima parameter lainnya.",
   },
 ];
 
@@ -276,8 +276,8 @@ onMounted(() => {
         </h3>
         <p class="mt-2 text-neutral-500">
           Sistem menganalisis indikator laboratorium dan mengelompokkan
-          pasien secara objektif -- bukan tebakan, murni angka rujukan
-          klinis.
+          pasien secara objektif, berdasarkan nilai rujukan klinis resmi,
+          bukan berdasarkan perkiraan.
         </p>
       </motion.div>
 
@@ -292,10 +292,10 @@ onMounted(() => {
         >
           <div class="border-b border-neutral-100 bg-neutral-50 px-6 py-5 md:px-8">
             <div class="flex items-center gap-2 text-xs font-bold tracking-widest text-neutral-400 uppercase">
-              <LucideChartPie class="h-4 w-4" /> Risk Classification
+              <LucideChartPie class="h-4 w-4" /> Klasifikasi Risiko
             </div>
             <p class="mt-1 text-sm text-neutral-500">
-              Tingkat risiko dan parameter kombinasi yang menentukannya.
+              Tingkat risiko beserta parameter kombinasi yang menjadi penentunya.
             </p>
           </div>
 
@@ -391,8 +391,9 @@ onMounted(() => {
 
           <p class="border-t border-neutral-100 px-6 py-4 text-xs text-neutral-400 md:px-8">
             Creatinine memiliki dua ambang bertingkat karena berperan sebagai
-            "direct classifier" -- lihat penjelasan Smart Early Detection
-            berikutnya.
+            penentu klasifikasi langsung ("direct classifier"); penjelasan
+            lebih lanjut disajikan pada bagian Deteksi Dini Cerdas (Smart
+            Early Detection) berikut.
           </p>
         </motion.div>
       </div>

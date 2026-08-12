@@ -21,23 +21,23 @@ import {
 const signals = [
   {
     icon: LucideSlidersHorizontal,
-    title: "Kedekatan ke Ambang Berat (Proximity)",
-    forWhom: "Khusus parameter bertingkat seperti Creatinine",
-    desc: "Menghitung posisi nilai pasien di dalam rentang Sedang sebagai persentase menuju ambang Berat berikutnya. Satu parameter penting yang dinilai terpisah dari kombo, tidak pernah dilonggarkan.",
+    title: "Tingkat Kedekatan terhadap Ambang Berat (Proximity)",
+    forWhom: "Khusus untuk parameter bertingkat, seperti Creatinine",
+    desc: "Menghitung posisi nilai pasien di dalam rentang Sedang sebagai persentase menuju ambang Berat berikutnya. Merupakan satu parameter penting yang dinilai secara terpisah dari kombinasi parameter lain, dan ambang penilaiannya tidak pernah dilonggarkan.",
     formula: "proximity = (nilai - ambang_bawah) / (ambang_berat - ambang_bawah)",
   },
   {
     icon: LucideLayers,
     title: "Margin Kombinasi Parameter",
-    forWhom: "Untuk 5 parameter kombinasi (GDP, Cholesterol, Trigliserida, LDL, Urea)",
-    desc: "Bukan lagi sekadar jumlah parameter yang melebihi ambang. Minimal 3 parameter harus melebihi bersamaan, WAJIB mencakup Gula Darah Puasa, LDL, dan Trigliserida (pemeriksaan terpenting secara klinis; Cholesterol dan Urea hanya pelengkap opsional). Seluruhnya — bukan cuma rata-ratanya — harus sama-sama jauh di atas nilai rujukan aslinya, bukan cuma satu parameter menyimpang jauh sementara yang lain nyaris ambang.",
+    forWhom: "Untuk lima parameter kombinasi (Gula Darah Puasa, Cholesterol, Trigliserida, LDL, dan Urea)",
+    desc: "Penilaian tidak lagi didasarkan semata-mata pada jumlah parameter yang melebihi ambang. Sekurang-kurangnya tiga parameter harus melebihi ambang secara bersamaan, dengan mewajibkan keberadaan Gula Darah Puasa, LDL, dan Trigliserida (pemeriksaan yang dinilai paling signifikan secara klinis; Cholesterol dan Urea berperan sebagai pelengkap yang bersifat opsional). Seluruh parameter tersebut, bukan hanya rata-ratanya, harus sama-sama berada jauh di atas nilai rujukan, sehingga tidak terjadi kondisi satu parameter menyimpang signifikan sementara parameter lainnya masih mendekati ambang.",
     formula: "hitung(margin) ≥ min_parameter DAN min(margin) ≥ ambang_margin",
   },
   {
     icon: LucideTrendingUp,
     title: "Tren Memburuk Berturut-turut",
-    forWhom: "Untuk parameter apa pun yang punya riwayat pemeriksaan",
-    desc: "Nilai parameter yang sama terus naik di 3 pemeriksaan terakhir berturut-turut, meski levelnya sendiri belum berubah.",
+    forWhom: "Berlaku untuk parameter apa pun yang memiliki riwayat pemeriksaan",
+    desc: "Nilai suatu parameter menunjukkan kenaikan berturut-turut pada tiga pemeriksaan terakhir, meskipun tingkat risikonya sendiri belum mengalami perubahan.",
     formula: "nilai_sekarang > nilai_sebelumnya > nilai_2x_sebelumnya",
   },
 ];
@@ -115,13 +115,14 @@ function openModal() {
         </div>
         <h2 class="mb-6 text-3xl font-extrabold text-accent md:text-5xl">
           Mendeteksi Pasien yang
-          <span class="text-primary">Hampir Memburuk</span>
+          <span class="text-primary">Berisiko Memburuk</span>
         </h2>
         <p class="text-lg text-neutral-600">
-          Bukan sekadar mengelompokkan Ringan/Sedang/Berat. Sistem juga
-          menandai pasien berisiko Sedang yang kondisinya diam-diam sudah
-          mendekati ambang Berat, berbasis 3 aturan objektif (rule-based),
-          bukan tebakan model machine learning kotak hitam.
+          Tidak sekadar mengelompokkan pasien ke dalam kategori Ringan,
+          Sedang, atau Berat, sistem ini turut menandai pasien dengan
+          klasifikasi Sedang yang kondisinya telah mendekati ambang Berat,
+          berdasarkan tiga kaidah objektif (rule-based), bukan berdasarkan
+          prediksi model machine learning yang bersifat tertutup (black box).
         </p>
       </motion.div>
 
@@ -158,49 +159,55 @@ function openModal() {
       >
         <div class="md:col-span-3">
           <h3 class="mb-3 text-xl font-bold text-accent">
-            Kenapa ambang proximity 60%, bukan 70%?
+            Mengapa Ambang Proximity Ditetapkan pada 60%, Bukan 70%?
           </h3>
           <p class="mb-3 text-sm leading-relaxed text-neutral-600">
-            Untuk Creatinine, rentang Sedang resmi adalah
-            <strong class="text-accent">1,7&ndash;1,9 mg/dL</strong> dan
-            Berat dimulai dari
+            Rentang klasifikasi Sedang resmi untuk parameter Creatinine adalah
+            <strong class="text-accent">1,7&ndash;1,9 mg/dL</strong>, sedangkan
+            klasifikasi Berat dimulai pada
             <strong class="text-accent">2,0 mg/dL</strong>. Nilai
-            <em>maksimum</em> yang mungkin dicapai di dalam rentang Sedang
+            <em>maksimum</em> yang dapat dicapai di dalam rentang Sedang
             (1,9 mg/dL) hanya menempuh
             <strong class="text-primary">{{ (MAKS_PROXIMITY_TERCAPAI * 100).toFixed(1) }}%</strong>
-            perjalanan menuju ambang Berat &mdash; kalau threshold di-set 70%,
-            sinyal ini secara matematis
-            <strong>tidak akan pernah bisa menyala</strong>. Ambang 60%
-            dipilih supaya berada sedikit di bawah batas maksimum itu,
-            sehingga early detection benar-benar bisa aktif memberi
-            peringatan bermakna.
+            dari jarak menuju ambang Berat. Apabila ambang ditetapkan pada
+            70%, sinyal ini secara matematis
+            <strong>tidak akan pernah dapat teraktivasi</strong>. Ambang 60%
+            dipilih agar berada sedikit di bawah batas maksimum tersebut,
+            sehingga fitur deteksi dini dapat benar-benar aktif memberikan
+            peringatan yang bermakna.
           </p>
           <p class="mb-3 text-sm leading-relaxed text-neutral-600">
-            Untuk 5 parameter kombinasi, ceritanya beda. Parameter ini
-            tidak punya tier "Berat" numerik bertingkat seperti Creatinine
-            (Berat kombo ditentukan lewat kelengkapan, bukan kedalaman),
-            jadi tidak ada batas atas matematis alami. Minimal
+            Ketentuan untuk kelima parameter kombinasi bersifat berbeda.
+            Parameter-parameter ini tidak memiliki tingkatan "Berat" numerik
+            bertingkat sebagaimana Creatinine (klasifikasi Berat pada
+            kombinasi parameter ditentukan melalui kelengkapan, bukan
+            kedalaman nilai), sehingga tidak terdapat batas atas matematis
+            yang alami. Sekurang-kurangnya
             <strong class="text-accent">{{ COMBO_MIN_PARAMETERS }} parameter</strong>
-            harus melebihi ambang bersamaan, WAJIB mencakup
+            harus melebihi ambang secara bersamaan, dengan mewajibkan
+            keberadaan
             <strong class="text-accent">{{ COMBO_REQUIRED_PARAMETERS }}</strong>
-            (pemeriksaan terpenting secara klinis; Cholesterol dan Urea
-            hanya pelengkap opsional), dan seluruhnya harus sama-sama
+            (pemeriksaan yang dinilai paling signifikan secara klinis;
+            Cholesterol dan Urea berperan sebagai pelengkap opsional), dan
+            seluruh parameter tersebut harus berada
             <strong class="text-primary">&ge; {{ COMBO_MARGIN_THRESHOLD_PERCENT }}%</strong>
-            di atas nilai rujukan aslinya. Ketiga angka ini murni
-            keputusan kebijakan klinis, bukan hasil turunan rumus.
+            di atas nilai rujukan. Ketiga nilai ambang ini merupakan
+            keputusan kebijakan klinis, bukan hasil turunan suatu rumus
+            matematis.
           </p>
           <p class="flex items-start gap-2 text-sm text-neutral-500">
             <LucideSlidersHorizontal class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-            Seluruh ambang ini tersimpan sebagai konfigurasi (bukan
-            angka tetap di kode) sehingga dapat disetel ulang tanpa mengubah
-            aplikasi kalau ada evaluasi klinis baru dari tenaga kesehatan.
+            Seluruh nilai ambang tersimpan sebagai konfigurasi, bukan angka
+            tetap di dalam kode program, sehingga dapat disesuaikan kembali
+            tanpa perlu mengubah aplikasi apabila terdapat evaluasi klinis
+            terbaru dari tenaga kesehatan.
           </p>
         </div>
 
         <div class="flex flex-col items-center justify-center gap-4 rounded-2xl bg-neutral-50 p-6 text-center md:col-span-2">
           <LucideCalculator class="h-8 w-8 text-primary" />
           <p class="text-sm text-neutral-600">
-            Ingin lihat perhitungannya langsung pada contoh kasus nyata?
+            Ingin melihat perhitungannya secara langsung pada contoh kasus nyata?
           </p>
           <button
             type="button"
@@ -224,7 +231,7 @@ function openModal() {
           <div class="flex items-center justify-between border-b border-neutral-100 px-6 py-5">
             <div class="flex items-center gap-2">
               <LucideFlaskConical class="h-5 w-5 text-primary" />
-              <h3 class="text-lg font-bold text-accent">Simulasi Early Detection</h3>
+              <h3 class="text-lg font-bold text-accent">Simulasi Deteksi Dini</h3>
             </div>
             <button type="button" @click="showModal = false" class="rounded-lg p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600">
               <LucideX class="h-5 w-5" />
@@ -253,10 +260,12 @@ function openModal() {
 
             <template v-if="simMode === 'creatinine'">
               <p class="text-sm text-neutral-500">
-                Contoh: pasien dengan level risiko saat ini
+                Contoh: pasien dengan tingkat risiko saat ini berada pada
+                klasifikasi
                 <span class="rounded bg-amber-100 px-1.5 py-0.5 font-bold text-amber-700">Sedang</span>
-                lewat jalur Creatinine. Geser nilai hasil lab untuk melihat
-                kapan sistem menandainya sebagai "berpotensi memburuk".
+                melalui jalur Creatinine. Geser nilai hasil laboratorium
+                untuk mengetahui kapan sistem menandainya sebagai
+                berpotensi memburuk.
               </p>
 
               <div>
@@ -302,13 +311,16 @@ function openModal() {
                   </p>
                   <p class="mt-1 text-xs" :class="simFlagged ? 'text-rose-600' : 'text-emerald-600'">
                     <template v-if="simFlagged">
-                      Pasien tetap diklasifikasikan <strong>Sedang</strong>, tapi kondisinya sudah
-                      {{ simProximityPercent }}% mendekati ambang Berat ({{ AMBANG_BERAT.toFixed(1) }} mg/dL).
-                      Sistem menandai untuk pemantauan lebih intensif sebelum benar-benar menjadi Berat.
+                      Pasien tetap diklasifikasikan sebagai <strong>Sedang</strong>, namun
+                      kondisinya telah mendekati ambang Berat sebesar {{ simProximityPercent }}%
+                      ({{ AMBANG_BERAT.toFixed(1) }} mg/dL). Sistem menandai pasien tersebut untuk
+                      pemantauan yang lebih intensif sebelum kondisinya benar-benar berkembang
+                      menjadi Berat.
                     </template>
                     <template v-else>
-                      Nilai masih cukup jauh dari ambang Berat, belum ditandai sebagai
-                      berpotensi memburuk. Geser slider ke kanan untuk melihat titik ambang aktif.
+                      Nilai tersebut masih cukup jauh dari ambang Berat sehingga belum ditandai
+                      sebagai berpotensi memburuk. Geser penggeser ke kanan untuk melihat titik
+                      ambang aktif.
                     </template>
                   </p>
                 </div>
@@ -317,10 +329,10 @@ function openModal() {
 
             <template v-else-if="simMode === 'combo'">
               <p class="text-sm text-neutral-500">
-                Contoh: 3 parameter wajib (Gula Darah Puasa, LDL, dan
-                Trigliserida) sama-sama dinilai. Ubah nilainya untuk melihat
-                kapan <strong>ketiganya</strong> &mdash; bukan cuma rata-ratanya &mdash;
-                melewati ambang margin.
+                Contoh: tiga parameter wajib (Gula Darah Puasa, LDL, dan
+                Trigliserida) dinilai secara bersamaan. Ubah nilainya untuk
+                mengetahui kapan <strong>ketiganya</strong>, bukan hanya
+                rata-ratanya, melampaui ambang margin.
               </p>
 
               <div>
@@ -413,15 +425,15 @@ function openModal() {
                   </p>
                   <p class="mt-1 text-xs" :class="simComboFlagged ? 'text-rose-600' : 'text-emerald-600'">
                     <template v-if="simComboFlagged">
-                      Ketiga parameter sama-sama sudah jauh di atas nilai rujukan
-                      (minimum {{ simMarginMin.toFixed(0) }}%). Sistem menandai
-                      pasien ini berpotensi menuju Berat, bukan cuma karena satu
-                      parameter yang melonjak sendirian.
+                      Ketiga parameter berada jauh di atas nilai rujukan
+                      (margin minimum {{ simMarginMin.toFixed(0) }}%). Sistem menandai
+                      pasien tersebut berpotensi menuju klasifikasi Berat, bukan
+                      disebabkan oleh satu parameter yang melonjak secara tersendiri.
                     </template>
                     <template v-else>
-                      Salah satu parameter masih di bawah ambang margin
-                      {{ COMBO_MARGIN_THRESHOLD_PERCENT }}%, belum ditandai,
-                      meski rata-ratanya bisa saja sudah terlihat tinggi.
+                      Salah satu parameter masih berada di bawah ambang margin
+                      {{ COMBO_MARGIN_THRESHOLD_PERCENT }}% sehingga belum ditandai,
+                      meskipun rata-ratanya dapat saja tampak tinggi.
                     </template>
                   </p>
                 </div>
