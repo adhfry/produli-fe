@@ -62,8 +62,9 @@ const checks = [
         </h1>
 
         <p class="mb-8 max-w-xl text-lg leading-relaxed text-neutral-600">
-          KOPIPU Smart merupakan platform digital yang mendukung transformasi
-          pelayanan kesehatan preventif berbasis data laboratorium. Melalui
+          PRODULI merupakan platform digital yang mendukung transformasi
+          pelayanan kesehatan preventif berbasis data laboratorium — mewujudkan
+          pelayanan kesehatan yang proaktif. Melalui
           analisis risiko otomatis, penugasan kader, dan pemantauan kunjungan
           secara real-time, sistem ini membantu tenaga kesehatan memberikan
           layanan yang lebih cepat, tepat sasaran, dan proaktif kepada

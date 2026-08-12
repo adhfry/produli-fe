@@ -29,7 +29,7 @@ import { motion } from "motion-v";
           class="glass-panel relative flex h-56 w-56 items-center justify-center rounded-full border border-white/50 shadow-2xl sm:h-72 sm:w-72"
         >
           <NuxtImg
-            src="/logo/kopipu-smart-logo-remove-bg.png"
+            src="/logo/produli-logo-remove-bg.png"
             alt=""
             width="180"
             height="180"
@@ -48,7 +48,7 @@ import { motion } from "motion-v";
       >
         <h2 class="mb-6 text-3xl font-bold text-accent">Tentang Inovasi</h2>
         <blockquote class="text-xl leading-relaxed text-neutral-600 italic">
-          "<span class="font-bold">KOPIPU Smart</span> merupakan inovasi sistem
+          "<span class="font-bold">PRODULI</span> merupakan inovasi sistem
           pelayanan kesehatan yang digagas oleh Kepala Dinas Kesehatan P2KB
           Kabupaten Sumenep,
           <span class="font-bold">drg. Ellya Fardasah, M.Kes.</span>, sebagai

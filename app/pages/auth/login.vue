@@ -9,7 +9,7 @@ import { motion } from 'motion-v'
 // middleware: 'guest' -- user yang sudah login & buka halaman ini lagi ditendang ke homeRoute,
 // bukan disuruh login ulang (lihat app/middleware/guest.ts).
 definePageMeta({ layout: 'private', middleware: 'guest' })
-useSeoMeta({ title: 'Masuk — KOPIPU Smart' })
+useSeoMeta({ title: 'Masuk — PRODULI' })
 
 const authStore = useAuthStore()
 const config = useRuntimeConfig()
@@ -65,9 +65,9 @@ function loginWithGoogle() {
       <!-- Top Branding -->
       <NuxtLink to="/" class="relative z-10 flex items-center gap-3 w-fit transition hover:opacity-90">
         <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-white p-1 shadow-lg">
-          <img src="/logo/logo-no-text.png" alt="KOPIPU Smart Logo" class="h-full w-full object-contain" />
+          <img src="/logo/logo-no-text.png" alt="PRODULI Logo" class="h-full w-full object-contain" />
         </div>
-        <span class="text-2xl font-bold tracking-tight">KOPIPU <span class="font-light text-primary">Smart</span></span>
+        <span class="text-2xl font-bold tracking-tight text-white">PRO<span class="font-light text-primary">DULI</span></span>
       </NuxtLink>
 
       <!-- Main Copy -->
@@ -104,10 +104,10 @@ function loginWithGoogle() {
           <div class="flex flex-col items-center mb-10 text-center lg:hidden">
             <NuxtLink to="/">
               <div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-xl shadow-primary/10 border border-neutral-100 p-2 mb-4">
-                <img src="/logo/logo-no-text.png" alt="KOPIPU Smart Logo" class="h-full w-full object-contain" />
+                <img src="/logo/logo-no-text.png" alt="PRODULI Logo" class="h-full w-full object-contain" />
               </div>
             </NuxtLink>
-            <h1 class="text-2xl font-extrabold text-accent">KOPIPU Smart</h1>
+            <h1 class="text-2xl font-extrabold tracking-tight text-accent">PRO<span class="font-light text-primary">DULI</span></h1>
             <p class="text-sm text-neutral-500 mt-2">Masuk untuk melanjutkan aktivitas</p>
           </div>
 

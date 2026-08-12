@@ -5,8 +5,8 @@ import 'flatpickr/dist/flatpickr.css'
 import { Indonesian } from 'flatpickr/dist/l10n/id.js'
 import type { ApiSuccessEnvelope, CompleteOnboardingPayload, Kader, Puskesmas, User } from '~/types/api'
 
-definePageMeta({ layout: 'private', middleware: 'auth' })
-useSeoMeta({ title: 'Onboarding — KOPIPU Smart' })
+definePageMeta({ layout: 'private', middleware: ['auth', 'redirect-if-onboarded'] })
+useSeoMeta({ title: 'Onboarding — PRODULI' })
 
 const step = ref(1)
 
@@ -60,7 +60,7 @@ const toggleTTS = () => {
     return
   }
 
-  const textToRead = `Selamat datang di aplikasi KOPIPU Smart. Aplikasi ini merupakan wujud digitalisasi program unggulan Pemerintah Provinsi Jawa Timur yang digagas oleh Gubernur Khofifah Indar Parawansa, yakni Program KOPIPU atau Kunjungan Rumah dari Pintu ke Pintu pada Keluarga Rawan. Aplikasi ini diinisiasi langsung oleh Kepala Dinas Kesehatan Pengendalian Penduduk dan Keluarga Berencana Kabupaten Sumenep, bersama U P T D Laboratorium Kesehatan Daerah Kabupaten Sumenep, serta dikembangkan dan dikelola oleh Pengolah Data dan Informasi U P T D Laboratorium Kesehatan Daerah Kabupaten Sumenep. Berikut adalah beberapa pasal Syarat dan Ketentuan Penggunaan. Pasal 1, Ketentuan Umum. Dengan menggunakan aplikasi ini, Anda menyatakan tunduk pada syarat dan standar prosedur yang berlaku. Pasal 2, Privasi dan Pelindungan Data. Sesuai Undang-Undang Nomor 27 Tahun 2022 tentang Pelindungan Data Pribadi, dan Permenkes Nomor 24 Tahun 2022, seluruh data identitas pasien berstatus sangat rahasia. Membocorkan data dapat diancam pidana. Pasal 3, Validitas Kunjungan. Laporan yang Anda masukkan adalah dokumen elektronik sah secara hukum. Sistem akan merekam titik koordinat atau Jii Pii Es. Pemalsuan data adalah pelanggaran berat. Pasal 4, Mode Luring. Pastikan selalu melakukan sinkronisasi data selambat-lambatnya satu kali dua puluh empat jam jika berada di area sulit sinyal. Pasal 5, Keamanan Akses. Jangan pernah meminjamkan akun atau kata sandi kepada orang lain demi kerahasiaan rekam medis. Demikian ketentuan ini dibuat untuk ditaati dengan penuh rasa tanggung jawab. Terima kasih.`
+  const textToRead = `Selamat datang di aplikasi PRODULI. Aplikasi ini merupakan wujud digitalisasi program unggulan Pemerintah Provinsi Jawa Timur yang digagas oleh Gubernur Khofifah Indar Parawansa, yakni Program KOPIPU atau Kunjungan Rumah dari Pintu ke Pintu pada Keluarga Rawan. Aplikasi ini diinisiasi langsung oleh Kepala Dinas Kesehatan Pengendalian Penduduk dan Keluarga Berencana Kabupaten Sumenep, bersama U P T D Laboratorium Kesehatan Daerah Kabupaten Sumenep, serta dikembangkan dan dikelola oleh Pengolah Data dan Informasi U P T D Laboratorium Kesehatan Daerah Kabupaten Sumenep. Berikut adalah beberapa pasal Syarat dan Ketentuan Penggunaan. Pasal 1, Ketentuan Umum. Dengan menggunakan aplikasi ini, Anda menyatakan tunduk pada syarat dan standar prosedur yang berlaku. Pasal 2, Privasi dan Pelindungan Data. Sesuai Undang-Undang Nomor 27 Tahun 2022 tentang Pelindungan Data Pribadi, dan Permenkes Nomor 24 Tahun 2022, seluruh data identitas pasien berstatus sangat rahasia. Membocorkan data dapat diancam pidana. Pasal 3, Validitas Kunjungan. Laporan yang Anda masukkan adalah dokumen elektronik sah secara hukum. Sistem akan merekam titik koordinat atau Jii Pii Es. Pemalsuan data adalah pelanggaran berat. Pasal 4, Mode Luring. Pastikan selalu melakukan sinkronisasi data selambat-lambatnya satu kali dua puluh empat jam jika berada di area sulit sinyal. Pasal 5, Keamanan Akses. Jangan pernah meminjamkan akun atau kata sandi kepada orang lain demi kerahasiaan rekam medis. Demikian ketentuan ini dibuat untuk ditaati dengan penuh rasa tanggung jawab. Terima kasih.`
 
   utterance = new SpeechSynthesisUtterance(textToRead)
   utterance.lang = 'id-ID'
@@ -216,9 +216,9 @@ const completeOnboarding = async (skip = false) => {
            
            <div class="relative z-10 flex flex-col items-center">
               <div class="bg-white p-2 rounded-2xl shadow-lg mb-4 h-16 w-16 flex items-center justify-center">
-                 <img src="/logo/logo-no-text.png" alt="Logo KOPIPU Smart" class="w-full h-full object-contain" />
+                 <img src="/logo/logo-no-text.png" alt="Logo PRODULI" class="w-full h-full object-contain" />
               </div>
-              <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight">Selamat Datang di KOPIPU Smart</h1>
+              <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight">Selamat Datang di PRODULI</h1>
               <p class="text-accent-200 mt-2 text-sm md:text-base max-w-sm mx-auto">Selesaikan langkah berikut untuk memulai tugas Anda dengan lancar.</p>
            </div>
            
@@ -299,7 +299,7 @@ const completeOnboarding = async (skip = false) => {
                     />
                     <div>
                        <span class="text-sm font-medium leading-relaxed block transition" :class="hasReadToS ? 'text-neutral-700 group-hover:text-neutral-900' : 'text-neutral-500'">
-                          Saya telah membaca, memahami, dan menyetujui seluruh Syarat & Ketentuan penggunaan aplikasi KOPIPU Smart.
+                          Saya telah membaca, memahami, dan menyetujui seluruh Syarat & Ketentuan penggunaan aplikasi PRODULI.
                        </span>
                        <span v-if="!hasReadToS" class="text-xs text-danger font-semibold mt-1 block">
                           * Gulir (scroll) teks persyaratan hingga ke bawah untuk menyetujui.
@@ -379,10 +379,10 @@ const completeOnboarding = async (skip = false) => {
                        <template v-else>
                           Kalau data ini keliru, segera hubungi <strong>Administrator Kabupaten</strong>. Anda tidak dapat mengubah data penugasan ini secara mandiri.
                           <div class="mt-3 flex flex-wrap gap-3">
-                             <a href="mailto:labkesmassumenep@gmail.com?subject=Revisi%20Data%20Penugasan%20KOPIPU%20Smart" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-warning/30 rounded-lg text-sm text-warning-700 hover:bg-warning/5 transition-colors shadow-xs font-bold">
+                             <a href="mailto:labkesmassumenep@gmail.com?subject=Revisi%20Data%20Penugasan%20PRODULI" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-warning/30 rounded-lg text-sm text-warning-700 hover:bg-warning/5 transition-colors shadow-xs font-bold">
                                 <LucideMail class="w-4 h-4" /> Email Admin
                              </a>
-                             <a href="https://wa.me/6281234567890?text=Halo%20Admin%20KOPIPU%20Smart,%20saya%20menemukan%20kekeliruan%20pada%20data%20penugasan%20saya%20di%20aplikasi." target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-warning/30 rounded-lg text-sm text-warning-700 hover:bg-warning/5 transition-colors shadow-xs font-bold">
+                             <a href="https://wa.me/6281234567890?text=Halo%20Admin%20PRODULI,%20saya%20menemukan%20kekeliruan%20pada%20data%20penugasan%20saya%20di%20aplikasi." target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-warning/30 rounded-lg text-sm text-warning-700 hover:bg-warning/5 transition-colors shadow-xs font-bold">
                                 <LucideMessageCircle class="w-4 h-4" /> WhatsApp
                              </a>
                           </div>

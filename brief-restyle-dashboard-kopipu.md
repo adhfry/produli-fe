@@ -1,10 +1,10 @@
-# Brief: Restyle Dashboard KOPIPU Smart
+# Brief: Restyle Dashboard PRODULI
 
 ## Konteks
 
 Lampirkan 2 gambar ini ke Gemini bareng brief ini:
 
-- **reference.jpeg** → desain target (source: "KOPIPU Smart", sidebar teal gelap, versi lengkap)
+- **reference.jpeg** → desain target (source: "PRODULI", sidebar teal gelap, versi lengkap)
 - **current.png** → hasil generate sekarang (localhost:3033/dashboard) yang perlu di-restyle
 
 Task ini **restyling visual murni** (warna, spacing, tipografi, layout kartu) mengikuti `reference.png`. Bukan redesign ulang struktur data atau fitur yang sudah dibangun.

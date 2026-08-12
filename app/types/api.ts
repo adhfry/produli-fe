@@ -84,7 +84,7 @@ export interface MeResponse {
   roles: Role[]
 }
 
-export type Role = 'super_admin' | 'admin_puskesmas' | 'pj_prolanis' | 'kader'
+export type Role = 'super_admin' | 'admin_puskesmas' | 'pj_prolanis' | 'kader' | 'tenaga_kesehatan'
 
 export interface LoginPayload {
   email: string
@@ -113,6 +113,10 @@ export interface ChangePasswordPayload {
 // --- Patient (app/Http/Controllers/Api/V1/PatientController.php) ---
 
 export type RiskLevel = 'ringan' | 'sedang' | 'berat'
+// Level klasifikasi risiko pasien (beda dari RiskLevel biasa) -- 'tidak_berisiko' cuma valid
+// di sini, BUKAN di assignment 'priority' (backend: risk_thresholds/risk_classifications.level
+// enum sudah termasuk tidak_berisiko, tapi visit_assignments.priority enum TIDAK diubah).
+export type PatientRiskLevel = RiskLevel | 'tidak_berisiko'
 export type WilayahStatus = 'resolved' | 'unresolved' | 'unknown' | 'out_of_scope'
 
 export interface Kecamatan {
@@ -138,7 +142,11 @@ export interface Patient {
   is_perokok: boolean
   jenis_perokok: string | null
   wilayah_status: WilayahStatus
-  puskesmas_resolution_method: 'desa' | 'kecamatan_fallback' | 'manual' | 'kader_verified' | 'unresolvable' | null
+  puskesmas_resolution_method: 'desa' | 'kecamatan_fallback' | 'pengirim_matched' | 'pengirim_individual' | 'manual' | 'kader_verified' | 'unresolvable' | null
+  // Teks asli `pengirim` (surat_hasil_labs SiLAKES) yang dipakai WilayahResolver (revisi Bu
+  // Kadis, Fase 5) -- terisi utk method='pengirim_individual' ("Rujukan: dr. X") ATAU
+  // 'unresolvable' (audit: kenapa ini tidak teridentifikasi -- teks aslinya apa).
+  pengirim_raw: string | null
   desa?: { id: number, nama: string }
   kecamatan?: { id: number, nama: string } | null
   puskesmas?: { id: number, nama: string }
@@ -146,9 +154,54 @@ export interface Patient {
   geo_source: 'desa_centroid' | 'patient_reported' | 'kader_verified' | null
   latitude: number | null
   longitude: number | null
-  risk_level?: RiskLevel | null
+  risk_level?: PatientRiskLevel | null
   risk_computed_at?: string | null
+  // Smart Early Detection (revisi Bu Kadis) -- cuma relevan saat risk_level='sedang', lihat
+  // RiskClassificationService::evaluateEarlyDetection() di backend.
+  early_detection_flag?: boolean
+  early_detection_reason?: EarlyDetectionReason[] | null
   last_synced_at: string | null
+}
+
+// early_detection_reason -- array heterogen, field selain type/message spesifik per tipe.
+export interface EarlyDetectionReason {
+  type: 'proximity' | 'combo_breadth' | 'worsening_trend'
+  message: string
+  parameter?: string
+  value?: number
+  next_tier_threshold?: number
+  proximity_percent?: number
+  exceeded_count?: number
+  total_count?: number
+  missing_parameters?: string[]
+  average_margin_percent?: number
+  parameter_margins_percent?: Record<string, number>
+  values_terbaru_ke_lama?: number[]
+}
+
+// Satu parameter dalam criteria_snapshot -- lihat RiskClassificationService::classify() di
+// backend, disimpan APA ADANYA saat klasifikasi dihitung (bukan dihitung ulang di frontend).
+export interface RiskCriteriaSnapshotItem {
+  parameter: string
+  value: number
+  tanggal_periksa: string | null
+  operator: '>' | '>=' | '<' | '<=' | 'between'
+  threshold_min: number | null
+  threshold_max: number | null
+  level: PatientRiskLevel
+  is_direct_classifier: boolean
+}
+
+// GET /patients/{id}/risk-history (revisi Bu Kadis, Fase 5) -- satu baris riwayat klasifikasi,
+// dipakai seksi "Dasar Klasifikasi" (baris terbaru) dan "Riwayat & Tren Kondisi" (semua baris).
+export interface RiskClassificationHistory {
+  id: number
+  level: PatientRiskLevel
+  criteria_snapshot: RiskCriteriaSnapshotItem[]
+  computed_at: string | null
+  is_latest: boolean
+  early_detection_flag: boolean
+  early_detection_reason: EarlyDetectionReason[] | null
 }
 
 // POST /patients/search-nik (SearchPatientByNikRequest) -- KOPIPU TIDAK PERNAH menyimpan NIK
@@ -191,6 +244,34 @@ export interface CreateKaderPayload {
   tgl_lahir?: string | null
   puskesmas_id?: number | null
   pj_id?: number | null
+}
+
+// --- Tenaga Kesehatan (revisi Bu Kadis, app/Http/Controllers/Api/V1/TenagaKesehatanController.php) ---
+// Peran baru: pemeriksaan lanjutan di rumah pasien (beda dari kader yang fokus pendampingan
+// minum obat). Struktur mirror persis Kader.
+
+export interface TenagaKesehatan {
+  id: number
+  status_aktif: boolean
+  no_hp: string
+  no_wa: string | null
+  alamat: string | null
+  gender: 'L' | 'P' | null
+  tgl_lahir: string | null
+  user?: { id: number, name: string, email: string }
+  puskesmas?: { id: number, nama: string }
+  created_at: string
+}
+
+export interface CreateTenagaKesehatanPayload {
+  name: string
+  email: string
+  no_hp: string
+  no_wa?: string | null
+  alamat?: string | null
+  gender?: 'L' | 'P' | null
+  tgl_lahir?: string | null
+  puskesmas_id?: number | null
 }
 
 // GET /kader/pj-options?puskesmas_id= -- dropdown pilihan PJ Prolanis saat registrasi kader
@@ -326,7 +407,10 @@ export interface VisitAssignment {
   // tapi ada no. telepon — kader diarahkan hubungi lewat telepon, bukan peta).
   assignment_method: 'wilayah_resolved' | 'phone_contact'
   patient?: { id: number, nama: string, alamat: string | null, phone: string | null, latitude: number | null, longitude: number | null, geo_status: string }
-  kader?: { id: number, name: string | null }
+  kader?: { id: number, name: string | null } | null
+  // Petugas tenaga_kesehatan (revisi Bu Kadis, Fase 2/5) -- kader/tenaga_kesehatan saling
+  // eksklusif per assignment (lihat visit_origin di backend), null kalau assignment ini kader.
+  tenaga_kesehatan?: { id: number, name: string | null } | null
   assigned_by?: { id: number, name: string } | null
   // Snapshot puskesmas saat assignment dibuat -- relevan terutama super_admin (lintas
   // puskesmas), admin_puskesmas/pj_prolanis selalu cuma lihat puskesmasnya sendiri.
@@ -394,9 +478,26 @@ export interface DashboardDesaRisk {
   berat: number
 }
 
+// Fase 4 (revisi Bu Kadis) -- jumlah pasien yang levelnya MEMBAIK (turun keparahan) antar 2
+// klasifikasi berurutan, dikelompokkan per puskesmas tempat pasien terdaftar SAAT INI. breakdown
+// kunci dinamis berbentuk "{level_lama}_ke_{level_baru}" (mis. "berat_ke_sedang"), bukan daftar
+// tetap -- backend menghasilkan kunci apa pun kombinasi transisi yang benar-benar terjadi.
+export interface DashboardPuskesmasPerformance {
+  puskesmas_id: number
+  puskesmas_nama: string
+  total_membaik: number
+  breakdown: Record<string, number>
+}
+
 export interface DashboardSummary {
   total_patients: number
-  patients_per_risk_level: Record<RiskLevel, number>
+  // Revisi Bu Kadis -- "3.900 dari total 5.000 pasien Prolanis": SELALU >= total_patients
+  // (superset -- semua pasien Prolanis ter-sync dalam scope, bukan cuma yang efektif
+  // terklasifikasi risiko). Lihat DashboardService::summaryFor() backend.
+  total_patients_prolanis: number
+  // REVISI Bu Kadis: kunci 'tidak_berisiko' ikut muncul di sini sejak tier itu ditambahkan
+  // (Fase 1) -- PatientRiskLevel (bukan RiskLevel biasa) supaya tipe ini akurat.
+  patients_per_risk_level: Record<PatientRiskLevel, number>
   total_assignments: number
   visits_per_status: Record<AssignmentStatus, number>
   kader_aktif_count: number
@@ -407,6 +508,7 @@ export interface DashboardSummary {
   // kecamatan (lihat mergeRiskData di pages/dashboard/index.vue).
   risiko_per_kecamatan: DashboardKecamatanRisk[]
   risiko_per_desa: DashboardDesaRisk[]
+  puskesmas_performance: DashboardPuskesmasPerformance[]
 }
 
 // --- Announcement (app/Http/Controllers/Api/V1/AnnouncementController.php) ---
@@ -434,10 +536,19 @@ export interface CreateAnnouncementPayload {
 // GET /notifications -- tabel `notifications` bawaan Laravel, SELALU ter-scope ke user login
 // sendiri. `data` bentuknya beda per `type` (lihat app/Notifications/*.php di backend) -- BUKAN
 // title/desc/sender generik seperti pola Announcement, harus di-format per type di frontend
-// (lihat formatNotification() di layouts/dashboard.vue). Cuma 2 type nyata saat ini:
-// 'visit_reminder' {assignment_id, patient_nama, scheduled_date, priority} dan
-// 'visit_report_invalidated' {visit_report_id, assignment_id, patient_nama, validation_note}.
-export type NotificationType = 'visit_reminder' | 'visit_report_invalidated' | string
+// (lihat formatNotification() di layouts/dashboard.vue). 'visit_reminder'
+// {assignment_id, patient_nama, scheduled_date, priority}, 'visit_report_invalidated'
+// {visit_report_id, assignment_id, patient_nama, validation_note}. Revisi Bu Kadis (NotifyService)
+// menambah 3 type baru: 'silakes_sync_completed' {patients_synced, lab_results_synced,
+// patients_classified}, 'patient_updated' {patient_id, patient_nama, updated_by},
+// 'care_visit_adhoc' {care_assignment_id, visit_assignment_id, patient_nama, scheduled_date}.
+export type NotificationType =
+  | 'visit_reminder'
+  | 'visit_report_invalidated'
+  | 'silakes_sync_completed'
+  | 'patient_updated'
+  | 'care_visit_adhoc'
+  | string
 
 export interface AppNotification {
   id: string

@@ -4,7 +4,7 @@
 // (IndexedDB dukung native, tidak perlu base64), field lain disimpan flat supaya gampang
 // direkonstruksi jadi FormData persis seperti submitData() normal saat disinkronkan.
 
-const DB_NAME = 'kopipu-offline'
+const DB_NAME = 'produli-offline'
 const DB_VERSION = 1
 const STORE_NAME = 'visit_report_drafts'
 

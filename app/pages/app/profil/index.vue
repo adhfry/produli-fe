@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import type { ApiSuccessEnvelope, Kader } from '~/types/api'
 
 definePageMeta({
@@ -147,9 +147,9 @@ async function linkGoogle() {
      <div class="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 mb-6 transition-colors duration-300 text-center flex flex-col items-center">
         <!-- App Logo -->
         <div class="w-16 h-16 mb-4 flex items-center justify-center">
-           <img src="/logo/logo-no-text.png" alt="KOPIPU Smart" class="w-full h-full object-contain drop-shadow-sm" />
+           <img src="/logo/logo-no-text.png" alt="PRODULI" class="w-full h-full object-contain drop-shadow-sm" />
         </div>
-        <h3 class="text-lg font-black text-slate-800 dark:text-white mb-1 transition-colors">KOPIPU Smart</h3>
+        <h3 class="text-lg font-black text-slate-800 dark:text-white mb-1 transition-colors">PRODULI</h3>
         <p class="text-xs text-primary dark:text-primary-400 font-bold mb-3 transition-colors">Versi 1.0.0</p>
         
         <p class="text-base font-bold italic text-slate-700 dark:text-slate-300 mb-2 transition-colors">"Mewujudkan Pelayanan Kesehatan yang Proaktif"</p>

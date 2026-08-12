@@ -6,7 +6,7 @@ import { motion } from 'motion-v'
 // Exchange dijalankan client-side saja (onMounted, bukan top-level await/SSR) supaya cookie
 // refresh token dari respons diterima langsung oleh browser, bukan oleh server Nuxt.
 definePageMeta({ layout: 'private' })
-useSeoMeta({ title: 'Otentikasi Sistem — KOPIPU Smart' })
+useSeoMeta({ title: 'Otentikasi Sistem — PRODULI' })
 
 const route = useRoute()
 const authStore = useAuthStore()
@@ -49,7 +49,7 @@ onMounted(async () => {
       :transition="{ duration: 0.5, ease: 'easeOut' }"
     >
       <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-md border border-neutral-100 p-2 mb-8">
-         <img src="/pwa-192x192.png" alt="KOPIPU Smart" class="h-full w-full object-contain" />
+         <img src="/pwa-192x192.png" alt="PRODULI" class="h-full w-full object-contain" />
       </div>
 
       <template v-if="errorMessage">

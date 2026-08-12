@@ -33,7 +33,7 @@ export default defineNuxtConfig({
     fallback: "light",
   },
 
-  // NUXT_PUBLIC_API_BASE di .env — lihat docs/planning/05-kontrak-api-kopipu-backend.md
+  // NUXT_PUBLIC_API_BASE di .env — lihat docs/planning/05-kontrak-api-produli-backend.md
   // NUXT_PUBLIC_TILE_SERVER_URL — tile server sendiri (self-hosted, TileServer GL/OpenMapTiles),
   // BUKAN CARTO/Google lagi (raw tile Google melanggar ToS, CARTO free basemap tidak untuk
   // bulk/offline caching) — dipakai semua peta MapLibre GL di app ini (dashboard & /app/kunjungan).
@@ -45,6 +45,19 @@ export default defineNuxtConfig({
       tileServerUrl:
         process.env.NUXT_PUBLIC_TILE_SERVER_URL ||
         "https://tiles.labkesdasumenep.cloud",
+
+      // Firebase Cloud Messaging (push notification) — semua nilai ini config client-side
+      // publik Firebase (aman diekspos), lihat .env.example untuk cara dapatkannya.
+      firebase: {
+        apiKey: process.env.NUXT_PUBLIC_FIREBASE_API_KEY || "",
+        authDomain: process.env.NUXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
+        projectId: process.env.NUXT_PUBLIC_FIREBASE_PROJECT_ID || "",
+        storageBucket: process.env.NUXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "",
+        messagingSenderId:
+          process.env.NUXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
+        appId: process.env.NUXT_PUBLIC_FIREBASE_APP_ID || "",
+        vapidKey: process.env.NUXT_PUBLIC_FIREBASE_VAPID_KEY || "",
+      },
     },
   },
 
@@ -107,9 +120,10 @@ export default defineNuxtConfig({
   pwa: {
     registerType: "autoUpdate",
     manifest: {
-      name: "KOPIPU Smart",
-      short_name: "KSmart",
-      description: "Aplikasi kader & dashboard KOPIPU Smart",
+      name: "PRODULI",
+      short_name: "PRODULI",
+      description:
+        "Aplikasi kader & dashboard PRODULI — Mewujudkan Pelayanan Kesehatan yang Proaktif.",
       theme_color: "#2563EB",
       background_color: "#F8FAFC",
       icons: [
@@ -144,7 +158,7 @@ export default defineNuxtConfig({
           urlPattern: /^https:\/\/tiles\.labkesdasumenep\.cloud\/.*/i,
           handler: "StaleWhileRevalidate",
           options: {
-            cacheName: "kopipu-map-tiles",
+            cacheName: "produli-map-tiles",
             expiration: {
               // Style/data/sprite/font jarang berubah + kuota wajar utk cakupan 1 kabupaten
               // zoom 9-16 (docs/planning/11 §4) -- bukan angka sembarangan, cukup longgar

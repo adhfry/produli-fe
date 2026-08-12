@@ -1,4 +1,4 @@
-# Dokumen Perencanaan 3/3 — UI/UX & Frontend Nuxt KOPIPU Smart
+# Dokumen Perencanaan 3/3 — UI/UX & Frontend Nuxt PRODULI
 
 ## 1. Prinsip Desain (Senior-Friendly)
 
@@ -15,7 +15,7 @@ Target utama antarmuka lapangan: **kader lansia**. Prinsip:
 
 | Area                              | Sifat                 | Karakteristik                                                    |
 | --------------------------------- | --------------------- | ---------------------------------------------------------------- |
-| Landing / About / Tentang Inovasi | Publik, **SEO aktif** | Sesuai draft: Hero, Kenapa KOPIPU Smart, Tentang Inovasi, Footer |
+| Landing / About / Tentang Inovasi | Publik, **SEO aktif** | Sesuai draft: Hero, Kenapa PRODULI, Tentang Inovasi, Footer |
 | Dashboard Dinkes / Puskesmas / PJ | Privat, **no-SEO**    | Data-dense wajar (tabel, chart, peta) — bukan target lansia      |
 | Aplikasi Kader (PWA)              | Privat, **no-SEO**    | Sangat sederhana, card-based, 1 aksi besar per layar             |
 
@@ -51,8 +51,8 @@ Target utama antarmuka lapangan: **kader lansia**. Prinsip:
 
 - Basis: Nuxt UI + TailwindCSS v4, token warna sebagai CSS variable (bukan hex hardcode di tiap komponen). **Palet resmi lengkap ada di `07-design-tokens-dan-koreksi-referensi.md`** (primary/secondary/accent/surface/danger/warning/neutral/info/success, 11-shade tiap warna) — dokumen itu yang jadi rujukan warna final, bukan draft awal ini.
 - Tipografi: Inter/Geist.
-- **Penulisan nama brand: selalu "KOPIPU Smart"** (KOPIPU kapital semua, Smart kapital di S saja) — jangan "Kopipu Smart", "KOPIPU SMART", atau variasi lain. Konsisten di semua teks UI, judul halaman, meta tag, manifest PWA, dan komunikasi (email, dsb).
-- **Aset logo** (4 file, sudah disediakan, taruh di `public/logo/`): `kopipu-smart-logo.png`/`-remove-bg.png` (icon+wordmark, buat header/navbar), `kopipu-smart-logo-plus-desc.png`/`-remove-bg.png` (icon+wordmark+tagline+badge, buat landing/footer/OG image). Icon PWA (192/512/maskable) di-crop terpisah dari wordmark — logo penuh tidak dipakai langsung sebagai app icon (tidak terbaca di ukuran kecil).
+- **Penulisan nama brand: selalu "PRODULI"** (kapital semua) — jangan "Produli", "produli", atau variasi lain. Konsisten di semua teks UI, judul halaman, meta tag, manifest PWA, dan komunikasi (email, dsb).
+- **Aset logo** (4 file, sudah disediakan, taruh di `public/logo/`): `produli-logo.png`/`-remove-bg.png` (icon+wordmark, buat header/navbar), `produli-logo-plus-desc.png`/`-remove-bg.png` (icon+wordmark+tagline+badge, buat landing/footer/OG image). Icon PWA (192/512/maskable) di-crop terpisah dari wordmark — logo penuh tidak dipakai langsung sebagai app icon (tidak terbaca di ukuran kecil).
 - Komponen reusable inti:
   - `<AppCard>` — mobile-first, target sentuh besar
   - `<StatusBadge level="berat|sedang|ringan">` — warna konsisten di seluruh app
@@ -66,4 +66,4 @@ Target utama antarmuka lapangan: **kader lansia**. Prinsip:
 
 ---
 
-_Ini adalah dokumen terakhir dari 3 dokumen planning KOPIPU Smart. Lihat juga: 01-integrasi-silakes-kopipu.md, 02-arsitektur-backend-kopipu-smart.md_
+_Ini adalah dokumen terakhir dari 3 dokumen planning PRODULI. Lihat juga: 01-integrasi-silakes-kopipu.md, 02-arsitektur-backend-kopipu-smart.md_

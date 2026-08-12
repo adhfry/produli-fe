@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem } from '~/types/api'
+import type { ApiSuccessEnvelope, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem, TenagaKesehatan, RiskClassificationHistory, RiskCriteriaSnapshotItem, VisitAssignment, PatientRiskLevel } from '~/types/api'
+import { Line } from 'vue-chartjs'
+import { Chart as ChartJS, Title, Tooltip, Legend, LineElement, CategoryScale, LinearScale, PointElement } from 'chart.js'
+
+// Pemakaian Chart.js PERTAMA di codebase ini (revisi Bu Kadis, Fase 5, seksi "Riwayat & Tren
+// Kondisi") -- dependency-nya sudah lama terpasang di package.json tapi belum pernah dipakai.
+ChartJS.register(Title, Tooltip, Legend, LineElement, CategoryScale, LinearScale, PointElement)
 
 definePageMeta({
   layout: 'dashboard',
@@ -32,15 +38,63 @@ async function loadPatient() {
   }
 }
 
-onMounted(loadPatient)
+// --- Dasar Klasifikasi & Riwayat/Tren Kondisi (GET /patients/{id}/risk-history, revisi Bu
+// Kadis Fase 5) -- diurutkan TERBARU DULU oleh backend, [0] = klasifikasi SAAT INI. ------------
+const riskHistory = ref<RiskClassificationHistory[]>([])
+const isLoadingRiskHistory = ref(false)
+const riskHistoryError = ref('')
+
+async function loadRiskHistory() {
+  isLoadingRiskHistory.value = true
+  riskHistoryError.value = ''
+  try {
+    const api = useApi()
+    const res = await api(`/patients/${route.params.id}/risk-history`) as ApiSuccessEnvelope<RiskClassificationHistory[]>
+    riskHistory.value = res.data
+  } catch (e) {
+    riskHistoryError.value = e instanceof ApiError ? e.message : 'Gagal memuat riwayat klasifikasi risiko.'
+  } finally {
+    isLoadingRiskHistory.value = false
+  }
+}
+
+const latestRiskEntry = computed(() => riskHistory.value[0] ?? null)
+
+// --- Riwayat Kunjungan (GET /patients/{id}/visit-history, revisi Bu Kadis Fase 5) -- kader
+// MAUPUN tenaga_kesehatan, mengisi seksi yang sebelumnya placeholder statis. ------------------
+const visitHistoryList = ref<VisitAssignment[]>([])
+const isLoadingVisitHistory = ref(false)
+const visitHistoryError = ref('')
+
+async function loadVisitHistory() {
+  isLoadingVisitHistory.value = true
+  visitHistoryError.value = ''
+  try {
+    const api = useApi()
+    const res = await api(`/patients/${route.params.id}/visit-history`) as ApiSuccessEnvelope<VisitAssignment[]>
+    visitHistoryList.value = res.data
+  } catch (e) {
+    visitHistoryError.value = e instanceof ApiError ? e.message : 'Gagal memuat riwayat kunjungan.'
+  } finally {
+    isLoadingVisitHistory.value = false
+  }
+}
+
+onMounted(() => {
+  loadPatient()
+  loadRiskHistory()
+  loadVisitHistory()
+})
 
 // Reload otomatis begitu sinkronisasi SiLAKES berhasil (dipicu dari sidebar ATAU tombol
-// "Sinkronisasi Sekarang" di riwayat pengajuan pada halaman ini sendiri) -- biodata,
-// wilayah, status risiko, DAN riwayat pengajuan semuanya perlu dimuat ulang bersamaan.
+// "Sinkronisasi Sekarang" di riwayat pengajuan pada halaman ini sendiri) -- biodata, wilayah,
+// status risiko, riwayat klasifikasi, DAN riwayat pengajuan semuanya perlu dimuat ulang
+// bersamaan (sync bisa mengubah lab_results_cache -> klasifikasi baru).
 const silakesSyncSignal = useSilakesSyncSignal()
 watch(silakesSyncSignal, () => {
   loadPatient()
   loadUpdateHistory()
+  loadRiskHistory()
 })
 
 useHead({
@@ -57,6 +111,7 @@ const getRiskColor = (risk) => {
   if (risk === 'berat') return 'bg-danger/10 text-danger border border-danger/20'
   if (risk === 'sedang') return 'bg-warning/10 text-warning border border-warning/20'
   if (risk === 'ringan') return 'bg-success/10 text-success border border-success/20'
+  if (risk === 'tidak_berisiko') return 'bg-primary/10 text-primary border border-primary/20'
   return 'bg-slate-100 text-slate-600 border border-slate-200'
 }
 
@@ -64,7 +119,135 @@ const getRiskLabel = (risk) => {
   if (risk === 'berat') return 'Risiko Berat'
   if (risk === 'sedang') return 'Risiko Sedang'
   if (risk === 'ringan') return 'Risiko Ringan'
+  if (risk === 'tidak_berisiko') return 'Tidak Berisiko'
   return 'Belum Dihitung'
+}
+
+// Smart Early Detection (revisi Bu Kadis) -- cuma relevan saat risk_level='sedang', lihat
+// RiskClassificationService::evaluateEarlyDetection() di backend. Gabung semua reason jadi 1
+// tooltip manusiawi (native title attribute, konsisten dengan pola tooltip lain di halaman ini).
+const getEarlyDetectionTooltip = (patient) => {
+  if (!patient?.early_detection_reason?.length) return ''
+  return patient.early_detection_reason.map((r) => r.message).join('\n')
+}
+
+// --- Dasar Klasifikasi -- render criteria_snapshot APA ADANYA (bukan dihitung ulang), lihat
+// RiskClassificationService::classify() di backend. ---------------------------------------
+const OPERATOR_LABELS: Record<string, string> = { '>': 'Lebih dari', '>=': 'Minimal', '<': 'Kurang dari', '<=': 'Maksimal' }
+
+function formatCriteriaThreshold(item: RiskCriteriaSnapshotItem): string {
+  if (item.operator === 'between') return `${item.threshold_min} - ${item.threshold_max}`
+  return `${OPERATOR_LABELS[item.operator] ?? item.operator} ${item.threshold_min ?? '-'}`
+}
+
+function formatCriteriaDate(iso: string | null): string {
+  if (!iso) return '-'
+  return new Date(iso).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+// --- Riwayat & Tren Kondisi -- Chart.js line chart level risiko dari waktu ke waktu, revisi
+// Bu Kadis Fase 5. Level (bukan 1 parameter lab spesifik) yang di-plot -- pasien punya
+// parameter berbeda-beda yang memicu klasifikasinya, level adalah satu-satunya sumbu yang
+// selalu konsisten dibandingkan across seluruh riwayat. ---------------------------------------
+const SEVERITY_ORDER: PatientRiskLevel[] = ['tidak_berisiko', 'ringan', 'sedang', 'berat']
+const SEVERITY_POINT_COLOR: Record<string, string> = {
+  tidak_berisiko: '#2563eb',
+  ringan: '#16a34a',
+  sedang: '#d97706',
+  berat: '#dc2626'
+}
+const RISK_LABEL_SHORT: Record<string, string> = { tidak_berisiko: 'Tidak Berisiko', ringan: 'Ringan', sedang: 'Sedang', berat: 'Berat' }
+
+const trendChartData = computed(() => {
+  // riskHistory terurut TERBARU DULU dari backend -- dibalik jadi kronologis (lama -> baru)
+  // supaya sumbu waktu chart terbaca dari kiri ke kanan seperti biasa.
+  const rows = [...riskHistory.value].reverse()
+  return {
+    labels: rows.map((r) => formatCriteriaDate(r.computed_at)),
+    datasets: [{
+      label: 'Tingkat Risiko',
+      data: rows.map((r) => SEVERITY_ORDER.indexOf(r.level)),
+      borderColor: '#0d9488',
+      backgroundColor: '#0d9488',
+      pointBackgroundColor: rows.map((r) => SEVERITY_POINT_COLOR[r.level] ?? '#94a3b8'),
+      pointBorderColor: '#ffffff',
+      pointBorderWidth: 1.5,
+      pointRadius: 5,
+      pointHoverRadius: 7,
+      tension: 0.15,
+      fill: false
+    }]
+  }
+})
+
+const trendChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      callbacks: {
+        label: (ctx: { parsed: { y: number } }) => RISK_LABEL_SHORT[SEVERITY_ORDER[ctx.parsed.y]] ?? '-'
+      }
+    }
+  },
+  scales: {
+    y: {
+      // min/max SENGAJA persis 0-3 (bukan -0.5/3.5) -- Chart.js generate tick MULAI DARI min
+      // dengan step stepSize, jadi min pecahan (-0.5) menghasilkan tick -0.5/0.5/1.5/2.5/3.5
+      // (bukan 0/1/2/3) -- SEVERITY_ORDER[0.5] dkk undefined, callback balikin '', ticks jadi
+      // kosong sama sekali (bug nyata, ketahuan lewat verifikasi visual: gridline ada tapi
+      // label sumbu Y kosong total).
+      min: 0,
+      max: 3,
+      ticks: {
+        stepSize: 1,
+        callback: (value: number) => RISK_LABEL_SHORT[SEVERITY_ORDER[value]] ?? ''
+      }
+    }
+  }
+}
+
+// --- Riwayat Kunjungan -- kader ATAU tenaga_kesehatan, mutually exclusive per assignment. ----
+const VISIT_STATUS_LABELS: Record<string, string> = {
+  pending: 'Terjadwal', in_progress: 'Sedang Berlangsung', completed: 'Selesai', cancelled: 'Dibatalkan'
+}
+const VISIT_STATUS_COLORS: Record<string, string> = {
+  pending: 'bg-info/10 text-info border border-info/20',
+  in_progress: 'bg-primary/10 text-primary border border-primary/20',
+  completed: 'bg-success/10 text-success border border-success/20',
+  cancelled: 'bg-slate-100 text-slate-500 border border-slate-200'
+}
+
+function visitAssigneeName(visit: VisitAssignment): string {
+  return visit.kader?.name ?? visit.tenaga_kesehatan?.name ?? '-'
+}
+
+function visitAssigneeType(visit: VisitAssignment): string {
+  if (visit.kader) return 'Kader'
+  if (visit.tenaga_kesehatan) return 'Tenaga Kesehatan'
+  return '-'
+}
+
+// Puskesmas binaan pasien -- kalau belum ter-resolve TAPI pengirim hasil labnya jelas rujukan
+// PERORANGAN (dokter/bidan, revisi Bu Kadis Fase 5), tampilkan nama perujuk itu, bukan "-"
+// polos -- datanya sebenarnya ADA, cuma memang bukan puskesmas. Sama persis dengan
+// pasien/index.vue (dua tempat rendering yang sama, tidak digabung ke composable bersama
+// karena masing-masing cuma dipakai 1 kali di file masing-masing).
+function puskesmasFieldLabel(patient: Patient): string {
+  if (patient.puskesmas?.nama) return patient.puskesmas.nama
+  if (patient.puskesmas_resolution_method === 'pengirim_individual' && patient.pengirim_raw) {
+    return `Rujukan: ${patient.pengirim_raw}`
+  }
+  return '-'
+}
+
+function puskesmasFieldTitle(patient: Patient): string | undefined {
+  if (patient.puskesmas?.nama) return undefined
+  if (patient.puskesmas_resolution_method === 'unresolvable' && patient.pengirim_raw) {
+    return `Tidak teridentifikasi otomatis. Teks pengirim asli: "${patient.pengirim_raw}"`
+  }
+  return undefined
 }
 
 const getWilayahLabel = (status) => {
@@ -93,6 +276,57 @@ const canProposeUpdate = computed(() => {
   }
   return false
 })
+
+// --- Tugaskan Tenaga Kesehatan (POST /care-assignments, revisi Bu Kadis) ---
+// Gerbang SAMA dengan canProposeUpdate (CareAssignmentPolicy::create sama-sama
+// super_admin/admin_puskesmas/pj_prolanis) -- reuse computed yang sama, bukan duplikat logic.
+const showAssignTkModal = ref(false)
+const tkOptions = ref<TenagaKesehatan[]>([])
+const isLoadingTkOptions = ref(false)
+const selectedTkId = ref<number | null>(null)
+const assignTkDate = ref(new Date().toISOString().slice(0, 10))
+const isAssigningTk = ref(false)
+const assignTkError = ref('')
+
+async function openAssignTkModal() {
+  showAssignTkModal.value = true
+  assignTkError.value = ''
+  selectedTkId.value = null
+  assignTkDate.value = new Date().toISOString().slice(0, 10)
+  if (tkOptions.value.length) return
+  isLoadingTkOptions.value = true
+  try {
+    const api = useApi()
+    tkOptions.value = await fetchAllPages((page) => api('/tenaga-kesehatan', { query: { per_page: 100, page, status_aktif: true } }))
+  } catch (e) {
+    console.error(e)
+  } finally {
+    isLoadingTkOptions.value = false
+  }
+}
+
+async function assignTenagaKesehatan() {
+  if (!patient.value || !selectedTkId.value) return
+  isAssigningTk.value = true
+  assignTkError.value = ''
+  try {
+    const api = useApi()
+    await api('/care-assignments', {
+      method: 'POST',
+      body: {
+        patient_id: patient.value.id,
+        tenaga_kesehatan_id: selectedTkId.value,
+        scheduled_date: assignTkDate.value
+      }
+    })
+    showAssignTkModal.value = false
+    toast.add({ title: 'Tenaga kesehatan berhasil ditugaskan', icon: 'i-lucide-check-circle-2' })
+  } catch (e) {
+    assignTkError.value = e instanceof ApiError ? e.message : 'Gagal menugaskan tenaga kesehatan.'
+  } finally {
+    isAssigningTk.value = false
+  }
+}
 
 const showUpdateModal = ref(false)
 const updateForm = ref<PatientFieldUpdates>({})
@@ -264,18 +498,34 @@ async function triggerSyncFromHistory() {
                <span class="px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider" :class="getRiskColor(patient.risk_level)">
                   {{ getRiskLabel(patient.risk_level) }}
                </span>
+               <AppTooltip v-if="patient.early_detection_flag" :text="getEarlyDetectionTooltip(patient)">
+                  <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-danger/10 text-danger border border-danger/20">
+                     <LucideAlertTriangle class="w-3.5 h-3.5" />
+                     Deteksi Dini
+                  </span>
+               </AppTooltip>
             </h1>
             <p class="text-sm text-slate-500 mt-1 font-medium">No. Registrasi: <span class="text-slate-700 font-bold">{{ patient.no_reg || '-' }}</span></p>
           </div>
         </div>
-        <button
-          v-if="canProposeUpdate"
-          @click="openUpdateModal"
-          class="inline-flex items-center gap-2 py-2.5 px-4 rounded-xl font-bold text-sm text-primary bg-primary/10 hover:bg-primary/20 transition-colors border border-primary/20 shrink-0"
-        >
-          <LucidePencil class="w-4 h-4" />
-          Ajukan Update Data
-        </button>
+        <div class="flex items-center gap-2 shrink-0">
+          <button
+            v-if="canProposeUpdate"
+            @click="openAssignTkModal"
+            class="inline-flex items-center gap-2 py-2.5 px-4 rounded-xl font-bold text-sm text-secondary bg-secondary/10 hover:bg-secondary/20 transition-colors border border-secondary/20"
+          >
+            <LucideStethoscope class="w-4 h-4" />
+            Tugaskan Tenaga Kesehatan
+          </button>
+          <button
+            v-if="canProposeUpdate"
+            @click="openUpdateModal"
+            class="inline-flex items-center gap-2 py-2.5 px-4 rounded-xl font-bold text-sm text-primary bg-primary/10 hover:bg-primary/20 transition-colors border border-primary/20"
+          >
+            <LucidePencil class="w-4 h-4" />
+            Ajukan Update Data
+          </button>
+        </div>
       </div>
 
       <!-- Layout Grid -->
@@ -308,7 +558,14 @@ async function triggerSyncFromHistory() {
               </div>
               <div>
                 <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Puskesmas Binaan</p>
-                <p class="text-sm font-bold text-slate-800">{{ patient.puskesmas?.nama || '-' }}</p>
+                <AppTooltip :text="puskesmasFieldTitle(patient) ?? ''">
+                  <p
+                    class="text-sm font-bold"
+                    :class="patient.puskesmas?.nama ? 'text-slate-800' : 'text-slate-400 italic font-semibold'"
+                  >
+                    {{ puskesmasFieldLabel(patient) }}
+                  </p>
+                </AppTooltip>
               </div>
             </div>
           </div>
@@ -329,6 +586,27 @@ async function triggerSyncFromHistory() {
               <span v-if="patient.is_perokok" class="bg-warning/10 text-warning border border-warning/20 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm">
                 Perokok{{ patient.jenis_perokok ? ` (${patient.jenis_perokok})` : '' }}
               </span>
+            </div>
+          </div>
+
+          <!-- Dasar Klasifikasi (revisi Bu Kadis, Fase 5) -- criteria_snapshot baris TERBARU,
+               APA ADANYA seperti dihitung RiskClassificationService, bukan dihitung ulang di
+               frontend. Cuma tampil kalau ada minimal 1 parameter yang jadi dasar (patient
+               tidak_berisiko/belum pernah diklasifikasi bisa punya array kosong). -->
+          <div v-if="latestRiskEntry && latestRiskEntry.criteria_snapshot.length > 0" class="bg-white rounded-2xl border border-slate-100 shadow-card p-5">
+            <h3 class="font-bold text-accent text-base mb-4 flex items-center gap-2 border-b border-slate-100 pb-4">
+              <LucideClipboardList class="w-4 h-4 text-warning" />
+              Dasar Klasifikasi
+            </h3>
+            <p class="text-xs text-slate-400 mb-3 -mt-1">Parameter yang melebihi ambang rujukan saat klasifikasi terakhir dihitung.</p>
+            <div class="space-y-3">
+              <div v-for="(item, idx) in latestRiskEntry.criteria_snapshot" :key="idx" class="flex items-start justify-between gap-3 pb-3 border-b border-slate-50 last:border-0 last:pb-0">
+                <div>
+                  <p class="text-sm font-bold text-slate-800">{{ item.parameter }}</p>
+                  <p class="text-[11px] text-slate-500 mt-0.5">Ambang: {{ formatCriteriaThreshold(item) }} &middot; Diperiksa {{ formatCriteriaDate(item.tanggal_periksa) }}</p>
+                </div>
+                <span class="text-sm font-black text-danger shrink-0">{{ item.value }}</span>
+              </div>
             </div>
           </div>
 
@@ -354,25 +632,94 @@ async function triggerSyncFromHistory() {
           </div>
         </div>
 
-        <!-- Right Column: Riwayat Kunjungan -->
+        <!-- Right Column: Riwayat Kunjungan (revisi Bu Kadis, Fase 5) -- GET /patients/{id}/
+             visit-history, kader MAUPUN tenaga_kesehatan (sebelumnya placeholder statis). -->
         <div class="lg:col-span-2">
           <div class="bg-white rounded-2xl border border-slate-100 shadow-card p-5 h-full flex flex-col">
             <div class="flex items-center justify-between mb-6 border-b border-slate-100 pb-4">
               <h3 class="font-bold text-accent text-base flex items-center gap-2">
                 <LucideCalendarClock class="w-4 h-4 text-info" />
-                Riwayat Kunjungan Kader
+                Riwayat Kunjungan
               </h3>
             </div>
 
-            <!-- Belum ada endpoint riwayat kunjungan per-pasien yang tersambung -- lihat
-                 /dashboard/kunjungan untuk daftar laporan kunjungan (masih terpisah, belum
-                 difilter per pasien). -->
-            <div class="text-center text-slate-400 py-16 flex flex-col items-center justify-center flex-1">
+            <div v-if="isLoadingVisitHistory" class="py-16 text-center text-slate-400 flex-1">
+              <LucideLoader2 class="w-6 h-6 mx-auto mb-2 animate-spin" />
+              Memuat riwayat kunjungan...
+            </div>
+            <p v-else-if="visitHistoryError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ visitHistoryError }}</p>
+            <div v-else-if="visitHistoryList.length === 0" class="text-center text-slate-400 py-16 flex flex-col items-center justify-center flex-1">
                <LucideHistory class="w-12 h-12 mb-4 text-slate-200" />
-               <p class="font-medium text-slate-500">Riwayat kunjungan belum tersedia di halaman ini.</p>
-               <p class="text-xs text-slate-400 mt-1">Lihat daftar laporan kunjungan lengkap di menu Data Kunjungan.</p>
+               <p class="font-medium text-slate-500">Belum ada kunjungan tercatat untuk pasien ini.</p>
+            </div>
+            <div v-else class="space-y-4 overflow-y-auto max-h-[520px] pr-1">
+              <div v-for="visit in visitHistoryList" :key="visit.id" class="border border-slate-100 rounded-xl p-4">
+                <div class="flex items-start justify-between gap-3 mb-2">
+                  <div>
+                    <p class="text-sm font-bold text-slate-800">{{ new Date(visit.scheduled_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) }}</p>
+                    <p class="text-xs text-slate-500 mt-0.5">{{ visitAssigneeType(visit) }}: {{ visitAssigneeName(visit) }}</p>
+                  </div>
+                  <span class="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider shrink-0" :class="VISIT_STATUS_COLORS[visit.status] ?? 'bg-slate-100 text-slate-500 border border-slate-200'">
+                    {{ VISIT_STATUS_LABELS[visit.status] ?? visit.status }}
+                  </span>
+                </div>
+                <div v-if="visit.report" class="mt-3 pt-3 border-t border-slate-50 text-xs text-slate-600 space-y-1">
+                  <p><span class="font-semibold text-slate-700">Kondisi:</span> {{ visit.report.kondisi }}</p>
+                  <p v-if="visit.report.keluhan"><span class="font-semibold text-slate-700">Keluhan:</span> {{ visit.report.keluhan }}</p>
+                  <p v-if="visit.report.catatan"><span class="font-semibold text-slate-700">Catatan:</span> {{ visit.report.catatan }}</p>
+                </div>
+              </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Riwayat & Tren Kondisi (revisi Bu Kadis, Fase 5) -- GET /patients/{id}/risk-history,
+           tabel riwayat klasifikasi + Chart.js line chart tingkat risiko dari waktu ke waktu. -->
+      <div v-if="!isLoadingRiskHistory && riskHistory.length > 0" class="bg-white rounded-2xl border border-slate-100 shadow-card p-5">
+        <div class="flex items-center justify-between mb-5 border-b border-slate-100 pb-4">
+          <h3 class="font-bold text-accent text-base flex items-center gap-2">
+            <LucideTrendingUp class="w-4 h-4 text-primary" />
+            Riwayat & Tren Kondisi
+          </h3>
+        </div>
+
+        <p v-if="riskHistoryError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2 mb-4">{{ riskHistoryError }}</p>
+
+        <div v-if="riskHistory.length > 1" class="h-64 mb-6">
+          <Line :data="trendChartData" :options="trendChartOptions" />
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse min-w-[640px]">
+            <thead>
+              <tr class="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                <th class="py-3 px-3 font-semibold">Tanggal</th>
+                <th class="py-3 px-3 font-semibold">Tingkat Risiko</th>
+                <th class="py-3 px-3 font-semibold">Dasar Klasifikasi</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <tr v-for="entry in riskHistory" :key="entry.id" class="hover:bg-slate-50/80 transition-colors" :class="{ 'bg-danger/5': entry.level === 'berat' }">
+                <td class="py-3 px-3 text-sm font-semibold text-slate-700">{{ formatCriteriaDate(entry.computed_at) }}</td>
+                <td class="py-3 px-3">
+                  <span class="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider" :class="getRiskColor(entry.level)">
+                    {{ getRiskLabel(entry.level) }}
+                  </span>
+                  <AppTooltip
+                     v-if="entry.early_detection_flag"
+                     :text="entry.early_detection_reason?.map(r => r.message).join(' — ') ?? ''"
+                  >
+                     <LucideAlertTriangle class="w-3.5 h-3.5 text-danger inline-block ml-1.5 align-middle" />
+                  </AppTooltip>
+                </td>
+                <td class="py-3 px-3 text-xs text-slate-500">
+                  <template v-if="entry.criteria_snapshot.length">{{ entry.criteria_snapshot.map(c => c.parameter).join(', ') }}</template>
+                  <span v-else class="text-slate-300">-</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -454,6 +801,47 @@ async function triggerSyncFromHistory() {
         </div>
       </div>
     </template>
+
+    <!-- Modal Tugaskan Tenaga Kesehatan -- POST /care-assignments (revisi Bu Kadis). Ini
+         SELALU menugaskan tenaga kesehatan BARU (rencana kunjungan berulang) -- kalau pasien
+         sudah punya rencana aktif ke tenaga kesehatan yang sama, backend menolak (lihat
+         CareAssignmentService::ensureTenagaKesehatanAvailable()); kunjungan tambahan mendesak
+         untuk plan yang SUDAH ada punya endpoint terpisah (adhoc-visit), belum ada UI-nya di
+         halaman ini -- menyusul kalau daftar rencana per-pasien sudah ditampilkan. -->
+    <div v-if="showAssignTkModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+      <div class="bg-white rounded-3xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200 max-h-[90vh] flex flex-col">
+        <div class="border-b border-slate-100 px-6 py-4 flex items-center justify-between shrink-0">
+          <h3 class="font-bold text-accent text-lg flex items-center gap-2">
+            <LucideStethoscope class="w-5 h-5 text-secondary" />
+            Tugaskan Tenaga Kesehatan
+          </h3>
+          <button @click="showAssignTkModal = false" class="text-slate-400 hover:text-slate-600 p-1">
+            <LucideX class="w-5 h-5" />
+          </button>
+        </div>
+        <div class="p-6 space-y-4 overflow-y-auto">
+          <p v-if="assignTkError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ assignTkError }}</p>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tenaga Kesehatan</label>
+            <select v-model.number="selectedTkId" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
+              <option :value="null">{{ isLoadingTkOptions ? 'Memuat...' : 'Pilih tenaga kesehatan...' }}</option>
+              <option v-for="tk in tkOptions" :key="tk.id" :value="tk.id">{{ tk.user?.name }} &mdash; {{ tk.puskesmas?.nama }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tanggal Kunjungan Pertama</label>
+            <input v-model="assignTkDate" type="date" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+          </div>
+        </div>
+        <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
+          <button @click="showAssignTkModal = false" class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors">Batal</button>
+          <button @click="assignTenagaKesehatan" :disabled="isAssigningTk || !selectedTkId" class="py-2.5 px-6 rounded-xl font-bold text-white bg-secondary hover:bg-secondary-600 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm">
+            <LucideLoader2 v-if="isAssigningTk" class="w-4 h-4 animate-spin" />
+            {{ isAssigningTk ? 'Menugaskan...' : 'Tugaskan' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- Modal Ajukan Update Data Pasien -- PATCH /patients/{id}/propose-update, jalur paralel
          dari usulan kader lewat POST /visit-reports. -->

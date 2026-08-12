@@ -7,7 +7,7 @@ definePageMeta({
   middleware: "auth",
 });
 useHead({
-  title: "Input Kunjungan - KOPIPU Smart",
+  title: "Input Kunjungan - PRODULI",
   link: [
     {
       rel: "stylesheet",
@@ -741,7 +741,7 @@ async function submitData() {
           <div class="absolute inset-0 flex flex-col justify-between p-3 z-10 pointer-events-none">
             <div class="flex items-center gap-2 self-start bg-white rounded-md px-2 py-1 shadow-sm">
               <img src="/logo/logo-no-text.png" class="w-4 h-4" />
-              <span class="text-[9px] font-black text-primary tracking-widest uppercase">KOPIPU Smart</span>
+              <span class="text-[9px] font-black text-primary tracking-widest uppercase">PRODULI</span>
             </div>
 
             <div class="flex flex-col gap-1.5 w-full mt-auto">

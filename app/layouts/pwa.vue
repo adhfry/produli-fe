@@ -1,6 +1,6 @@
 <script setup>
 useHead({
-  titleTemplate: (titleChunk) => titleChunk ? `${titleChunk} - Kader Prolanis` : 'KOPIPU Smart Kader',
+  titleTemplate: (titleChunk) => titleChunk ? `${titleChunk} - Kader Prolanis` : 'PRODULI Kader',
   meta: [
     { name: 'robots', content: 'noindex, nofollow' },
     { name: 'theme-color', content: '#ffffff' },

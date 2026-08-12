@@ -22,7 +22,8 @@ import {
   LucideAlertTriangle,
   LucideCalendarClock,
   LucideFileWarning,
-  LucideSmartphone
+  LucideSmartphone,
+  LucideStethoscope
 } from "#components"
 import type { ApiSuccessEnvelope, AppNotification, PaginatedData, Role } from '~/types/api'
 
@@ -39,7 +40,7 @@ const userRoleLabel = computed(() => {
 
 useHead({
   titleTemplate: (titleChunk) => {
-    return titleChunk ? `${titleChunk} - KOPIPU Smart` : 'Dashboard - KOPIPU Smart'
+    return titleChunk ? `${titleChunk} - PRODULI` : 'Dashboard - PRODULI'
   }
 })
 
@@ -132,6 +133,9 @@ const menuGroups = ref([
     items: [
       // KaderPolicy::viewAny -- super_admin/admin_puskesmas/pj_prolanis.
       { name: 'Manajemen Kader', icon: LucideUsers, to: '/dashboard/kader', roles: ['pj_prolanis', 'admin_puskesmas', 'super_admin'] },
+      // TenagaKesehatanPolicy::viewAny -- gerbang sama persis dengan Manajemen Kader di atas
+      // (revisi Bu Kadis, peran baru pemeriksaan lanjutan di rumah pasien).
+      { name: 'Manajemen Tenaga Kesehatan', icon: LucideStethoscope, to: '/dashboard/tenaga-kesehatan', roles: ['pj_prolanis', 'admin_puskesmas', 'super_admin'] },
       // StaffController::index -- super_admin/admin_puskesmas/pj_prolanis boleh LIHAT (pj_prolanis
       // sebelumnya 403 total, sekarang boleh lihat staf puskesmasnya sendiri); store() (daftarkan
       // staf baru) TETAP super_admin/admin_puskesmas saja, digerbangi terpisah di halamannya sendiri.
@@ -216,6 +220,12 @@ async function loadNotifications() {
 
 onMounted(loadNotifications)
 
+// Push notification (FCM) -- daftarkan token sekali per sesi dashboard, no-op kalau config
+// Firebase belum lengkap atau user belum kasih izin notifikasi browser (lihat useFcm.ts).
+onMounted(() => {
+  useFcm().registerAndSendToken()
+})
+
 // Format per type -- backend TIDAK kirim title/desc siap-pakai, cuma payload mentah per type
 // (lihat komentar AppNotification di types/api.ts). Type yang tidak dikenal ditampilkan apa
 // adanya (type mentah sebagai judul), bukan dikarang isinya.
@@ -232,11 +242,33 @@ function formatNotification(n: AppNotification) {
       desc: `Laporan untuk pasien ${n.data.patient_nama ?? '-'} dinyatakan tidak valid.${n.data.validation_note ? ' Catatan: ' + n.data.validation_note : ''}`
     }
   }
+  // 3 type baru (revisi Bu Kadis, NotifyService) -- lihat komentar NotificationType di types/api.ts.
+  if (n.type === 'silakes_sync_completed') {
+    return {
+      title: 'Sinkronisasi SiLAKES Selesai',
+      desc: `${n.data.patients_synced ?? 0} pasien, ${n.data.lab_results_synced ?? 0} hasil lab tersinkron.`
+    }
+  }
+  if (n.type === 'patient_updated') {
+    return {
+      title: 'Data Pasien Diperbarui',
+      desc: `${n.data.updated_by ?? 'Seseorang'} mengajukan perubahan data pasien ${n.data.patient_nama ?? '-'}.`
+    }
+  }
+  if (n.type === 'care_visit_adhoc') {
+    return {
+      title: 'Kunjungan Tambahan Mendesak',
+      desc: `Kunjungan intensif tambahan untuk ${n.data.patient_nama ?? '-'} dijadwalkan ${n.data.scheduled_date ?? '-'}.`
+    }
+  }
   return { title: n.type ?? 'Notifikasi', desc: '' }
 }
 
 function notifIcon(type: string | null) {
   if (type === 'visit_report_invalidated') return LucideFileWarning
+  if (type === 'silakes_sync_completed') return LucideRefreshCw
+  if (type === 'patient_updated') return LucidePencil
+  if (type === 'care_visit_adhoc') return LucideStethoscope
   return LucideCalendarClock
 }
 
@@ -364,10 +396,10 @@ onMounted(loadSyncStatus)
       <div class="h-16 flex items-center px-6 bg-white shrink-0 border-b border-slate-200 theme-transition">
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden">
-            <img src="/logo/logo-no-text.png" alt="Logo KOPIPU" class="w-full h-full object-contain" />
+            <img src="/logo/logo-no-text.png" alt="Logo PRODULI" class="w-full h-full object-contain" />
           </div>
           <div class="flex flex-col">
-            <span class="font-extrabold text-accent leading-tight tracking-tight text-lg">KOPIPU Smart</span>
+            <span class="font-extrabold text-accent leading-tight tracking-tight text-lg">PRODULI</span>
             <span class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider leading-none">PELAYANAN PROAKTIF</span>
           </div>
         </div>
@@ -634,7 +666,7 @@ onMounted(loadSyncStatus)
              <div class="w-14 h-14 rounded-2xl bg-danger/10 text-danger flex items-center justify-center mb-4">
                 <LucideLogOut class="w-7 h-7" />
              </div>
-             <h3 class="font-bold text-accent text-lg mb-1">Keluar dari KOPIPU Smart?</h3>
+             <h3 class="font-bold text-accent text-lg mb-1">Keluar dari PRODULI?</h3>
              <p class="text-sm text-slate-500 leading-relaxed">Anda perlu masuk kembali dengan email dan kata sandi untuk melanjutkan.</p>
           </div>
           <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">

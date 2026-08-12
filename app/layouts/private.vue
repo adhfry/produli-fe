@@ -5,7 +5,7 @@
 // sederhana) diatur di level halaman/komponen, bukan di layout ini.
 useHead({
   titleTemplate: (titleChunk) => {
-    return titleChunk ? `${titleChunk} - KOPIPU Smart` : 'App - KOPIPU Smart'
+    return titleChunk ? `${titleChunk} - PRODULI` : 'App - PRODULI'
   },
   meta: [
     { name: 'robots', content: 'noindex, nofollow' }

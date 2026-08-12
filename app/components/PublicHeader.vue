@@ -20,11 +20,11 @@ const scrolled = computed(() => scrollY.value > 20);
       <NuxtLink to="/" class="flex cursor-pointer items-center gap-2">
         <img
           src="/logo/logo-no-text.png"
-          alt="KOPIPU Smart Logo"
+          alt="PRODULI Logo"
           class="h-14 w-14 object-contain drop-shadow-sm"
         />
         <span class="text-xl font-bold tracking-tight text-accent"
-          >KOPIPU <span class="font-light text-primary">Smart</span></span
+          >PRO<span class="font-light text-primary">DULI</span></span
         >
       </NuxtLink>
 

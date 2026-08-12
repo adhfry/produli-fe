@@ -6,14 +6,14 @@ definePageMeta({ layout: "public" });
 
 const title = "Kontak & Bantuan";
 const description =
-  "Hubungi UPTD Laboratorium Kesehatan Daerah Kabupaten Sumenep untuk pelaporan kendala teknis dan informasi platform KOPIPU Smart.";
+  "Hubungi UPTD Laboratorium Kesehatan Daerah Kabupaten Sumenep untuk pelaporan kendala teknis dan informasi platform PRODULI.";
 
 useSeoMeta({
   title,
   description,
-  ogTitle: `${title} — KOPIPU Smart`,
+  ogTitle: `${title} — PRODULI`,
   ogDescription: description,
-  twitterTitle: `${title} — KOPIPU Smart`,
+  twitterTitle: `${title} — PRODULI`,
   twitterDescription: description,
 });
 
@@ -47,7 +47,7 @@ const message = ref("");
             </h1>
             <p class="mx-auto max-w-2xl text-lg text-neutral-600">
               Pusat bantuan teknis dan informasi kontak resmi penyelenggara
-              sistem KOPIPU Smart Kabupaten Sumenep.
+              sistem PRODULI Kabupaten Sumenep.
             </p>
           </motion.div>
         </div>

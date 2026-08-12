@@ -654,7 +654,9 @@ const submitValidation = async () => {
                          class="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary/30"
                       />
                       <div class="flex-1 min-w-0">
-                         <span class="text-sm font-semibold text-slate-800 block truncate">{{ p.nama }}</span>
+                         <AppTooltip :text="p.nama">
+                            <span class="text-sm font-semibold text-slate-800 block truncate">{{ p.nama }}</span>
+                         </AppTooltip>
                          <span class="text-[11px] text-slate-500">{{ p.kel_desa_raw || '—' }}, {{ p.kecamatan_raw || '—' }}</span>
                       </div>
                       <span v-if="isPatientAssigned(p.id)" class="text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-500 px-2 py-1 rounded-md shrink-0">

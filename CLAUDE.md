@@ -1,17 +1,17 @@
-# CLAUDE.md — KOPIPU Smart Frontend (letakkan file ini di root repo Nuxt KOPIPU)
+# CLAUDE.md — PRODULI Frontend (letakkan file ini di root repo Nuxt PRODULI)
 
 ## Konteks Proyek
 
-Frontend PWA mobile-first untuk KOPIPU Smart. Pengguna utama halaman
+Frontend PWA mobile-first untuk PRODULI. Pengguna utama halaman
 kader adalah **lansia** — semua keputusan UI harus mengutamakan
 kemudahan, bukan estetika kompleks. Stack: Nuxt 4, Vue 3, TypeScript,
 PWA (Workbox), Pinia, TailwindCSS v4, Nuxt UI, Chart.js, MapLibre GL.
 
 ## Backend API
 
-Repo backend Laravel ada di sebelah (`../kopipu-smart-backend` atau
+Repo backend Laravel ada di sebelah (`../produli-backend` atau
 sesuai path lokal Anda). Kontrak endpoint yang sudah live ada di
-`docs/planning/05-kontrak-api-kopipu-backend.md` (diambil dari
+`docs/planning/05-kontrak-api-produli-backend.md` (diambil dari
 `route:list` nyata) — tapi untuk bentuk persis request/response tiap
 endpoint, **baca langsung Controller/Request/Resource class di repo
 backend**, jangan menebak dari dokumen ini saja (dokumen ditulis
@@ -23,7 +23,7 @@ Base URL: `runtimeConfig.public.apiBase`, dari env `NUXT_PUBLIC_API_BASE`
 `credentials: 'include'` — tanpa ini refresh-token cookie tidak
 pernah terkirim, auth tidak akan jalan.
 
-## Prinsip Wajib (lihat `03-uiux-frontend-kopipu-nuxt.md`)
+## Prinsip Wajib (lihat `03-uiux-frontend-produli-nuxt.md`)
 
 - Halaman kader: font besar (16–18px+), tombol besar full-width,
   1 aksi utama per layar, navigasi linear, bottom nav max 3–4 item

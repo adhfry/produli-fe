@@ -151,7 +151,7 @@ async function onAvatarSelected(e: Event) {
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 class="text-2xl font-extrabold text-accent">Profil Saya</h1>
-          <p class="text-sm text-slate-500 mt-1">Data diri Anda sebagai pengguna KOPIPU Smart.</p>
+          <p class="text-sm text-slate-500 mt-1">Data diri Anda sebagai pengguna PRODULI.</p>
         </div>
         <NuxtLink
           to="/dashboard/profil/pengaturan"

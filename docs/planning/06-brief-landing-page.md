@@ -1,16 +1,16 @@
-# Brief Landing Page & Halaman Publik — KOPIPU Smart
+# Brief Landing Page & Halaman Publik — PRODULI
 
 > Semua konten teks di dokumen ini diambil verbatim dari draft resmi proyek (bukan dikarang baru) — jangan diparafrase jauh dari aslinya, cukup disusun ulang ke komponen visual.
 
 ## 1. Tujuan
 
-Landing page ini representasi publik pertama KOPIPU Smart — audiensnya bukan cuma kader/staf (yang nanti login), tapi juga pihak luar: pejabat Dinkes lain, puskesmas yang belum tahu program ini, media, atau siapa pun yang mencari tahu soal program ini di Google. Beda total dari halaman kader (senior-friendly, super sederhana) — di sini boleh lebih kaya visual, animasi, dan kedalaman konten, karena tujuannya meyakinkan dan menginformasikan, bukan dipakai berulang oleh lansia di lapangan.
+Landing page ini representasi publik pertama PRODULI — audiensnya bukan cuma kader/staf (yang nanti login), tapi juga pihak luar: pejabat Dinkes lain, puskesmas yang belum tahu program ini, media, atau siapa pun yang mencari tahu soal program ini di Google. Beda total dari halaman kader (senior-friendly, super sederhana) — di sini boleh lebih kaya visual, animasi, dan kedalaman konten, karena tujuannya meyakinkan dan menginformasikan, bukan dipakai berulang oleh lansia di lapangan.
 
 ## 2. Rute Halaman (untuk SEO — tiap halaman punya title/description sendiri)
 
 | Rute            | Isi                                                                                                 | Kenapa terpisah (SEO)                                  |
 | --------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `/`             | Hero, Mengapa KOPIPU Smart, Nilai Inovasi (ringkas), Tentang Inovasi (ringkas), CTA, Footer         | Landing utama, kata kunci umum                         |
+| `/`             | Hero, Mengapa PRODULI, Nilai Inovasi (ringkas), Tentang Inovasi (ringkas), CTA, Footer         | Landing utama, kata kunci umum                         |
 | `/tentang-kami` | Latar belakang lengkap, Visi & Misi, Nilai Inovasi (lengkap), Tentang Inovasi (lengkap + penggagas) | Kata kunci "tentang", kedalaman konten bagus untuk SEO |
 | `/kontak`       | Cara melapor kendala, email, konteks institusi                                                      | Kata kunci "kontak"/"hubungi"                          |
 
@@ -23,11 +23,11 @@ Semua rute publik pakai `layouts/public.vue` (SEO aktif, sudah dibangun Prompt 2
 ### Hero
 
 - Headline: **"Mewujudkan Pelayanan Kesehatan yang Proaktif"**
-- Subtitle: _"KOPIPU Smart merupakan platform digital yang mendukung pelaksanaan inovasi KOPIPU (Konseling Masalah Kesehatan Keluarga dari Pintu ke Pintu), sebuah pendekatan pelayanan kesehatan berbasis data laboratorium melalui kunjungan rumah secara aktif untuk meningkatkan kualitas kesehatan masyarakat."_
+- Subtitle: _"PRODULI merupakan platform digital yang mendukung pelaksanaan inovasi KOPIPU (Konseling Masalah Kesehatan Keluarga dari Pintu ke Pintu), sebuah pendekatan pelayanan kesehatan berbasis data laboratorium melalui kunjungan rumah secara aktif untuk meningkatkan kualitas kesehatan masyarakat."_
 - Tombol: **[ Masuk Sistem ]** (ke `/auth/login`) — **[ Pelajari Inovasi ]** (scroll ke Tentang Inovasi, atau ke `/tentang-kami`)
-- Tampilkan logo (`kopipu-smart-logo-remove-bg.png` atau versi icon-only) besar/menonjol di hero — ini titik pertama orang lihat brand-nya.
+- Tampilkan logo (`produli-logo-remove-bg.png` atau versi icon-only) besar/menonjol di hero — ini titik pertama orang lihat brand-nya.
 
-### Mengapa KOPIPU Smart (6 card)
+### Mengapa PRODULI (6 card)
 
 ✓ Berbasis Data Laboratorium
 ✓ Dashboard Analitik
@@ -96,7 +96,7 @@ Sinkronisasi data pasien dari SiLAKES, dashboard terpisah untuk Dinas Kesehatan/
 
 ## 6. Desain & Animasi (REVISI — hasil pertama gagal, spek berikut wajib diikuti persis)
 
-**Hasil pertama gagal karena:** tema gelap (padahal untuk audiens umum, harus terang), layout satu kolom serba-tengah (generik, terkesan template), icon "Mengapa KOPIPU Smart" patah/tidak render, teks headline ada artefak visual (shadow/outline yang tidak rapi). Berikut spesifikasi yang lebih tegas supaya tidak terulang.
+**Hasil pertama gagal karena:** tema gelap (padahal untuk audiens umum, harus terang), layout satu kolom serba-tengah (generik, terkesan template), icon "Mengapa PRODULI" patah/tidak render, teks headline ada artefak visual (shadow/outline yang tidak rapi). Berikut spesifikasi yang lebih tegas supaya tidak terulang.
 
 ### Tema: TERANG, bukan gelap
 
@@ -124,7 +124,7 @@ Prinsip: tiap section besar (hero, "Mengapa", "Nilai Inovasi", "Tentang Inovasi"
 └─────────────────────────────────────────────┘
 ```
 
-**"Mengapa KOPIPU Smart"** — bukan grid kartu seragam kaku, coba bento-style (1-2 card besar + beberapa kecil, variasi ukuran) ATAU icon+teks berjajar horizontal dengan 1 card "unggulan" lebih besar. Tiap icon di dalam badge/lingkaran berwarna (bukan icon polos mengambang), pastikan render nyata (lihat §6.4 — ini bug yang harus diperbaiki dulu).
+**"Mengapa PRODULI"** — bukan grid kartu seragam kaku, coba bento-style (1-2 card besar + beberapa kecil, variasi ukuran) ATAU icon+teks berjajar horizontal dengan 1 card "unggulan" lebih besar. Tiap icon di dalam badge/lingkaran berwarna (bukan icon polos mengambang), pastikan render nyata (lihat §6.4 — ini bug yang harus diperbaiki dulu).
 
 **"Nilai Inovasi"** (before/after) — visual kiri (flow diagram lama: "Laboratorium → hasil keluar → selesai"), visual kanan (flow diagram baru dengan lebih banyak tahap) ATAU satu flow horizontal penuh lebar dengan panah, animasi tiap tahap muncul saat di-scroll.
 
@@ -154,11 +154,11 @@ Mobile-first tapi desktop dirancang sengaja — split 2 kolom di desktop, susun 
 
 ### Logo
 
-Navbar: icon+wordmark kecil (`kopipu-smart-logo-remove-bg.png`, di-resize proporsional). Hero: boleh lebih besar/jadi bagian komposisi visual kanan. Footer: kecil, atau versi tagline (`kopipu-smart-logo-plus-desc-remove-bg.png`).
+Navbar: icon+wordmark kecil (`produli-logo-remove-bg.png`, di-resize proporsional). Hero: boleh lebih besar/jadi bagian komposisi visual kanan. Footer: kecil, atau versi tagline (`produli-logo-plus-desc-remove-bg.png`).
 
 ## 7. SEO Teknis (checklist)
 
-- `useSeoMeta()` per halaman — title unik pola `"{Judul Halaman} — KOPIPU Smart"`, description spesifik per halaman (jangan generik sama di semua halaman).
+- `useSeoMeta()` per halaman — title unik pola `"{Judul Halaman} — PRODULI"`, description spesifik per halaman (jangan generik sama di semua halaman).
 - **Structured data (JSON-LD)** — tambahkan schema.org type yang sesuai (`GovernmentOrganization` atau `Organization`) di landing: nama, url, logo, description. Ini belum pernah dibahas sebelumnya di dokumen manapun, tapi worth ditambahkan — praktik SEO enterprise yang nyata, bukan cuma meta tag dasar.
 - Heading hierarchy semantik yang benar — H1 cuma satu per halaman (headline hero), H2 per section, jangan pakai div/span yang di-styling seperti heading.
 - `@nuxtjs/sitemap` (sudah terpasang) — pastikan `/`, `/tentang-kami`, `/kontak` (dan `/privasi` kalau dibuat) masuk.

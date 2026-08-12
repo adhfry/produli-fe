@@ -81,7 +81,7 @@ export const useAuthStore = defineStore(
       setSession(res.data)
     }
 
-    // Dipanggil saat app boot untuk memulihkan sesi dari httpOnly cookie kopipu_refresh_token
+    // Dipanggil saat app boot untuk memulihkan sesi dari httpOnly cookie produli_refresh_token
     // (lihat docs/planning/05 §Auth) — belum di-wire ke plugin/middleware, itu langkah berikutnya.
     async function refresh() {
       const api = useApi()

@@ -58,24 +58,49 @@ const afterFlow = [
   },
 ];
 
+// Kelas klasifikasi risiko -- disamakan PERSIS dengan RiskClassificationService (backend):
+// Creatinine adalah "direct classifier" bertingkat yang berdiri SENDIRI (tidak lagi bagian
+// dari 5 parameter kombinasi Berat), jadi ditandai terpisah di sini supaya tidak menyesatkan
+// pengunjung awam yang membaca halaman ini sebagai referensi.
 const riskLevels = [
   {
     level: "Ringan",
     color: "emerald",
-    indikator: "Hanya nilai GDP (Gula Darah Puasa) di atas nilai rujukan",
+    parameters: ["Gula Darah Puasa"],
+    indikator:
+      "HANYA Gula Darah Puasa yang melebihi nilai rujukan -- parameter kombinasi lain normal atau belum pernah diperiksa.",
   },
   {
     level: "Sedang",
     color: "amber",
+    parameters: ["Gula Darah Puasa", "Cholesterol", "Trigliserida", "LDL"],
     indikator:
-      "Pemeriksaan GDP, Kolesterol Total, Trigliserida, dan LDL di atas nilai rujukan",
+      "Salah satu dari Gula Darah Puasa, Cholesterol, Trigliserida, atau LDL melebihi nilai rujukan (bukan cuma GDP sendirian).",
+    extra:
+      "Jalur independen: Creatinine 1,7–1,9 mg/dL juga langsung menghasilkan Sedang, tanpa perlu parameter lain ikut melebihi.",
   },
   {
     level: "Berat",
     color: "rose",
+    parameters: ["Gula Darah Puasa", "Cholesterol", "Trigliserida", "LDL", "Urea"],
     indikator:
-      "Seluruh parameter (GDP > 120, Creatinine > 1.7, Cholesterol > 200, Trigliserida > 140, LDL > 130, Urea > 46) di atas nilai rujukan",
+      "KELIMA parameter kombinasi di atas harus lengkap tersedia DAN seluruhnya melebihi nilai rujukan sekaligus.",
+    extra:
+      "Jalur independen: Creatinine ≥ 2,0 mg/dL juga langsung menghasilkan Berat, sendirian tanpa perlu 5 parameter lain.",
   },
+];
+
+// Pemeriksaan & nilai rujukan -- sisi kanan tabel, bersumber dari RiskThresholdSeeder
+// (nilai klinis resmi, bukan tebakan). Creatinine bertingkat (dua baris) karena dia
+// "direct classifier", bukan satu ambang tunggal seperti 5 parameter lainnya.
+const examinations = [
+  { parameter: "Gula Darah Puasa (GDP)", rujukan: "> 120 mg/dL", tag: null },
+  { parameter: "Cholesterol Total", rujukan: "> 200 mg/dL", tag: null },
+  { parameter: "Trigliserida", rujukan: "> 140 mg/dL", tag: null },
+  { parameter: "LDL", rujukan: "> 130 mg/dL", tag: null },
+  { parameter: "Urea", rujukan: "> 46 mg/dL", tag: null },
+  { parameter: "Creatinine", rujukan: "1,7 – 1,9 mg/dL", tag: "Sedang" },
+  { parameter: "Creatinine", rujukan: "≥ 2,0 mg/dL", tag: "Berat" },
 ];
 
 const scrollContainer = ref<HTMLElement | null>(null);
@@ -172,7 +197,7 @@ onMounted(() => {
           <div
             class="mb-4 flex items-center gap-2 text-sm font-bold tracking-widest text-primary uppercase"
           >
-            <LucideZap class="h-4 w-4" /> KOPIPU Smart (Proaktif)
+            <LucideZap class="h-4 w-4" /> PRODULI (Proaktif)
           </div>
           <!-- PERBAIKAN 2: lg:overflow-x-visible ditambahkan. pt-4 pl-4 -ml-4 ditambahkan agar elemen absolut (angka) tidak terpotong (clipped) oleh overflow-x-auto di mobile -->
           <div
@@ -235,72 +260,142 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- Risk Classification Table -->
+      <!-- Risk Classification -- dua kolom: KIRI kelas risiko (Ringan/Sedang/Berat) + parameter
+           penentunya, KANAN daftar pemeriksaan & nilai rujukan mentahnya. Dipisah supaya
+           pengunjung bisa membaca "kenapa" (kiri) dan "berapa angkanya" (kanan) tanpa harus
+           menyisir satu tabel panjang. -->
       <motion.div
-        class="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm"
-        :initial="{ opacity: 0, y: 30 }"
+        class="mb-10 text-center"
+        :initial="{ opacity: 0, y: 20 }"
         :while-in-view="{ opacity: 1, y: 0 }"
         :in-view-options="{ once: true, amount: 0.15 }"
-        :transition="{ duration: 0.8, ease: 'easeOut' }"
+        :transition="{ duration: 0.6, ease: 'easeOut' }"
       >
-        <div class="border-b border-neutral-100 bg-neutral-50 px-8 py-6">
-          <h3 class="text-xl font-bold text-accent">
-            Penilaian Risiko Otomatis
-          </h3>
-          <p class="mt-1 text-sm text-neutral-500">
-            Sistem menganalisis indikator kesehatan dan mengelompokkan secara
-            cerdas.
-          </p>
-        </div>
-        <div class="overflow-x-auto">
+        <h3 class="text-2xl font-extrabold text-accent md:text-3xl">
+          Penilaian Risiko Otomatis
+        </h3>
+        <p class="mt-2 text-neutral-500">
+          Sistem menganalisis indikator laboratorium dan mengelompokkan
+          pasien secara objektif -- bukan tebakan, murni angka rujukan
+          klinis.
+        </p>
+      </motion.div>
+
+      <div class="grid grid-cols-1 gap-6 lg:grid-cols-5">
+        <!-- Kiri (3/5): Risk Classification -->
+        <motion.div
+          class="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm lg:col-span-3"
+          :initial="{ opacity: 0, x: -24 }"
+          :while-in-view="{ opacity: 1, x: 0 }"
+          :in-view-options="{ once: true, amount: 0.15 }"
+          :transition="{ duration: 0.7, ease: 'easeOut' }"
+        >
+          <div class="border-b border-neutral-100 bg-neutral-50 px-6 py-5 md:px-8">
+            <div class="flex items-center gap-2 text-xs font-bold tracking-widest text-neutral-400 uppercase">
+              <LucideChartPie class="h-4 w-4" /> Risk Classification
+            </div>
+            <p class="mt-1 text-sm text-neutral-500">
+              Tingkat risiko dan parameter kombinasi yang menentukannya.
+            </p>
+          </div>
+
+          <div class="divide-y divide-neutral-100">
+            <div v-for="risk in riskLevels" :key="risk.level" class="px-6 py-6 md:px-8">
+              <div class="mb-3 flex items-center gap-2">
+                <span
+                  class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-bold"
+                  :class="{
+                    'bg-emerald-100 text-emerald-700 border-emerald-200': risk.color === 'emerald',
+                    'bg-amber-100 text-amber-700 border-amber-200': risk.color === 'amber',
+                    'bg-rose-100 text-rose-700 border-rose-200': risk.color === 'rose',
+                  }"
+                >
+                  <span
+                    class="h-1.5 w-1.5 rounded-full"
+                    :class="{
+                      'bg-emerald-500': risk.color === 'emerald',
+                      'bg-amber-500': risk.color === 'amber',
+                      'bg-rose-500 animate-pulse': risk.color === 'rose',
+                    }"
+                  />
+                  {{ risk.level }}
+                </span>
+              </div>
+
+              <p class="mb-3 text-sm font-medium text-neutral-600">{{ risk.indikator }}</p>
+
+              <div class="flex flex-wrap gap-1.5">
+                <span
+                  v-for="param in risk.parameters"
+                  :key="param"
+                  class="rounded-lg border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-xs font-semibold text-neutral-600"
+                >
+                  {{ param }}
+                </span>
+              </div>
+
+              <p v-if="risk.extra" class="mt-3 flex items-start gap-1.5 text-xs text-neutral-500">
+                <LucideZap class="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                {{ risk.extra }}
+              </p>
+            </div>
+          </div>
+        </motion.div>
+
+        <!-- Kanan (2/5): Pemeriksaan & Nilai Rujukan -->
+        <motion.div
+          class="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm lg:col-span-2"
+          :initial="{ opacity: 0, x: 24 }"
+          :while-in-view="{ opacity: 1, x: 0 }"
+          :in-view-options="{ once: true, amount: 0.15 }"
+          :transition="{ duration: 0.7, ease: 'easeOut', delay: 0.1 }"
+        >
+          <div class="border-b border-neutral-100 bg-neutral-50 px-6 py-5 md:px-8">
+            <div class="flex items-center gap-2 text-xs font-bold tracking-widest text-neutral-400 uppercase">
+              <LucideTestTubes class="h-4 w-4" /> Pemeriksaan & Nilai Rujukan
+            </div>
+            <p class="mt-1 text-sm text-neutral-500">
+              Ambang klinis resmi per parameter laboratorium.
+            </p>
+          </div>
+
           <table class="w-full border-collapse text-left">
             <thead>
-              <tr
-                class="border-b border-neutral-200 bg-white text-xs tracking-wider text-neutral-500 uppercase"
-              >
-                <th class="px-8 py-4 font-semibold w-1/4">Tingkat Risiko</th>
-                <th class="px-8 py-4 font-semibold">
-                  Kriteria Penilaian Klinis
-                </th>
+              <tr class="border-b border-neutral-100 text-[11px] tracking-wider text-neutral-400 uppercase">
+                <th class="px-6 py-3 font-semibold md:px-8">Parameter</th>
+                <th class="px-6 py-3 font-semibold md:px-8">Nilai Rujukan</th>
               </tr>
             </thead>
             <tbody class="text-sm">
               <tr
-                v-for="risk in riskLevels"
-                :key="risk.level"
-                class="border-b border-neutral-100 last:border-0 hover:bg-neutral-50"
+                v-for="(exam, idx) in examinations"
+                :key="exam.parameter + exam.rujukan"
+                class="border-b border-neutral-50 last:border-0 hover:bg-neutral-50"
               >
-                <td class="px-8 py-5">
+                <td class="px-6 py-3.5 font-semibold text-neutral-700 md:px-8">
+                  {{ exam.parameter }}
                   <span
-                    class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-bold"
-                    :class="{
-                      'bg-emerald-100 text-emerald-700 border-emerald-200':
-                        risk.color === 'emerald',
-                      'bg-amber-100 text-amber-700 border-amber-200':
-                        risk.color === 'amber',
-                      'bg-rose-100 text-rose-700 border-rose-200':
-                        risk.color === 'rose',
-                    }"
+                    v-if="exam.tag"
+                    class="ml-1.5 rounded border px-1.5 py-0.5 text-[10px] font-bold"
+                    :class="exam.tag === 'Berat'
+                      ? 'border-rose-200 bg-rose-50 text-rose-600'
+                      : 'border-amber-200 bg-amber-50 text-amber-600'"
                   >
-                    <span
-                      class="h-1.5 w-1.5 rounded-full"
-                      :class="{
-                        'bg-emerald-500': risk.color === 'emerald',
-                        'bg-amber-500': risk.color === 'amber',
-                        'bg-rose-500 animate-pulse': risk.color === 'rose',
-                      }"
-                    />
-                    {{ risk.level }}
+                    {{ exam.tag }}
                   </span>
                 </td>
-                <td class="px-8 py-5 font-medium text-neutral-600">
-                  {{ risk.indikator }}
-                </td>
+                <td class="px-6 py-3.5 font-mono text-neutral-600 md:px-8">{{ exam.rujukan }}</td>
               </tr>
             </tbody>
           </table>
-        </div>
-      </motion.div>
+
+          <p class="border-t border-neutral-100 px-6 py-4 text-xs text-neutral-400 md:px-8">
+            Creatinine memiliki dua ambang bertingkat karena berperan sebagai
+            "direct classifier" -- lihat penjelasan Smart Early Detection
+            berikutnya.
+          </p>
+        </motion.div>
+      </div>
     </div>
   </section>
 </template>

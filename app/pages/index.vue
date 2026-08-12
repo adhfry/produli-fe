@@ -8,14 +8,14 @@ const { origin } = useRequestURL();
 const heroHeadline = "Mewujudkan Pelayanan Kesehatan yang Proaktif";
 
 const heroSubtitle =
-  "KOPIPU Smart merupakan platform digital yang mengintegrasikan data laboratorium, analisis risiko, dan koordinasi kunjungan kesehatan dalam satu ekosistem terintegrasi. Dengan pendekatan berbasis data dan pemantauan secara real-time, KOPIPU Smart membantu tenaga kesehatan memberikan layanan yang lebih cepat, tepat sasaran, dan berkelanjutan.";
+  "PRODULI merupakan platform digital yang mengintegrasikan data laboratorium, analisis risiko, dan koordinasi kunjungan kesehatan dalam satu ekosistem terintegrasi. Dengan pendekatan berbasis data dan pemantauan secara real-time, PRODULI membantu tenaga kesehatan memberikan layanan yang lebih cepat, tepat sasaran, dan berkelanjutan.";
 
 useSeoMeta({
-  title: "KOPIPU Smart — " + heroHeadline,
+  title: "PRODULI — " + heroHeadline,
   description: heroSubtitle,
-  ogTitle: `KOPIPU Smart — ${heroHeadline}`,
+  ogTitle: `PRODULI — ${heroHeadline}`,
   ogDescription: heroSubtitle,
-  twitterTitle: `KOPIPU Smart — ${heroHeadline}`,
+  twitterTitle: `PRODULI — ${heroHeadline}`,
   twitterDescription: heroSubtitle,
   author:
     "Pengolah Data dan Informasi UPTD Laboratorium Kesehatan Daerah, Dinas Kesehatan P2KB Kabupaten Sumenep",
@@ -30,9 +30,9 @@ useHead({
       innerHTML: JSON.stringify({
         "@context": "https://schema.org",
         "@type": "GovernmentOrganization",
-        name: "KOPIPU Smart",
+        name: "PRODULI",
         url: origin,
-        logo: `${origin}/logo/kopipu-smart-logo-remove-bg.png`,
+        logo: `${origin}/logo/produli-logo-remove-bg.png`,
         description: heroSubtitle,
       }),
     },
@@ -51,6 +51,7 @@ useHead({
       <LandingStats />
       <LandingFeatures />
       <LandingTransformation />
+      <LandingEarlyDetection />
       <LandingSecurity />
       <LandingRoles />
       <LandingImpact />

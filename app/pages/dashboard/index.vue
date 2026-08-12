@@ -20,13 +20,22 @@ import {
   LucideFilter,
   LucideCalendar,
   LucideBuilding2,
-  LucideChevronDown
+  LucideChevronDown,
+  LucideTrendingUp,
+  LucideShieldCheck
 } from "#components"
 
 import type { ApiSuccessEnvelope, DashboardSummary, DashboardKecamatanRisk, DashboardDesaRisk, PaginatedData, Announcement, AnnouncementType, Puskesmas } from '~/types/api'
 import flatpickr from 'flatpickr'
 import 'flatpickr/dist/flatpickr.css'
 import { Indonesian } from 'flatpickr/dist/l10n/id.js'
+import { Doughnut } from 'vue-chartjs'
+import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, Legend as ChartLegend } from 'chart.js'
+
+// Donut chart kartu "Tingkat Kepatuhan" (revisi Bu Kadis) -- registrasi terpisah dari
+// pasien/[id].vue (Line chart riwayat risiko), tiap halaman yang pakai Chart.js daftar sendiri
+// (ChartJS.register idempotent, aman dipanggil ulang).
+ChartJS.register(ArcElement, ChartTooltip, ChartLegend)
 
 definePageMeta({
   layout: 'dashboard',
@@ -68,8 +77,51 @@ const totalRiskValue = ref({ targetValue: '0', displayValue: '0' })
 const progressValue = ref({ targetValue: '0%', displayValue: '0%' })
 const progressPercent = ref(0)
 const assignmentTotals = ref({ completed: 0, total: 0 })
+
+// Donut chart kecil di kartu "Tingkat Kepatuhan" (revisi Bu Kadis) -- proporsi kunjungan
+// selesai vs belum selesai, data SAMA dengan panel "Progres Kunjungan" di Middle Section
+// (assignmentTotals), cuma divisualisasikan lagi dalam bentuk ringkas di kartu stat.
+const tingkatKepatuhanChartData = computed(() => ({
+  labels: ['Selesai', 'Belum Selesai'],
+  datasets: [{
+    data: [assignmentTotals.value.completed, Math.max(assignmentTotals.value.total - assignmentTotals.value.completed, 0)],
+    backgroundColor: ['#0d9488', '#e2e8f0'],
+    borderWidth: 0
+  }]
+}))
+const tingkatKepatuhanChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  cutout: '72%',
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      callbacks: {
+        label: (ctx: { label: string, parsed: number }) => `${ctx.label}: ${ctx.parsed}`
+      }
+    }
+  }
+}
+const TINGKAT_KEPATUHAN_EXPLAINER = 'Tingkat Kepatuhan = persentase kunjungan yang sudah diselesaikan (completed) dari seluruh kunjungan yang dijadwalkan pada periode ini.'
 const activities = ref<any[]>([])
 const topDistricts = ref<any[]>([])
+const puskesmasPerformanceRows = ref<any[]>([])
+
+// Label level risiko manusiawi -- dipakai formatBreakdown() di bawah, breakdown backend
+// berbentuk kunci mentah "{level_lama}_ke_{level_baru}" (mis. "berat_ke_sedang").
+function formatLevelLabel(level: string): string {
+  if (level === 'tidak_berisiko') return 'Tidak Berisiko'
+  return level.charAt(0).toUpperCase() + level.slice(1)
+}
+
+function formatBreakdown(breakdown: Record<string, number>): string {
+  return Object.entries(breakdown)
+    .map(([key, count]) => {
+      const [from, to] = key.split('_ke_')
+      return `${count} ${formatLevelLabel(from)} → ${formatLevelLabel(to)}`
+    })
+    .join(' · ')
+}
 
 async function loadDashboardSummary() {
   summaryError.value = ''
@@ -90,13 +142,26 @@ async function loadDashboardSummary() {
     // "Lihat Detail" per card -- reuse halaman yang sudah ada + query param, docs/planning/02
     // §17 tabel mapping (JANGAN bikin halaman baru).
     stats.value = [
-      { label: 'Total Pasien Aktif', targetValue: formatId(data.total_patients), displayValue: '0', icon: LucideUsers, colorClass: 'text-primary', bgClass: 'bg-primary/10', to: '/dashboard/pasien' },
+      // "3.900 dari total 5.000 pasien Prolanis" (revisi Bu Kadis) -- totalSuffix statis
+      // (tidak dianimasikan, animateNumber() cuma memparse SATU angka per objek) ditampilkan
+      // setelah displayValue yang tetap dianimasikan seperti biasa.
+      { label: 'Total Pasien Aktif', targetValue: formatId(data.total_patients), displayValue: '0', totalSuffix: `/ ${formatId(data.total_patients_prolanis)}`, icon: LucideUsers, colorClass: 'text-primary', bgClass: 'bg-primary/10', to: '/dashboard/pasien' },
+      // "Pasien Tidak Berisiko" -- gabungan 2 kelompok: (1) SELISIH total_patients_prolanis
+      // dikurangi total_patients (pasien yang lolos eligibility sync tapi TIDAK PERNAH punya
+      // baris risk_classifications sama sekali -- belum pernah ada parameter lab yang melebihi
+      // ambang rujukan), dan (2) patients_per_risk_level.tidak_berisiko (pasien yang PERNAH
+      // berisiko lalu membaik total, lihat RiskClassificationService::classify()). Keduanya
+      // sama-sama "tidak sedang berisiko sekarang", tapi berasal dari 2 kolom summary berbeda.
+      { label: 'Pasien Tidak Berisiko', targetValue: formatId((data.total_patients_prolanis - data.total_patients) + risk.tidak_berisiko), displayValue: '0', icon: LucideShieldCheck, colorClass: 'text-success', bgClass: 'bg-success/10', to: '/dashboard/pasien?risk_level=tidak_berisiko' },
       { label: 'Risiko Berat', targetValue: formatId(risk.berat), displayValue: '0', icon: LucideAlertTriangle, colorClass: 'text-danger', bgClass: 'bg-danger/10', to: '/dashboard/pasien?risk_level=berat' },
       { label: 'Risiko Sedang', targetValue: formatId(risk.sedang), displayValue: '0', icon: LucideAlertCircle, colorClass: 'text-warning', bgClass: 'bg-warning/10', to: '/dashboard/pasien?risk_level=sedang' },
       { label: 'Kunjungan Selesai', targetValue: formatId(visits.completed), displayValue: '0', icon: LucideCheckCircle2, colorClass: 'text-success', bgClass: 'bg-success/10', to: '/dashboard/kunjungan?status=completed' },
       { label: 'Kader Aktif', targetValue: formatId(data.kader_aktif_count), displayValue: '0', icon: LucideUserPlus, colorClass: 'text-info', bgClass: 'bg-info/10', to: '/dashboard/kader' },
-      { label: 'Tingkat Kepatuhan', targetValue: `${data.tingkat_kepatuhan}%`, displayValue: '0%', icon: LucideActivity, colorClass: 'text-secondary', bgClass: 'bg-secondary/10', to: '/dashboard/kunjungan' },
     ]
+    // "Tingkat Kepatuhan" SENGAJA dikeluarkan dari array stats generik di atas -- kartu ini
+    // dirender terpisah di template (bukan lewat v-for) karena butuh layout khusus (memanjang
+    // 2 baris + donut chart), reuse progressValue/progressPercent yang sudah ada (sama persis
+    // dipakai panel "Progres Kunjungan" di Middle Section, supaya tidak duplikat state).
 
     const totalRisk = risk.ringan + risk.sedang + risk.berat
     const pct = (n: number) => totalRisk > 0 ? (n / totalRisk * 100).toFixed(1).replace('.', ',') : '0,0'
@@ -131,6 +196,20 @@ async function loadDashboardSummary() {
         percentage: Math.round((k.berat / maxBerat) * 100),
         colorClass: TOP_DISTRICT_COLORS[idx] ?? 'bg-primary/60'
       }))
+
+    // Tampilkan SEMUA puskesmas (bukan cuma 5 teratas seperti topDistricts) -- admin_puskesmas/
+    // pj_prolanis sudah otomatis cuma dapat 1 baris (puskesmasnya sendiri) dari backend
+    // (DashboardService::puskesmasPerformance() pakai $scopedPatients yang sudah terkunci per
+    // role), super_admin melihat seluruh puskesmas yang punya pasien membaik. Sudah terurut
+    // total_membaik desc dari backend, tidak perlu re-sort di sini.
+    const maxMembaik = Math.max(...data.puskesmas_performance.map((p) => p.total_membaik), 1)
+    puskesmasPerformanceRows.value = data.puskesmas_performance.slice(0, 5).map((p) => ({
+      name: p.puskesmas_nama,
+      targetValue: p.total_membaik,
+      displayValue: 0,
+      percentage: Math.round((p.total_membaik / maxMembaik) * 100),
+      breakdownText: formatBreakdown(p.breakdown)
+    }))
 
     // Reload akibat filter puskesmas/tanggal berubah -- animasikan count-up lagi supaya angka
     // baru tidak nyangkut di displayValue lama '0' (bug ditemukan: sebelumnya animateNumber
@@ -431,7 +510,7 @@ const setMapMode = async (mode: string) => {
       rawDesaGeoJson = structuredClone(geo)
 
       // risiko_per_desa (docs/planning/02 §17) -- cakupan wajar kecil (cuma wilayah_status=
-      // resolved), banyak desa tetap slate/"belum ada data risiko" sampai kopipu:import-desa-
+      // resolved), banyak desa tetap slate/"belum ada data risiko" sampai produli:import-desa-
       // puskesmas dijalankan penuh. TIDAK mengubah poligon/struktur peta, sama seperti kecamatan.
       const merged = mergeRiskData(
         geo,
@@ -562,7 +641,14 @@ const animateNumber = (obj: any, keyTarget: string, keyDisplay: string, duration
   const targetStr = String(obj[keyTarget])
   const isPercent = targetStr.includes('%')
   const hasDot = targetStr.includes('.')
-  const numericTarget = parseFloat(targetStr.replace(/\./g, '').replace(/%/g, ''))
+  // Bug ditemukan (revisi Bu Kadis, kartu Tingkat Kepatuhan) -- persen di sini SUDAH desimal
+  // polos (mis. "83.33%"), BUKAN dipisah ribuan (beda dari kartu non-persen seperti "3.900").
+  // Membuang SEMUA titik sebelum parseFloat() salah untuk kasus persen -- "83.33%" jadi "8333"
+  // (angka meledak 100x, sempat kelihatan sebagai lonjakan aneh mis. "3275%" di tengah animasi
+  // count-up sebelum akhirnya "dikoreksi" balik ke targetStr persis di frame terakhir).
+  const numericTarget = isPercent
+    ? parseFloat(targetStr.replace('%', ''))
+    : parseFloat(targetStr.replace(/\./g, ''))
   
   let startTime: number | null = null
   
@@ -599,6 +685,7 @@ function triggerCardAnimations() {
   stats.value.forEach(s => animateNumber(s, 'targetValue', 'displayValue'))
   riskDistribution.value.forEach(r => animateNumber(r, 'targetValue', 'displayValue'))
   topDistricts.value.forEach(d => animateNumber(d, 'targetValue', 'displayValue'))
+  puskesmasPerformanceRows.value.forEach(p => animateNumber(p, 'targetValue', 'displayValue'))
   animateNumber(totalRiskValue.value, 'targetValue', 'displayValue')
   animateNumber(progressValue.value, 'targetValue', 'displayValue')
 }
@@ -880,34 +967,73 @@ const initMap = () => {
       </button>
     </div>
 
-    <!-- Top Stats (6 Cards) -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-      <div 
-        v-for="(stat, index) in stats" 
-        :key="index"
-        class="relative overflow-hidden group bg-white p-5 rounded-2xl border border-slate-100 shadow-card hover:-translate-y-1 transition-transform duration-300 flex flex-col justify-between"
-      >
-        <!-- Soft Animate Blob -->
-        <div class="absolute -right-8 -bottom-8 w-32 h-32 rounded-full blur-3xl opacity-30 pointer-events-none group-hover:scale-125 transition-transform duration-700 animate-pulse" :class="stat.bgClass"></div>
-        
-        <div>
-          <!-- Baris 1: Icon & Label -->
-          <div class="relative z-10 flex items-center gap-3 mb-3">
-            <div :class="['w-10 h-10 rounded-full flex items-center justify-center shrink-0', stat.bgClass, stat.colorClass]">
-              <component :is="stat.icon" class="w-5 h-5" />
+    <!-- Top Stats -- grid 3 kolom (6 kartu generik) + kartu "Tingkat Kepatuhan" memanjang 2
+         baris di sisi kanan (donut chart), sengaja NESTED grid (bukan row-span di grid yang
+         sama) supaya auto-placement CSS Grid tidak perlu diakali -- kolom kanan otomatis
+         setinggi blok 3x2 kartu generik di sebelahnya (satu grid item, stretch default). -->
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+      <div class="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div
+          v-for="(stat, index) in stats"
+          :key="index"
+          class="relative overflow-hidden group bg-white p-5 rounded-2xl border border-slate-100 shadow-card hover:-translate-y-1 transition-transform duration-300 flex flex-col justify-between"
+        >
+          <!-- Soft Animate Blob -->
+          <div class="absolute -right-8 -bottom-8 w-32 h-32 rounded-full blur-3xl opacity-30 pointer-events-none group-hover:scale-125 transition-transform duration-700 animate-pulse" :class="stat.bgClass"></div>
+
+          <div>
+            <!-- Baris 1: Icon & Label -->
+            <div class="relative z-10 flex items-center gap-3 mb-3">
+              <div :class="['w-10 h-10 rounded-full flex items-center justify-center shrink-0', stat.bgClass, stat.colorClass]">
+                <component :is="stat.icon" class="w-5 h-5" />
+              </div>
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider leading-snug">{{ stat.label }}</p>
             </div>
-            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider leading-snug">{{ stat.label }}</p>
+
+            <!-- Baris 2: Value -->
+            <p class="relative z-10 text-2xl font-black text-accent">
+              {{ stat.displayValue }}
+              <span v-if="stat.totalSuffix" class="text-sm font-bold text-slate-400 ml-0.5">{{ stat.totalSuffix }}</span>
+            </p>
           </div>
-          
-          <!-- Baris 2: Value -->
-          <p class="relative z-10 text-2xl font-black text-accent">{{ stat.displayValue }}</p>
+
+          <NuxtLink :to="stat.to" class="relative z-10 mt-4 text-xs font-semibold text-primary hover:text-primary-600 transition-colors flex items-center gap-1">
+            Lihat Detail <span aria-hidden="true">&rarr;</span>
+          </NuxtLink>
+        </div>
+        <p v-if="!stats.length && !summaryError" class="col-span-full text-sm text-slate-400 text-center py-6">Memuat ringkasan...</p>
+      </div>
+
+      <!-- Kartu khusus "Tingkat Kepatuhan" -- memanjang 2 baris, donut chart kecil + tooltip
+           penjelasan (UTooltip) saat hover angka persentase. -->
+      <div class="lg:col-span-1 relative overflow-hidden bg-white p-5 rounded-2xl border border-slate-100 shadow-card flex flex-col">
+        <div class="absolute -right-8 -bottom-8 w-32 h-32 rounded-full blur-3xl opacity-30 pointer-events-none bg-secondary/10"></div>
+
+        <div class="relative z-10 flex items-center gap-3 mb-1">
+          <div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-secondary/10 text-secondary">
+            <LucideActivity class="w-5 h-5" />
+          </div>
+          <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider leading-snug">Tingkat Kepatuhan</p>
         </div>
 
-        <NuxtLink :to="stat.to" class="relative z-10 mt-4 text-xs font-semibold text-primary hover:text-primary-600 transition-colors flex items-center gap-1">
+        <div class="relative z-10 flex-1 flex flex-col items-center justify-center gap-3 py-2">
+          <div class="relative w-32 h-32">
+            <Doughnut :data="tingkatKepatuhanChartData" :options="tingkatKepatuhanChartOptions" />
+            <div class="absolute inset-0 flex items-center justify-center">
+              <AppTooltip :text="TINGKAT_KEPATUHAN_EXPLAINER">
+                <span class="text-2xl font-black text-accent cursor-help">{{ progressValue.displayValue }}</span>
+              </AppTooltip>
+            </div>
+          </div>
+          <p class="text-xs font-semibold text-slate-500 text-center">
+            {{ formatId(assignmentTotals.completed) }} dari {{ formatId(assignmentTotals.total) }} kunjungan selesai
+          </p>
+        </div>
+
+        <NuxtLink to="/dashboard/kunjungan" class="relative z-10 mt-2 text-xs font-semibold text-primary hover:text-primary-600 transition-colors flex items-center gap-1">
           Lihat Detail <span aria-hidden="true">&rarr;</span>
         </NuxtLink>
       </div>
-      <p v-if="!stats.length && !summaryError" class="col-span-full text-sm text-slate-400 text-center py-6">Memuat ringkasan...</p>
     </div>
 
     <!-- Middle Section (Grid 4 columns) -->
@@ -1083,9 +1209,90 @@ const initMap = () => {
 
     </div>
 
-    <!-- Bottom Section (Grid 3 columns) -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      
+    <!-- Row A: 5 Kecamatan Risiko Tertinggi berdampingan dengan Top 5 Puskesmas Kinerja
+         Terbaik (revisi Bu Kadis) -- keduanya bar-list horizontal senada, satu menyorot
+         wilayah PALING BERISIKO, satunya menyorot puskesmas PALING BERHASIL menangani pasien. -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <!-- Kiri: 5 Kecamatan dengan Risiko Tertinggi -->
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-card p-5 flex flex-col">
+        <h3 class="font-bold text-accent text-base mb-5 flex items-center gap-2">
+          <LucideBarChart4 class="w-4 h-4 text-warning" />
+          5 Kecamatan Risiko Tertinggi
+        </h3>
+
+        <div class="space-y-3 flex-1 mt-2">
+          <div v-for="(kec, idx) in topDistricts" :key="idx" class="flex items-center h-10">
+             <div class="w-32 shrink-0 pr-3 flex justify-end">
+                <AppTooltip :text="kec.name">
+                   <span class="text-xs font-semibold text-slate-600 truncate block text-right">{{ kec.name }}</span>
+                </AppTooltip>
+             </div>
+             <div class="flex-1 border-l-2 border-slate-200 flex items-center h-full pl-0">
+                 <div class="flex-1 h-3 bg-slate-100 rounded-r-full overflow-hidden shadow-inner flex items-center">
+                    <div class="h-full rounded-r-full transition-all duration-[2500ms] ease-out" :class="kec.colorClass" :style="{ width: isLoaded ? `${kec.percentage}%` : '0%' }"></div>
+                 </div>
+                 <div class="w-12 text-right shrink-0">
+                    <span class="text-xs font-bold text-accent">{{ kec.displayValue }}</span>
+                 </div>
+             </div>
+          </div>
+          <p v-if="!topDistricts.length" class="text-sm text-slate-400 text-center py-6">Belum ada data risiko per kecamatan.</p>
+        </div>
+
+        <button class="w-full text-center text-sm font-semibold text-primary hover:text-primary-600 mt-4 pt-4 border-t border-slate-100 flex items-center justify-center gap-1 transition-colors">
+          Lihat Selengkapnya <span aria-hidden="true">&rarr;</span>
+        </button>
+      </div>
+
+      <!-- Kanan: Top 5 Puskesmas Kinerja Terbaik (revisi Bu Kadis) -- jumlah pasien Prolanis
+           yang tertangani dengan baik (turun tingkat risiko: berat->sedang, berat->ringan,
+           sedang->ringan, dst.) dalam periode filter aktif. super_admin otomatis melihat
+           SELURUH puskesmas (bisa persempit lewat filter puskesmas di atas -- backend sudah
+           menghormati puskesmas_id yang sama dipakai peta/statistik lain), admin_puskesmas/
+           pj_prolanis otomatis cuma lihat puskesmasnya sendiri (DashboardService::
+           puskesmasPerformance() pakai $scopedPatients yang sudah terkunci per role). -->
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-card p-5 flex flex-col">
+        <div class="flex items-center justify-between mb-1">
+          <h3 class="font-bold text-accent text-base flex items-center gap-2">
+            <LucideTrendingUp class="w-4 h-4 text-success" />
+            Top 5 Puskesmas Kinerja Terbaik
+          </h3>
+          <span class="text-[11px] font-semibold text-slate-400">{{ dateRangeLabel }}</span>
+        </div>
+        <p class="text-[11px] text-slate-400 mb-4">Pasien Prolanis yang kondisinya membaik (turun tingkat risiko)</p>
+
+        <div class="space-y-3 flex-1 mt-2">
+          <div v-for="(row, idx) in puskesmasPerformanceRows" :key="idx" class="flex items-center h-10">
+             <div class="w-32 shrink-0 pr-3 flex justify-end">
+                <AppTooltip :text="row.name">
+                   <span class="text-xs font-semibold text-slate-600 truncate block text-right">{{ row.name }}</span>
+                </AppTooltip>
+             </div>
+             <div class="flex-1 border-l-2 border-slate-200 flex items-center h-full pl-0">
+                <AppTooltip :text="row.breakdownText || 'Belum ada rincian transisi.'">
+                   <div class="flex-1 h-3 bg-slate-100 rounded-r-full overflow-hidden shadow-inner flex items-center cursor-help">
+                      <div class="h-full rounded-r-full bg-success transition-all duration-[2500ms] ease-out" :style="{ width: isLoaded ? `${row.percentage}%` : '0%' }"></div>
+                   </div>
+                </AppTooltip>
+                <div class="w-12 text-right shrink-0">
+                   <span class="text-xs font-bold text-accent">{{ row.displayValue }}</span>
+                </div>
+             </div>
+          </div>
+          <p v-if="!puskesmasPerformanceRows.length" class="text-sm text-slate-400 text-center py-6">Belum ada pasien yang membaik pada periode ini.</p>
+        </div>
+
+        <button class="w-full text-center text-sm font-semibold text-primary hover:text-primary-600 mt-4 pt-4 border-t border-slate-100 flex items-center justify-center gap-1 transition-colors">
+          Lihat Selengkapnya <span aria-hidden="true">&rarr;</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Row B: Aktivitas Kunjungan Hari Ini digeser ke bawah, berdampingan dengan Informasi
+         Pembaruan Sistem. -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
       <!-- Kiri: Aktivitas Kunjungan Hari Ini -->
       <div class="bg-white rounded-2xl border border-slate-100 shadow-card p-5 flex flex-col">
         <div class="flex items-center justify-between mb-5">
@@ -1095,7 +1302,7 @@ const initMap = () => {
           </h3>
           <button class="text-xs font-semibold text-primary hover:underline">Lihat Semua</button>
         </div>
-        
+
         <div class="overflow-x-auto mt-2 flex-1">
           <table class="w-full text-left border-collapse">
             <thead>
@@ -1138,35 +1345,6 @@ const initMap = () => {
             </tbody>
           </table>
         </div>
-      </div>
-
-      <!-- Tengah: 5 Kecamatan dengan Risiko Tertinggi -->
-      <div class="bg-white rounded-2xl border border-slate-100 shadow-card p-5 flex flex-col">
-        <h3 class="font-bold text-accent text-base mb-5 flex items-center gap-2">
-          <LucideBarChart4 class="w-4 h-4 text-warning" />
-          5 Kecamatan Risiko Tertinggi
-        </h3>
-        
-        <div class="space-y-3 flex-1 mt-2">
-          <div v-for="(kec, idx) in topDistricts" :key="idx" class="flex items-center h-10">
-             <div class="w-32 shrink-0 pr-3 flex justify-end">
-                <span class="text-xs font-semibold text-slate-600 truncate">{{ kec.name }}</span>
-             </div>
-             <div class="flex-1 border-l-2 border-slate-200 flex items-center h-full pl-0">
-                 <div class="flex-1 h-3 bg-slate-100 rounded-r-full overflow-hidden shadow-inner flex items-center">
-                    <div class="h-full rounded-r-full transition-all duration-[2500ms] ease-out" :class="kec.colorClass" :style="{ width: isLoaded ? `${kec.percentage}%` : '0%' }"></div>
-                 </div>
-                 <div class="w-12 text-right shrink-0">
-                    <span class="text-xs font-bold text-accent">{{ kec.displayValue }}</span>
-                 </div>
-             </div>
-          </div>
-          <p v-if="!topDistricts.length" class="text-sm text-slate-400 text-center py-6">Belum ada data risiko per kecamatan.</p>
-        </div>
-
-        <button class="w-full text-center text-sm font-semibold text-primary hover:text-primary-600 mt-4 pt-4 border-t border-slate-100 flex items-center justify-center gap-1 transition-colors">
-          Lihat Selengkapnya <span aria-hidden="true">&rarr;</span>
-        </button>
       </div>
 
       <!-- Kanan: Notifikasi -->

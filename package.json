@@ -1,5 +1,5 @@
 {
-  "name": "kopipu-smart-frontend",
+  "name": "produli-frontend",
   "type": "module",
   "private": true,
   "scripts": {
@@ -24,6 +24,7 @@
     "@vueuse/nuxt": "^14.4.0",
     "axios": "^1.19.0",
     "chart.js": "^4.5.1",
+    "firebase": "^12.17.1",
     "flatpickr": "^4.6.13",
     "maplibre-gl": "^6.1.0",
     "motion-v": "^2.3.0",

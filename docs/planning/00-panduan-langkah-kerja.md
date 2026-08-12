@@ -1,4 +1,4 @@
-# Panduan Langkah Kerja — KOPIPU Smart
+# Panduan Langkah Kerja — PRODULI
 
 Urutan ini disusun berdasarkan dependensi: SiLAKES harus siap menyediakan data
 dulu sebelum backend KOPIPU bisa sinkronisasi sungguhan, dan backend harus
@@ -120,7 +120,7 @@ _Mulai setelah endpoint auth & data dasar di Tahap 2 siap, supaya bisa langsung 
 2. **Prompt 1 (sanity check):**
    > Baca CLAUDE.md, docs/planning/03, dan docs/planning/05 (kontrak API backend), lalu ringkas pemahamanmu soal proyek ini, endpoint yang tersedia, dan bagian yang jadi tanggung jawab repo ini.
 3. **Prompt 2 — struktur dasar + branding/SEO:**
-   > Setup struktur layouts/public.vue (SEO aktif) dan layouts/private.vue (noindex otomatis) sesuai docs/planning/03 §2 dan §5. Sekalian: (1) taruh 4 file logo dari public/logo/ dan icon PWA (pwa-192x192.png, pwa-512x512.png, maskable-icon-\*.png, apple-touch-icon.png, favicon.ico, og-image.png — sudah disediakan terpisah, taruh di public/) ke manifest PWA yang masih kosong (nuxt.config.ts) dan favicon/apple-touch-icon di app.head. (2) Set default useSeoMeta di layout publik: title pola "{halaman} — KOPIPU Smart", ogImage ke og-image.png, selalu tulis "KOPIPU Smart" konsisten sesuai docs/planning/03 §6.
+   > Setup struktur layouts/public.vue (SEO aktif) dan layouts/private.vue (noindex otomatis) sesuai docs/planning/03 §2 dan §5. Sekalian: (1) taruh 4 file logo dari public/logo/ dan icon PWA (pwa-192x192.png, pwa-512x512.png, maskable-icon-\*.png, apple-touch-icon.png, favicon.ico, og-image.png — sudah disediakan terpisah, taruh di public/) ke manifest PWA yang masih kosong (nuxt.config.ts) dan favicon/apple-touch-icon di app.head. (2) Set default useSeoMeta di layout publik: title pola "{halaman} — PRODULI", ogImage ke og-image.png, selalu tulis "PRODULI" konsisten sesuai docs/planning/03 §6.
 4. **Prompt 3 — struktur pages/ + auth store:**
    > Buatkan struktur dasar pages/ (folder routing minimal), composable useApi (base URL dari runtimeConfig.public.apiBase, credentials: 'include' wajib), dan Pinia store useAuthStore (login, refresh, logout, state user) sesuai docs/planning/03 §3 dan docs/planning/05. Store lain (useAssignmentStore, usePatientStore, useSyncStore) belum sekarang — dibangun nanti saat halaman yang membutuhkannya dikerjakan.
 5. **Prompt 4a — halaman login:**
@@ -134,7 +134,7 @@ _Mulai setelah endpoint auth & data dasar di Tahap 2 siap, supaya bisa langsung 
 9. **Prompt 4e — forgot & reset password:**
    > Halaman lupa password (POST /api/v1/auth/forgot-password, pesan sukses generik) dan reset (token dari query, POST /api/v1/auth/reset-password).
 10. **Prompt 4f — landing page utama:**
-    > Baca docs/planning/06-brief-landing-page.md sepenuhnya. Bangun pages/index.vue sesuai §3 (Hero, Mengapa KOPIPU Smart 6 card, Nilai Inovasi dengan animasi scroll, Tentang Inovasi ringkas, Footer kredit elegan) sesuai arahan desain §6. Pakai motion-v untuk animasi bertujuan (bukan dekorasi kosong). Pastikan title/SEO meta sesuai §7.
+    > Baca docs/planning/06-brief-landing-page.md sepenuhnya. Bangun pages/index.vue sesuai §3 (Hero, Mengapa PRODULI 6 card, Nilai Inovasi dengan animasi scroll, Tentang Inovasi ringkas, Footer kredit elegan) sesuai arahan desain §6. Pakai motion-v untuk animasi bertujuan (bukan dekorasi kosong). Pastikan title/SEO meta sesuai §7.
 11. **Prompt 4g — sub-halaman publik + SEO teknis:**
     > Bangun pages/tentang-kami.vue dan pages/kontak.vue sesuai docs/planning/06-brief-landing-page.md §4 dan §5. Tambahkan JSON-LD structured data (GovernmentOrganization/Organization) di landing sesuai §7. Pastikan @nuxtjs/sitemap mencakup semua route publik baru. Kalau mau tambah @nuxt/image, tanya dulu sebelum install — jangan diam-diam.
 12. **Prompt 5 — dashboard:**

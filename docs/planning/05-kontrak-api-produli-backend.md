@@ -1,4 +1,4 @@
-# Kontrak API Backend KOPIPU (Aktual — dari `route:list` nyata)
+# Kontrak API Backend PRODULI (Aktual — dari `route:list` nyata)
 
 > Diambil langsung dari `php artisan route:list` di repo backend, bukan direkonstruksi dari ingatan — kalau ada perbedaan dengan yang ditemukan Claude Code saat baca kode backend langsung, **ikuti kode backend**, dokumen ini cuma peta, bukan sumber kebenaran mutlak. Untuk bentuk persis request/response tiap endpoint (field apa saja, validasi apa), baca Controller/Request/Resource class terkait di repo backend — dokumen ini sengaja tidak menebak detail itu.
 

@@ -15,12 +15,13 @@
           >
             <img
               src="/logo/logo-no-text.png"
-              alt="KOPIPU Smart Logo"
+              alt="PRODULI Logo"
               class="h-full w-full object-contain"
             />
           </div>
-          <span class="text-2xl font-bold tracking-tight"
-            >KOPIPU <span class="font-light">Smart</span></span
+          <span
+            class="rounded-md bg-white px-2 py-0.5 text-2xl font-bold tracking-tight text-accent"
+            >PRO<span class="font-light text-primary">DULI</span></span
           >
         </div>
         <p class="mb-6 max-w-sm text-neutral-400">
@@ -97,7 +98,7 @@
     >
       <div class="text-center text-gray-200 md:text-left">
         <p>
-          &copy; 2026 KOPIPU Smart Platform. Hak cipta dilindungi undang-undang.
+          &copy; 2026 PRODULI Platform. Hak cipta dilindungi undang-undang.
         </p>
         <p class="mt-1 text-xs text-gray-200">
           Dikembangkan oleh Pengolah Data dan Informasi UPTD Laboratorium

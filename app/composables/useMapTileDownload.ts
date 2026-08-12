@@ -6,7 +6,7 @@
 // cache store, tile yang sudah diunduh manual langsung dipakai peta tanpa perlu online lagi.
 import type { VisitAssignment } from '~/types/api'
 
-const CACHE_NAME = 'kopipu-map-tiles'
+const CACHE_NAME = 'produli-map-tiles'
 const MIN_ZOOM = 9
 const MAX_ZOOM = 16
 // ~2km buffer di sekitar titik pasien terluar -- kader biasanya perlu sedikit konteks jalan di

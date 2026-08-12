@@ -1,7 +1,7 @@
 <template>
   <div class="prose prose-sm max-w-none text-neutral-600 leading-relaxed text-justify">
     <p class="mb-5 font-medium leading-relaxed text-primary-800 bg-primary-50 p-4 rounded-xl border border-primary-200 shadow-sm">
-      Aplikasi <strong class="text-primary-900">KOPIPU Smart</strong> lahir sebagai bentuk digitalisasi program unggulan Pemerintah Provinsi Jawa Timur yang digagas pada era Gubernur Khofifah Indar Parawansa, yakni <strong>KOPIPU (Kunjungan Rumah dari Pintu ke Pintu pada Keluarga Rawan)</strong>. Program ini juga terintegrasi penuh dengan <a href="https://peraturan.bpk.go.id/Home/Details/114990/permenkes-no-39-tahun-2016" target="_blank" rel="noopener noreferrer" class="text-primary-600 hover:text-primary-800 font-semibold underline decoration-primary-300 underline-offset-2">Program Indonesia Sehat dengan Pendekatan Keluarga (PIS-PK) berdasarkan Permenkes No. 39 Tahun 2016</a>, demi menekan angka kesakitan pada keluarga berisiko tinggi.
+      Aplikasi <strong class="text-primary-900">PRODULI</strong> lahir sebagai bentuk digitalisasi program unggulan Pemerintah Provinsi Jawa Timur yang digagas pada era Gubernur Khofifah Indar Parawansa, yakni <strong>KOPIPU (Kunjungan Rumah dari Pintu ke Pintu pada Keluarga Rawan)</strong>. Program ini juga terintegrasi penuh dengan <a href="https://peraturan.bpk.go.id/Home/Details/114990/permenkes-no-39-tahun-2016" target="_blank" rel="noopener noreferrer" class="text-primary-600 hover:text-primary-800 font-semibold underline decoration-primary-300 underline-offset-2">Program Indonesia Sehat dengan Pendekatan Keluarga (PIS-PK) berdasarkan Permenkes No. 39 Tahun 2016</a>, demi menekan angka kesakitan pada keluarga berisiko tinggi.
     </p>
 
     <div class="bg-surface rounded-xl border border-neutral-200 p-5 mb-6 shadow-sm">
@@ -10,13 +10,13 @@
          Tentang Pengembang
       </h3>
       <p class="text-sm leading-relaxed text-neutral-700">
-        Platform KOPIPU Smart ini diinisiasi dan digagas secara langsung oleh <strong>Kepala Dinas Kesehatan, Pengendalian Penduduk dan Keluarga Berencana (Dinkes P2KB) Kabupaten Sumenep</strong> bersama <strong>UPTD Laboratorium Kesehatan Daerah Kabupaten Sumenep</strong>. Sistem ini dikembangkan, dirancang, dan dikelola sepenuhnya oleh <strong>Pengolah Data dan Informasi UPTD Laboratorium Kesehatan Daerah Kabupaten Sumenep</strong> demi mendukung percepatan pelayanan promotif dan preventif secara proaktif ke setiap keluarga di seluruh pelosok kabupaten.
+        Platform PRODULI ini diinisiasi dan digagas secara langsung oleh <strong>Kepala Dinas Kesehatan, Pengendalian Penduduk dan Keluarga Berencana (Dinkes P2KB) Kabupaten Sumenep</strong> bersama <strong>UPTD Laboratorium Kesehatan Daerah Kabupaten Sumenep</strong>. Sistem ini dikembangkan, dirancang, dan dikelola sepenuhnya oleh <strong>Pengolah Data dan Informasi UPTD Laboratorium Kesehatan Daerah Kabupaten Sumenep</strong> demi mendukung percepatan pelayanan promotif dan preventif secara proaktif ke setiap keluarga di seluruh pelosok kabupaten.
       </p>
     </div>
 
     <h3 class="text-accent font-bold mb-2">Pasal 1: Ketentuan Umum</h3>
     <p class="mb-4">
-      Dengan menggunakan aplikasi KOPIPU Smart, Pengguna (Kader Kesehatan, Perawat, dan Tenaga Kesehatan lainnya) secara sadar menyatakan tunduk pada Syarat dan Ketentuan ini. Aplikasi ini dioperasikan oleh Pemerintah Kabupaten Sumenep sebagai instrumen pencatatan rekam medis elektronik lapangan yang sah. Pengguna wajib mematuhi Standard Operating Procedure (SOP) pelayanan yang telah ditetapkan dinas terkait.
+      Dengan menggunakan aplikasi PRODULI, Pengguna (Kader Kesehatan, Perawat, dan Tenaga Kesehatan lainnya) secara sadar menyatakan tunduk pada Syarat dan Ketentuan ini. Aplikasi ini dioperasikan oleh Pemerintah Kabupaten Sumenep sebagai instrumen pencatatan rekam medis elektronik lapangan yang sah. Pengguna wajib mematuhi Standard Operating Procedure (SOP) pelayanan yang telah ditetapkan dinas terkait.
     </p>
 
     <h3 class="text-accent font-bold mb-2">Pasal 2: Privasi dan Pelindungan Data Pribadi</h3>
@@ -31,7 +31,7 @@
 
     <h3 class="text-accent font-bold mb-2">Pasal 4: Kewajiban Sinkronisasi (Mode Luring)</h3>
     <p class="mb-4">
-      Bagi wilayah dengan kendala infrastruktur jaringan (<em>blank spot</em>), KOPIPU Smart beroperasi penuh dengan teknologi <em>Offline-First</em>. Namun, pengguna bertanggung jawab penuh untuk menekan tombol <strong>Sinkronisasi</strong> segera setelah perangkat mendapat akses internet, selambat-lambatnya 1x24 jam setelah jadwal kunjungan lapangan. Kelalaian yang berujung pada hilangnya data <em>draft</em> kunjungan menjadi beban kelalaian perorangan.
+      Bagi wilayah dengan kendala infrastruktur jaringan (<em>blank spot</em>), PRODULI beroperasi penuh dengan teknologi <em>Offline-First</em>. Namun, pengguna bertanggung jawab penuh untuk menekan tombol <strong>Sinkronisasi</strong> segera setelah perangkat mendapat akses internet, selambat-lambatnya 1x24 jam setelah jadwal kunjungan lapangan. Kelalaian yang berujung pada hilangnya data <em>draft</em> kunjungan menjadi beban kelalaian perorangan.
     </p>
 
     <h3 class="text-accent font-bold mb-2">Pasal 5: Keamanan Akses Kredensial</h3>

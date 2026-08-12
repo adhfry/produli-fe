@@ -1,6 +1,6 @@
 import type { ApiErrorEnvelope } from '~/types/api'
 
-// Client HTTP dasar KOPIPU — wajib dipakai oleh semua composable/store yang bicara ke backend
+// Client HTTP dasar PRODULI — wajib dipakai oleh semua composable/store yang bicara ke backend
 // (docs/planning/03 §3: "komponen tidak fetch API langsung, selalu lewat composable").
 // credentials: 'include' wajib (CLAUDE.md) — tanpa ini refresh-token cookie tidak pernah terkirim.
 export function useApi() {
