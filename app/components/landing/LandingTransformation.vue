@@ -292,7 +292,7 @@ onMounted(() => {
         >
           <div class="border-b border-neutral-100 bg-neutral-50 px-6 py-5 md:px-8">
             <div class="flex items-center gap-2 text-xs font-bold tracking-widest text-neutral-400 uppercase">
-              <LucideChartPie class="h-4 w-4" /> Klasifikasi Risiko
+              <LucideChartPie class="h-4 w-4" /> Risk Classification
             </div>
             <p class="mt-1 text-sm text-neutral-500">
               Tingkat risiko beserta parameter kombinasi yang menjadi penentunya.
@@ -392,8 +392,7 @@ onMounted(() => {
           <p class="border-t border-neutral-100 px-6 py-4 text-xs text-neutral-400 md:px-8">
             Creatinine memiliki dua ambang bertingkat karena berperan sebagai
             penentu klasifikasi langsung ("direct classifier"); penjelasan
-            lebih lanjut disajikan pada bagian Deteksi Dini Cerdas (Smart
-            Early Detection) berikut.
+            lebih lanjut disajikan pada bagian Smart Early Detection berikut.
           </p>
         </motion.div>
       </div>

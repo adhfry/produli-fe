@@ -231,7 +231,7 @@ function openModal() {
           <div class="flex items-center justify-between border-b border-neutral-100 px-6 py-5">
             <div class="flex items-center gap-2">
               <LucideFlaskConical class="h-5 w-5 text-primary" />
-              <h3 class="text-lg font-bold text-accent">Simulasi Deteksi Dini</h3>
+              <h3 class="text-lg font-bold text-accent">Simulasi Smart Early Detection</h3>
             </div>
             <button type="button" @click="showModal = false" class="rounded-lg p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600">
               <LucideX class="h-5 w-5" />
