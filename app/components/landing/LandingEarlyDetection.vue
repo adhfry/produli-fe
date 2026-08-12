@@ -23,14 +23,14 @@ const signals = [
     icon: LucideSlidersHorizontal,
     title: "Kedekatan ke Ambang Berat (Proximity)",
     forWhom: "Khusus parameter bertingkat seperti Creatinine",
-    desc: "Menghitung posisi nilai pasien di dalam rentang Sedang sebagai persentase menuju ambang Berat berikutnya -- 1 parameter penting yang dinilai terpisah dari kombo, tidak pernah dilonggarkan.",
+    desc: "Menghitung posisi nilai pasien di dalam rentang Sedang sebagai persentase menuju ambang Berat berikutnya. Satu parameter penting yang dinilai terpisah dari kombo, tidak pernah dilonggarkan.",
     formula: "proximity = (nilai - ambang_bawah) / (ambang_berat - ambang_bawah)",
   },
   {
     icon: LucideLayers,
     title: "Margin Kombinasi Parameter",
     forWhom: "Untuk 5 parameter kombinasi (GDP, Cholesterol, Trigliserida, LDL, Urea)",
-    desc: "Bukan lagi sekadar jumlah parameter yang melebihi ambang -- minimal 2 parameter harus melebihi BERSAMAAN, dan SELURUHNYA (bukan cuma rata-ratanya) harus sama-sama jauh di atas nilai rujukan aslinya, bukan cuma 1 parameter menyimpang jauh sementara yang lain nyaris ambang.",
+    desc: "Bukan lagi sekadar jumlah parameter yang melebihi ambang. Minimal 3 parameter harus melebihi bersamaan, WAJIB mencakup Gula Darah Puasa, LDL, dan Trigliserida (pemeriksaan terpenting secara klinis; Cholesterol dan Urea hanya pelengkap opsional). Seluruhnya — bukan cuma rata-ratanya — harus sama-sama jauh di atas nilai rujukan aslinya, bukan cuma satu parameter menyimpang jauh sementara yang lain nyaris ambang.",
     formula: "hitung(margin) ≥ min_parameter DAN min(margin) ≥ ambang_margin",
   },
   {
@@ -52,13 +52,15 @@ const AMBANG_BERAT = 2.0; // Creatinine mg/dL
 const PROXIMITY_THRESHOLD = 0.6; // config('produli.early_detection.proximity_threshold')
 const MAKS_PROXIMITY_TERCAPAI = (1.9 - AMBANG_SEDANG_BAWAH) / (AMBANG_BERAT - AMBANG_SEDANG_BAWAH); // 66,7%
 
-// config('produli.early_detection.combo_min_parameters' / 'combo_margin_threshold_percent')
-const COMBO_MIN_PARAMETERS = 2;
+// config('produli.early_detection.combo_min_parameters' / 'combo_margin_threshold_percent' /
+// 'combo_required_parameters')
+const COMBO_MIN_PARAMETERS = 3;
 const COMBO_MARGIN_THRESHOLD_PERCENT = 50;
+const COMBO_REQUIRED_PARAMETERS = "Gula Darah Puasa, LDL, Trigliserida";
 
 const showModal = ref(false);
 const simMode = ref<"creatinine" | "combo">("creatinine");
-const simCreatinine = ref(1.89); // contoh bawaan -- persis kasus nyata yang ditemukan saat pengujian
+const simCreatinine = ref(1.89); // contoh bawaan, persis kasus nyata yang ditemukan saat pengujian
 
 const simProximity = computed(() => {
   const raw = (simCreatinine.value - AMBANG_SEDANG_BAWAH) / (AMBANG_BERAT - AMBANG_SEDANG_BAWAH);
@@ -67,27 +69,30 @@ const simProximity = computed(() => {
 const simProximityPercent = computed(() => Math.round(simProximity.value * 1000) / 10);
 const simFlagged = computed(() => simProximity.value >= PROXIMITY_THRESHOLD);
 
-// Simulasi Margin Kombinasi -- 2 parameter contoh (Gula Darah Puasa & Cholesterol), persis
-// combo_min_parameters bawaan (2). Margin = (nilai - ambang) / ambang * 100, SELURUH parameter
+// Simulasi Margin Kombinasi -- 3 parameter wajib (Gula Darah Puasa, LDL, Trigliserida), persis
+// combo_required_parameters bawaan. Margin = (nilai - ambang) / ambang * 100, SELURUH parameter
 // yang diikutkan harus >= ambang margin, bukan cuma rata-ratanya (lihat evaluateComboMargin()).
 const comboGdp = ref({ value: 180, ambang: 120 }); // Gula Darah Puasa mg/dL
-const comboKolesterol = ref({ value: 300, ambang: 200 }); // Cholesterol mg/dL
+const comboLdl = ref({ value: 195, ambang: 130 }); // LDL mg/dL
+const comboTrigliserida = ref({ value: 225, ambang: 150 }); // Trigliserida mg/dL
 
 function marginPercent(value: number, ambang: number): number {
   return ((value - ambang) / ambang) * 100;
 }
 
 const simMarginGdp = computed(() => Math.max(0, marginPercent(comboGdp.value.value, comboGdp.value.ambang)));
-const simMarginKolesterol = computed(() => Math.max(0, marginPercent(comboKolesterol.value.value, comboKolesterol.value.ambang)));
-const simMarginMin = computed(() => Math.min(simMarginGdp.value, simMarginKolesterol.value));
-const simMarginAverage = computed(() => (simMarginGdp.value + simMarginKolesterol.value) / 2);
+const simMarginLdl = computed(() => Math.max(0, marginPercent(comboLdl.value.value, comboLdl.value.ambang)));
+const simMarginTrigliserida = computed(() => Math.max(0, marginPercent(comboTrigliserida.value.value, comboTrigliserida.value.ambang)));
+const simMarginMin = computed(() => Math.min(simMarginGdp.value, simMarginLdl.value, simMarginTrigliserida.value));
+const simMarginAverage = computed(() => (simMarginGdp.value + simMarginLdl.value + simMarginTrigliserida.value) / 3);
 const simComboFlagged = computed(() => simMarginMin.value >= COMBO_MARGIN_THRESHOLD_PERCENT);
 
 function openModal() {
   simMode.value = "creatinine";
   simCreatinine.value = 1.89;
   comboGdp.value = { value: 180, ambang: 120 };
-  comboKolesterol.value = { value: 300, ambang: 200 };
+  comboLdl.value = { value: 195, ambang: 130 };
+  comboTrigliserida.value = { value: 225, ambang: 150 };
   showModal.value = true;
 }
 </script>
@@ -113,7 +118,7 @@ function openModal() {
           <span class="text-primary">Hampir Memburuk</span>
         </h2>
         <p class="text-lg text-neutral-600">
-          Bukan sekadar mengelompokkan Ringan/Sedang/Berat -- sistem juga
+          Bukan sekadar mengelompokkan Ringan/Sedang/Berat. Sistem juga
           menandai pasien berisiko Sedang yang kondisinya diam-diam sudah
           mendekati ambang Berat, berbasis 3 aturan objektif (rule-based),
           bukan tebakan model machine learning kotak hitam.
@@ -163,7 +168,7 @@ function openModal() {
             <em>maksimum</em> yang mungkin dicapai di dalam rentang Sedang
             (1,9 mg/dL) hanya menempuh
             <strong class="text-primary">{{ (MAKS_PROXIMITY_TERCAPAI * 100).toFixed(1) }}%</strong>
-            perjalanan menuju ambang Berat -- kalau threshold di-set 70%,
+            perjalanan menuju ambang Berat &mdash; kalau threshold di-set 70%,
             sinyal ini secara matematis
             <strong>tidak akan pernah bisa menyala</strong>. Ambang 60%
             dipilih supaya berada sedikit di bawah batas maksimum itu,
@@ -171,21 +176,23 @@ function openModal() {
             peringatan bermakna.
           </p>
           <p class="mb-3 text-sm leading-relaxed text-neutral-600">
-            Untuk 5 parameter kombinasi, ceritanya beda -- parameter ini
+            Untuk 5 parameter kombinasi, ceritanya beda. Parameter ini
             tidak punya tier "Berat" numerik bertingkat seperti Creatinine
             (Berat kombo ditentukan lewat kelengkapan, bukan kedalaman),
             jadi tidak ada batas atas matematis alami. Minimal
             <strong class="text-accent">{{ COMBO_MIN_PARAMETERS }} parameter</strong>
-            harus melebihi ambang bersamaan (bukan cuma 1 parameter
-            menyimpang jauh sendirian), dan SELURUHNYA harus sama-sama
+            harus melebihi ambang bersamaan, WAJIB mencakup
+            <strong class="text-accent">{{ COMBO_REQUIRED_PARAMETERS }}</strong>
+            (pemeriksaan terpenting secara klinis; Cholesterol dan Urea
+            hanya pelengkap opsional), dan seluruhnya harus sama-sama
             <strong class="text-primary">&ge; {{ COMBO_MARGIN_THRESHOLD_PERCENT }}%</strong>
-            di atas nilai rujukan aslinya -- kedua angka ini murni
+            di atas nilai rujukan aslinya. Ketiga angka ini murni
             keputusan kebijakan klinis, bukan hasil turunan rumus.
           </p>
           <p class="flex items-start gap-2 text-sm text-neutral-500">
             <LucideSlidersHorizontal class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-            Ketiga nilai ambang ini tersimpan sebagai konfigurasi (bukan
-            angka tetap di kode) -- dapat disetel ulang tanpa mengubah
+            Seluruh ambang ini tersimpan sebagai konfigurasi (bukan
+            angka tetap di kode) sehingga dapat disetel ulang tanpa mengubah
             aplikasi kalau ada evaluasi klinis baru dari tenaga kesehatan.
           </p>
         </div>
@@ -296,11 +303,11 @@ function openModal() {
                   <p class="mt-1 text-xs" :class="simFlagged ? 'text-rose-600' : 'text-emerald-600'">
                     <template v-if="simFlagged">
                       Pasien tetap diklasifikasikan <strong>Sedang</strong>, tapi kondisinya sudah
-                      {{ simProximityPercent }}% mendekati ambang Berat ({{ AMBANG_BERAT.toFixed(1) }} mg/dL) --
-                      sistem menandai untuk pemantauan lebih intensif sebelum benar-benar menjadi Berat.
+                      {{ simProximityPercent }}% mendekati ambang Berat ({{ AMBANG_BERAT.toFixed(1) }} mg/dL).
+                      Sistem menandai untuk pemantauan lebih intensif sebelum benar-benar menjadi Berat.
                     </template>
                     <template v-else>
-                      Nilai masih cukup jauh dari ambang Berat -- belum ditandai sebagai
+                      Nilai masih cukup jauh dari ambang Berat, belum ditandai sebagai
                       berpotensi memburuk. Geser slider ke kanan untuk melihat titik ambang aktif.
                     </template>
                   </p>
@@ -310,9 +317,9 @@ function openModal() {
 
             <template v-else-if="simMode === 'combo'">
               <p class="text-sm text-neutral-500">
-                Contoh: 2 dari 5 parameter kombinasi (Gula Darah Puasa &amp;
-                Cholesterol) sama-sama dinilai. Ubah nilainya untuk melihat
-                kapan <strong>keduanya</strong> -- bukan cuma rata-ratanya --
+                Contoh: 3 parameter wajib (Gula Darah Puasa, LDL, dan
+                Trigliserida) sama-sama dinilai. Ubah nilainya untuk melihat
+                kapan <strong>ketiganya</strong> &mdash; bukan cuma rata-ratanya &mdash;
                 melewati ambang margin.
               </p>
 
@@ -337,20 +344,39 @@ function openModal() {
 
               <div>
                 <div class="mb-2 flex items-center justify-between">
-                  <label class="text-xs font-bold tracking-wide text-neutral-500 uppercase">Cholesterol (mg/dL)</label>
-                  <span class="font-mono text-lg font-bold text-accent">{{ comboKolesterol.value }}</span>
+                  <label class="text-xs font-bold tracking-wide text-neutral-500 uppercase">LDL (mg/dL)</label>
+                  <span class="font-mono text-lg font-bold text-accent">{{ comboLdl.value }}</span>
                 </div>
                 <input
-                  v-model.number="comboKolesterol.value"
+                  v-model.number="comboLdl.value"
                   type="range"
-                  min="200"
-                  max="400"
+                  min="130"
+                  max="300"
                   step="5"
                   class="w-full accent-primary"
                 />
                 <div class="mt-1 flex justify-between text-[10px] text-neutral-400">
-                  <span>200 (ambang rujukan)</span>
-                  <span>400</span>
+                  <span>130 (ambang rujukan)</span>
+                  <span>300</span>
+                </div>
+              </div>
+
+              <div>
+                <div class="mb-2 flex items-center justify-between">
+                  <label class="text-xs font-bold tracking-wide text-neutral-500 uppercase">Trigliserida (mg/dL)</label>
+                  <span class="font-mono text-lg font-bold text-accent">{{ comboTrigliserida.value }}</span>
+                </div>
+                <input
+                  v-model.number="comboTrigliserida.value"
+                  type="range"
+                  min="150"
+                  max="350"
+                  step="5"
+                  class="w-full accent-primary"
+                />
+                <div class="mt-1 flex justify-between text-[10px] text-neutral-400">
+                  <span>150 (ambang rujukan)</span>
+                  <span>350</span>
                 </div>
               </div>
 
@@ -361,8 +387,12 @@ function openModal() {
                   = <strong class="text-accent">{{ simMarginGdp.toFixed(0) }}%</strong>
                 </div>
                 <div class="mt-1">
-                  margin_kolesterol = ({{ comboKolesterol.value }} &minus; {{ comboKolesterol.ambang }}) / {{ comboKolesterol.ambang }}
-                  = <strong class="text-accent">{{ simMarginKolesterol.toFixed(0) }}%</strong>
+                  margin_ldl = ({{ comboLdl.value }} &minus; {{ comboLdl.ambang }}) / {{ comboLdl.ambang }}
+                  = <strong class="text-accent">{{ simMarginLdl.toFixed(0) }}%</strong>
+                </div>
+                <div class="mt-1">
+                  margin_trigliserida = ({{ comboTrigliserida.value }} &minus; {{ comboTrigliserida.ambang }}) / {{ comboTrigliserida.ambang }}
+                  = <strong class="text-accent">{{ simMarginTrigliserida.toFixed(0) }}%</strong>
                 </div>
                 <div class="mt-1">
                   min(margin) = <strong class="text-accent">{{ simMarginMin.toFixed(0) }}%</strong>
@@ -383,14 +413,14 @@ function openModal() {
                   </p>
                   <p class="mt-1 text-xs" :class="simComboFlagged ? 'text-rose-600' : 'text-emerald-600'">
                     <template v-if="simComboFlagged">
-                      Kedua parameter sama-sama sudah jauh di atas nilai rujukan
-                      (minimum {{ simMarginMin.toFixed(0) }}%) -- sistem menandai
-                      pasien ini berpotensi menuju Berat, bukan cuma karena 1
+                      Ketiga parameter sama-sama sudah jauh di atas nilai rujukan
+                      (minimum {{ simMarginMin.toFixed(0) }}%). Sistem menandai
+                      pasien ini berpotensi menuju Berat, bukan cuma karena satu
                       parameter yang melonjak sendirian.
                     </template>
                     <template v-else>
                       Salah satu parameter masih di bawah ambang margin
-                      {{ COMBO_MARGIN_THRESHOLD_PERCENT }}% -- belum ditandai,
+                      {{ COMBO_MARGIN_THRESHOLD_PERCENT }}%, belum ditandai,
                       meski rata-ratanya bisa saja sudah terlihat tinggi.
                     </template>
                   </p>

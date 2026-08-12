@@ -204,6 +204,19 @@ export interface RiskClassificationHistory {
   early_detection_reason: EarlyDetectionReason[] | null
 }
 
+// GET /patients/{id}/lab-results (revisi Bu Kadis) -- 1 baris per parameter, hasil TERBARU
+// SAJA (bukan riwayat), nilai_rujukan ASLI dari SiLAKES (standar lab, BUKAN risk_thresholds
+// internal PRODULI yang dipakai criteria_snapshot di atas -- dua konsep berbeda).
+export interface LabResult {
+  parameter: string
+  value: string
+  satuan: string | null
+  nilai_rujukan: string | null
+  class_hasil: string | null
+  validation_status: string | null
+  tanggal_periksa: string | null
+}
+
 // POST /patients/search-nik (SearchPatientByNikRequest) -- KOPIPU TIDAK PERNAH menyimpan NIK
 // asli (patients_cache cuma punya nik_hash HMAC dari SiLAKES, docs/planning/04) -- endpoint ini
 // cuma cocokkan hash-vs-hash, TIDAK PERNAH bisa menampilkan digit NIK asli di mana pun. POST

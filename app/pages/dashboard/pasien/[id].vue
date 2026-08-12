@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem, TenagaKesehatan, RiskClassificationHistory, RiskCriteriaSnapshotItem, VisitAssignment, PatientRiskLevel } from '~/types/api'
+import type { ApiSuccessEnvelope, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem, TenagaKesehatan, RiskClassificationHistory, RiskCriteriaSnapshotItem, VisitAssignment, PatientRiskLevel, LabResult } from '~/types/api'
 import { Line } from 'vue-chartjs'
 import { Chart as ChartJS, Title, Tooltip, Legend, LineElement, CategoryScale, LinearScale, PointElement } from 'chart.js'
 
@@ -60,6 +60,27 @@ async function loadRiskHistory() {
 
 const latestRiskEntry = computed(() => riskHistory.value[0] ?? null)
 
+// --- Hasil Pemeriksaan Terakhir (GET /patients/{id}/lab-results, revisi Bu Kadis) -- SEMUA
+// parameter yang pernah diperiksa (bukan cuma yang exceeded seperti criteria_snapshot),
+// lengkap dengan nilai_rujukan ASLI dari SiLAKES. -----------------------------------------------
+const labResults = ref<LabResult[]>([])
+const isLoadingLabResults = ref(false)
+const labResultsError = ref('')
+
+async function loadLabResults() {
+  isLoadingLabResults.value = true
+  labResultsError.value = ''
+  try {
+    const api = useApi()
+    const res = await api(`/patients/${route.params.id}/lab-results`) as ApiSuccessEnvelope<LabResult[]>
+    labResults.value = res.data
+  } catch (e) {
+    labResultsError.value = e instanceof ApiError ? e.message : 'Gagal memuat hasil pemeriksaan lab.'
+  } finally {
+    isLoadingLabResults.value = false
+  }
+}
+
 // --- Riwayat Kunjungan (GET /patients/{id}/visit-history, revisi Bu Kadis Fase 5) -- kader
 // MAUPUN tenaga_kesehatan, mengisi seksi yang sebelumnya placeholder statis. ------------------
 const visitHistoryList = ref<VisitAssignment[]>([])
@@ -84,17 +105,19 @@ onMounted(() => {
   loadPatient()
   loadRiskHistory()
   loadVisitHistory()
+  loadLabResults()
 })
 
 // Reload otomatis begitu sinkronisasi SiLAKES berhasil (dipicu dari sidebar ATAU tombol
 // "Sinkronisasi Sekarang" di riwayat pengajuan pada halaman ini sendiri) -- biodata, wilayah,
-// status risiko, riwayat klasifikasi, DAN riwayat pengajuan semuanya perlu dimuat ulang
-// bersamaan (sync bisa mengubah lab_results_cache -> klasifikasi baru).
+// status risiko, riwayat klasifikasi, hasil lab, DAN riwayat pengajuan semuanya perlu dimuat
+// ulang bersamaan (sync bisa mengubah lab_results_cache -> klasifikasi baru).
 const silakesSyncSignal = useSilakesSyncSignal()
 watch(silakesSyncSignal, () => {
   loadPatient()
   loadUpdateHistory()
   loadRiskHistory()
+  loadLabResults()
 })
 
 useHead({
@@ -586,6 +609,41 @@ async function triggerSyncFromHistory() {
               <span v-if="patient.is_perokok" class="bg-warning/10 text-warning border border-warning/20 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm">
                 Perokok{{ patient.jenis_perokok ? ` (${patient.jenis_perokok})` : '' }}
               </span>
+            </div>
+          </div>
+
+          <!-- Hasil Pemeriksaan Terakhir (revisi Bu Kadis) -- GET /patients/{id}/lab-results,
+               SEMUA parameter yang pernah diperiksa (bukan cuma yang jadi dasar klasifikasi di
+               bawah), lengkap dengan nilai_rujukan ASLI dari SiLAKES. -->
+          <div class="bg-white rounded-2xl border border-slate-100 shadow-card p-5">
+            <h3 class="font-bold text-accent text-base mb-4 flex items-center gap-2 border-b border-slate-100 pb-4">
+              <LucideFlaskConical class="w-4 h-4 text-primary" />
+              Hasil Pemeriksaan Terakhir
+            </h3>
+            <div v-if="isLoadingLabResults" class="py-8 text-center text-slate-400">
+              <LucideLoader2 class="w-5 h-5 mx-auto mb-2 animate-spin" />
+              Memuat hasil pemeriksaan...
+            </div>
+            <p v-else-if="labResultsError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ labResultsError }}</p>
+            <p v-else-if="labResults.length === 0" class="text-sm text-slate-400 text-center py-6">Belum ada hasil pemeriksaan lab tercatat untuk pasien ini.</p>
+            <div v-else class="space-y-3">
+              <div v-for="item in labResults" :key="item.parameter" class="flex items-start justify-between gap-3 pb-3 border-b border-slate-50 last:border-0 last:pb-0">
+                <div>
+                  <p class="text-sm font-bold text-slate-800">{{ item.parameter }}</p>
+                  <p class="text-[11px] text-slate-500 mt-0.5">
+                    Rujukan: {{ item.nilai_rujukan ?? '-' }}<span v-if="item.satuan"> {{ item.satuan }}</span>
+                    &middot; Diperiksa {{ formatCriteriaDate(item.tanggal_periksa) }}
+                  </p>
+                </div>
+                <div class="text-right shrink-0">
+                  <p class="text-sm font-black text-slate-800">{{ item.value }}<span v-if="item.satuan" class="text-[11px] font-semibold text-slate-400 ml-1">{{ item.satuan }}</span></p>
+                  <span
+                    v-if="item.class_hasil"
+                    class="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                    :class="item.class_hasil.toLowerCase().includes('normal') ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'"
+                  >{{ item.class_hasil }}</span>
+                </div>
+              </div>
             </div>
           </div>
 
