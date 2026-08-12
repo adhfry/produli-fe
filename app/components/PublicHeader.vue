@@ -3,6 +3,16 @@
 // sama persis, cuma kebab-case data-lucide -> komponen LucideXxx dan href jadi route Nuxt.
 const { y: scrollY } = useWindowScroll();
 const scrolled = computed(() => scrollY.value > 20);
+
+// Menu mobile -- TIDAK ADA di reference-landing-asli.html sekalipun (tombol hamburger di sana
+// juga cuma ikon statis tanpa handler/panel), jadi ini implementasi baru, bukan port. Ditutup
+// otomatis tiap kali route berubah (klik link/back-forward browser) supaya tidak nyangkut
+// terbuka saat pindah halaman.
+const mobileMenuOpen = ref(false);
+const route = useRoute();
+watch(() => route.fullPath, () => {
+  mobileMenuOpen.value = false;
+});
 </script>
 
 <template>
@@ -74,10 +84,43 @@ const scrolled = computed(() => scrollY.value > 20);
 
       <!-- Mobile: toggle + menu -->
       <div class="flex items-center gap-2 lg:hidden">
-        <button class="text-accent" type="button">
-          <LucideMenu class="h-6 w-6" />
+        <button
+          class="text-accent"
+          type="button"
+          :aria-expanded="mobileMenuOpen"
+          aria-controls="mobile-menu"
+          aria-label="Buka menu navigasi"
+          @click="mobileMenuOpen = !mobileMenuOpen"
+        >
+          <LucideX v-if="mobileMenuOpen" class="h-6 w-6" />
+          <LucideMenu v-else class="h-6 w-6" />
         </button>
       </div>
+    </div>
+
+    <!-- Panel Menu Mobile -->
+    <div
+      v-if="mobileMenuOpen"
+      id="mobile-menu"
+      class="mx-auto mt-4 flex max-w-7xl flex-col gap-1 rounded-2xl border border-neutral-200 bg-white p-4 text-sm font-medium text-neutral-600 shadow-lg lg:hidden"
+    >
+      <NuxtLink to="/#beranda" class="rounded-lg px-3 py-2.5 transition-colors hover:bg-neutral-50 hover:text-primary">Beranda</NuxtLink>
+      <NuxtLink to="/#platform" class="rounded-lg px-3 py-2.5 transition-colors hover:bg-neutral-50 hover:text-primary">Platform</NuxtLink>
+      <NuxtLink to="/#inovasi" class="rounded-lg px-3 py-2.5 transition-colors hover:bg-neutral-50 hover:text-primary">Inovasi</NuxtLink>
+      <NuxtLink to="/#keamanan" class="rounded-lg px-3 py-2.5 transition-colors hover:bg-neutral-50 hover:text-primary">Keamanan</NuxtLink>
+      <NuxtLink to="/#dampak" class="rounded-lg px-3 py-2.5 transition-colors hover:bg-neutral-50 hover:text-primary">Dampak</NuxtLink>
+
+      <div class="my-2 border-t border-neutral-100" />
+
+      <NuxtLink to="/tentang-kami" class="rounded-lg px-3 py-2.5 transition-colors hover:bg-neutral-50 hover:text-accent">Tentang</NuxtLink>
+      <NuxtLink to="/kontak" class="rounded-lg px-3 py-2.5 transition-colors hover:bg-neutral-50 hover:text-accent">Kontak</NuxtLink>
+      <NuxtLink
+        to="/auth/login"
+        class="mt-2 flex items-center justify-center gap-2 rounded-full bg-accent px-5 py-3 text-sm font-medium text-white shadow-md transition-all hover:bg-neutral-800"
+      >
+        Masuk Sistem
+        <LucideArrowRight class="h-4 w-4" />
+      </NuxtLink>
     </div>
   </nav>
 </template>
