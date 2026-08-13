@@ -13,6 +13,12 @@ const route = useRoute();
 watch(() => route.fullPath, () => {
   mobileMenuOpen.value = false;
 });
+
+// KHUSUS branch `dev`/lingkungan simulasi -- geser navbar turun sepersis tinggi
+// SimulationBanner.vue supaya tidak ketimpa (keduanya sama-sama fixed di top).
+// Tidak berpengaruh sama sekali di build produksi normal (bannerActive selalu false).
+const bannerActive = useSimulationBannerActive();
+const navTop = computed(() => (bannerActive.value ? `${SIMULATION_BANNER_HEIGHT_PX}px` : "0px"));
 </script>
 
 <template>
@@ -24,6 +30,7 @@ watch(() => route.fullPath, () => {
         ? 'border-neutral-200 bg-white/90 py-3 shadow-sm backdrop-blur-md'
         : ''
     "
+    :style="{ top: navTop }"
   >
     <div class="mx-auto flex max-w-7xl items-center justify-between">
       <!-- Logo -->

@@ -10,7 +10,7 @@ const label = config.public.appEnvLabel as string
 <template>
   <div
     v-if="label"
-    class="fixed inset-x-0 top-0 z-[100] flex items-center justify-center gap-2 bg-warning px-4 py-1.5 text-center text-xs font-bold tracking-wide text-warning-950 shadow-sm"
+    class="fixed inset-x-0 top-0 z-[100] flex h-9 items-center justify-center gap-2 bg-warning px-4 text-center text-xs font-bold tracking-wide text-warning-950 shadow-sm"
   >
     <LucideFlaskConical class="h-3.5 w-3.5 shrink-0" />
     <span>MODE {{ label }} — DATA BUKAN DATA PRODUKSI LIVE</span>

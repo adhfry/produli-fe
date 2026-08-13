@@ -29,6 +29,15 @@ import type { ApiSuccessEnvelope, AppNotification, PaginatedData, Role } from '~
 
 const isSidebarOpen = ref(true)
 
+// KHUSUS branch `dev`/lingkungan simulasi -- geser sidebar (fixed) & header (sticky)
+// turun sepersis tinggi SimulationBanner.vue supaya tidak ketimpa. Sticky BUTUH digeser
+// lewat margin/padding juga (bukan cuma ganti `top`) -- posisi awal sebelum discroll
+// tetap ditentukan alur dokumen normal, `top` cuma menentukan titik berhenti saat
+// scroll. Tidak berpengaruh sama sekali di build produksi normal (bannerActive selalu
+// false).
+const bannerActive = useSimulationBannerActive()
+const bannerOffsetTop = computed(() => (bannerActive.value ? `${SIMULATION_BANNER_HEIGHT_PX}px` : '0px'))
+
 // Identitas user login asli -- dipakai di widget sapaan header + dropdown profil (dulu
 // hardcode "dr. Budi" / "dr. Amanda Putri" / "amanda.putri@silakes.go.id", beda-beda pula
 // antara dua tempat yang seharusnya sama).
@@ -389,9 +398,10 @@ onMounted(loadSyncStatus)
     <SimulationBanner />
 
     <!-- Sidebar -->
-    <aside 
-      class="fixed top-0 left-0 h-screen w-64 bg-accent flex flex-col z-20 transition-transform duration-300 shadow-xl"
+    <aside
+      class="fixed left-0 h-screen w-64 bg-accent flex flex-col z-20 transition-transform duration-300 shadow-xl"
       :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+      :style="bannerActive ? { top: bannerOffsetTop, height: `calc(100vh - ${SIMULATION_BANNER_HEIGHT_PX}px)` } : { top: '0px' }"
     >
       <!-- Logo Area -->
       <div class="h-16 flex items-center px-6 bg-white shrink-0 border-b border-slate-200 theme-transition">
@@ -442,12 +452,16 @@ onMounted(loadSyncStatus)
     </aside>
 
     <!-- Main Content Wrapper -->
-    <div 
+    <div
       class="flex-1 flex flex-col min-h-screen transition-all duration-300"
       :class="isSidebarOpen ? 'ml-0 md:ml-64' : 'ml-0'"
+      :style="bannerActive ? { marginTop: bannerOffsetTop } : {}"
     >
       <!-- Header -->
-      <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-6 sticky top-0 z-40 shadow-sm theme-transition">
+      <header
+        class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-6 sticky z-40 shadow-sm theme-transition"
+        :style="{ top: bannerOffsetTop }"
+      >
         <div class="flex items-center gap-4">
           <button @click="toggleSidebar" class="text-slate-500 hover:text-primary transition-colors p-2 rounded-lg hover:bg-slate-50">
             <LucideMenu class="w-5 h-5" />
