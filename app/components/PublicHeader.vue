@@ -67,6 +67,11 @@ watch(() => route.fullPath, () => {
           >Tentang</NuxtLink
         >
         <NuxtLink
+          to="/panduan"
+          class="text-sm font-medium text-neutral-600 transition-colors hover:text-accent"
+          >Panduan</NuxtLink
+        >
+        <NuxtLink
           to="/kontak"
           class="text-sm font-medium text-neutral-600 transition-colors hover:text-accent"
           >Kontak</NuxtLink
@@ -113,6 +118,7 @@ watch(() => route.fullPath, () => {
       <div class="my-2 border-t border-neutral-100" />
 
       <NuxtLink to="/tentang-kami" class="rounded-lg px-3 py-2.5 transition-colors hover:bg-neutral-50 hover:text-accent">Tentang</NuxtLink>
+      <NuxtLink to="/panduan" class="rounded-lg px-3 py-2.5 transition-colors hover:bg-neutral-50 hover:text-accent">Panduan</NuxtLink>
       <NuxtLink to="/kontak" class="rounded-lg px-3 py-2.5 transition-colors hover:bg-neutral-50 hover:text-accent">Kontak</NuxtLink>
       <NuxtLink
         to="/auth/login"

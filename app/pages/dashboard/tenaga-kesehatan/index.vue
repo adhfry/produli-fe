@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, CreateTenagaKesehatanPayload, TenagaKesehatan, Puskesmas } from '~/types/api'
+import type { ApiSuccessEnvelope, CreateTenagaKesehatanPayload, TenagaKesehatan, Puskesmas, UpdateTenagaKesehatanPayload } from '~/types/api'
 
 definePageMeta({
   layout: 'dashboard',
@@ -158,6 +158,116 @@ async function save() {
     isSaving.value = false
   }
 }
+
+// --- Ubah Data — PATCH /api/v1/tenaga-kesehatan/{id} (TenagaKesehatanPolicy::update) ---
+const showEditModal = ref(false)
+const isSavingEdit = ref(false)
+const editError = ref('')
+const editFieldErrors = ref<Record<string, string[]>>({})
+const itemBeingEdited = ref<TenagaKesehatan | null>(null)
+const editForm = ref<UpdateTenagaKesehatanPayload>({})
+
+function openEditModal(item: TenagaKesehatan) {
+  itemBeingEdited.value = item
+  editForm.value = {
+    name: item.user?.name ?? '',
+    email: item.user?.email ?? '',
+    no_hp: item.no_hp,
+    no_wa: item.no_wa,
+    alamat: item.alamat,
+    gender: item.gender,
+    tgl_lahir: item.tgl_lahir
+  }
+  editError.value = ''
+  editFieldErrors.value = {}
+  showEditModal.value = true
+}
+
+async function saveEdit() {
+  if (!itemBeingEdited.value) return
+  isSavingEdit.value = true
+  editError.value = ''
+  editFieldErrors.value = {}
+  try {
+    const api = useApi()
+    const res = await api(`/tenaga-kesehatan/${itemBeingEdited.value.id}`, {
+      method: 'PATCH',
+      body: editForm.value
+    }) as ApiSuccessEnvelope<TenagaKesehatan>
+    const idx = list.value.findIndex((t) => t.id === itemBeingEdited.value!.id)
+    if (idx !== -1) list.value[idx] = res.data
+    showEditModal.value = false
+  } catch (e) {
+    if (e instanceof ApiError) {
+      editError.value = e.message
+      editFieldErrors.value = e.errors ?? {}
+    } else {
+      editError.value = 'Gagal memperbarui data tenaga kesehatan.'
+    }
+  } finally {
+    isSavingEdit.value = false
+  }
+}
+
+// --- Hapus PERMANEN — DELETE /api/v1/tenaga-kesehatan/{id} (ditolak backend kalau sudah ada
+// riwayat kunjungan/penugasan, lihat TenagaKesehatanService::delete()). ---
+const showDeleteConfirm = ref(false)
+const itemToDelete = ref<TenagaKesehatan | null>(null)
+const isDeleting = ref(false)
+const deleteError = ref('')
+
+function requestDelete(item: TenagaKesehatan) {
+  itemToDelete.value = item
+  deleteError.value = ''
+  showDeleteConfirm.value = true
+}
+
+async function confirmDelete() {
+  if (!itemToDelete.value) return
+  isDeleting.value = true
+  deleteError.value = ''
+  try {
+    const api = useApi()
+    await api(`/tenaga-kesehatan/${itemToDelete.value.id}`, { method: 'DELETE' })
+    list.value = list.value.filter((t) => t.id !== itemToDelete.value!.id)
+    showDeleteConfirm.value = false
+    itemToDelete.value = null
+  } catch (e) {
+    deleteError.value = e instanceof ApiError ? e.message : 'Gagal menghapus tenaga kesehatan.'
+  } finally {
+    isDeleting.value = false
+  }
+}
+
+// --- Reset Password — POST /api/v1/tenaga-kesehatan/{id}/reset-password (super_admin saja). ---
+const showResetPasswordConfirm = ref(false)
+const itemToReset = ref<TenagaKesehatan | null>(null)
+const isResettingPassword = ref(false)
+const resetPasswordError = ref('')
+const resetPasswordSuccess = ref('')
+
+function requestResetPassword(item: TenagaKesehatan) {
+  itemToReset.value = item
+  resetPasswordError.value = ''
+  showResetPasswordConfirm.value = true
+}
+
+async function confirmResetPassword() {
+  if (!itemToReset.value) return
+  isResettingPassword.value = true
+  resetPasswordError.value = ''
+  try {
+    const api = useApi()
+    const res = await api(`/tenaga-kesehatan/${itemToReset.value.id}/reset-password`, { method: 'POST' }) as ApiSuccessEnvelope<null>
+    showResetPasswordConfirm.value = false
+    resetPasswordSuccess.value = res.message
+    itemToReset.value = null
+  } catch (e) {
+    resetPasswordError.value = e instanceof ApiError ? e.message : 'Gagal mereset password.'
+  } finally {
+    isResettingPassword.value = false
+  }
+}
 </script>
 
 <template>
@@ -182,6 +292,13 @@ async function save() {
         </div>
       </div>
     </div>
+
+    <p
+      v-if="resetPasswordSuccess"
+      class="text-sm font-semibold text-success bg-success/10 border border-success/20 rounded-xl px-4 py-3"
+    >
+      {{ resetPasswordSuccess }}
+    </p>
 
     <div class="bg-white rounded-2xl border border-slate-100 shadow-card flex flex-col overflow-hidden">
       <div class="p-5 border-b border-slate-100 flex flex-col md:flex-row gap-4 items-center justify-between bg-slate-50/50">
@@ -247,16 +364,40 @@ async function save() {
                      <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Nonaktif
                   </span>
                </td>
-               <td v-if="canManage" class="py-4 px-5 text-right">
-                  <button
-                     @click="requestToggleStatus(item)"
-                     :disabled="togglingId === item.id"
-                     class="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50"
-                     :class="item.status_aktif ? 'text-danger border-danger/30 hover:bg-danger/5' : 'text-success border-success/30 hover:bg-success/5'"
-                  >
-                     <LucideLoader2 v-if="togglingId === item.id" class="w-3.5 h-3.5 animate-spin" />
-                     {{ item.status_aktif ? 'Nonaktifkan' : 'Aktifkan' }}
-                  </button>
+               <td v-if="canManage" class="py-4 px-5">
+                  <div class="flex items-center justify-end gap-1.5 flex-wrap">
+                     <button
+                        @click="openEditModal(item)"
+                        title="Ubah data"
+                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-primary transition-colors"
+                     >
+                        <LucidePencil class="w-3.5 h-3.5" />
+                     </button>
+                     <button
+                        @click="requestToggleStatus(item)"
+                        :disabled="togglingId === item.id"
+                        class="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50"
+                        :class="item.status_aktif ? 'text-danger border-danger/30 hover:bg-danger/5' : 'text-success border-success/30 hover:bg-success/5'"
+                     >
+                        <LucideLoader2 v-if="togglingId === item.id" class="w-3.5 h-3.5 animate-spin" />
+                        {{ item.status_aktif ? 'Nonaktifkan' : 'Aktifkan' }}
+                     </button>
+                     <button
+                        v-if="isSuperAdmin"
+                        @click="requestResetPassword(item)"
+                        title="Reset password"
+                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-warning transition-colors"
+                     >
+                        <LucideKeyRound class="w-3.5 h-3.5" />
+                     </button>
+                     <button
+                        @click="requestDelete(item)"
+                        title="Hapus permanen"
+                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 text-slate-500 hover:bg-danger/5 hover:text-danger hover:border-danger/30 transition-colors"
+                     >
+                        <LucideTrash2 class="w-3.5 h-3.5" />
+                     </button>
+                  </div>
                </td>
             </tr>
             <tr v-if="!isLoading && filteredList.length === 0">
@@ -352,6 +493,132 @@ async function save() {
              >
                 <LucideLoader2 v-if="togglingId === toDeactivate.id" class="w-4 h-4 animate-spin" />
                 Ya, Nonaktifkan
+             </button>
+          </div>
+       </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div v-if="showEditModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+       <div class="bg-white rounded-3xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200 max-h-[90vh] flex flex-col">
+          <div class="border-b border-slate-100 px-6 py-4 flex items-center justify-between shrink-0">
+             <h3 class="font-bold text-accent text-lg flex items-center gap-2">
+               <LucidePencil class="w-5 h-5 text-primary" />
+               Ubah Data Tenaga Kesehatan
+             </h3>
+             <button @click="showEditModal = false" class="text-slate-400 hover:text-slate-600 p-1">
+                <LucideX class="w-5 h-5" />
+             </button>
+          </div>
+
+          <div class="p-6 space-y-4 overflow-y-auto">
+             <p v-if="editError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ editError }}</p>
+
+             <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Nama Lengkap</label>
+                <input v-model="editForm.name" type="text" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                <p v-if="editFieldErrors.name" class="text-xs text-danger mt-1">{{ editFieldErrors.name[0] }}</p>
+             </div>
+
+             <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Email</label>
+                <input v-model="editForm.email" type="email" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                <p v-if="editFieldErrors.email" class="text-xs text-danger mt-1">{{ editFieldErrors.email[0] }}</p>
+             </div>
+
+             <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">No. Handphone (WhatsApp)</label>
+                <input v-model="editForm.no_hp" type="text" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                <p v-if="editFieldErrors.no_hp" class="text-xs text-danger mt-1">{{ editFieldErrors.no_hp[0] }}</p>
+             </div>
+
+             <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">No. WhatsApp Alternatif</label>
+                <input v-model="editForm.no_wa" type="text" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+             </div>
+
+             <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Alamat</label>
+                <input v-model="editForm.alamat" type="text" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+             </div>
+
+             <div class="grid grid-cols-2 gap-3">
+                <div>
+                   <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Jenis Kelamin</label>
+                   <select v-model="editForm.gender" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
+                      <option :value="null">Tidak ditentukan</option>
+                      <option value="L">Laki-laki</option>
+                      <option value="P">Perempuan</option>
+                   </select>
+                </div>
+                <div>
+                   <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tanggal Lahir</label>
+                   <input v-model="editForm.tgl_lahir" type="date" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                </div>
+             </div>
+          </div>
+
+          <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
+             <button @click="showEditModal = false" class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors">Batal</button>
+             <button @click="saveEdit" :disabled="isSavingEdit" class="py-2.5 px-6 rounded-xl font-bold text-white bg-primary hover:bg-primary-600 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm">
+                <LucideLoader2 v-if="isSavingEdit" class="w-4 h-4 animate-spin" />
+                {{ isSavingEdit ? 'Menyimpan...' : 'Simpan Perubahan' }}
+             </button>
+          </div>
+       </div>
+    </div>
+
+    <!-- Konfirmasi Hapus Permanen -->
+    <div v-if="showDeleteConfirm && itemToDelete" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+       <div class="bg-white rounded-3xl shadow-xl w-full max-w-sm max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+          <div class="p-6 overflow-y-auto">
+             <div class="w-14 h-14 rounded-2xl bg-danger/10 text-danger flex items-center justify-center mb-4">
+                <LucideTrash2 class="w-7 h-7" />
+             </div>
+             <h3 class="font-bold text-accent text-lg mb-1">Hapus Tenaga Kesehatan Permanen?</h3>
+             <p class="text-sm text-slate-500 leading-relaxed mb-1">
+                <span class="font-bold text-slate-700">{{ itemToDelete.user?.name ?? 'Tenaga kesehatan ini' }}</span> akan dihapus permanen dari sistem. Tindakan ini tidak bisa dibatalkan. Kalau sudah pernah punya riwayat penugasan, sistem akan menolak dan menyarankan nonaktifkan saja.
+             </p>
+             <p v-if="deleteError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2 mt-4">{{ deleteError }}</p>
+          </div>
+          <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
+             <button @click="showDeleteConfirm = false; itemToDelete = null" class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors">Batal</button>
+             <button
+                @click="confirmDelete"
+                :disabled="isDeleting"
+                class="py-2.5 px-6 rounded-xl font-bold text-white bg-danger hover:bg-danger/90 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm"
+             >
+                <LucideLoader2 v-if="isDeleting" class="w-4 h-4 animate-spin" />
+                Ya, Hapus Permanen
+             </button>
+          </div>
+       </div>
+    </div>
+
+    <!-- Konfirmasi Reset Password -->
+    <div v-if="showResetPasswordConfirm && itemToReset" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+       <div class="bg-white rounded-3xl shadow-xl w-full max-w-sm max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+          <div class="p-6 overflow-y-auto">
+             <div class="w-14 h-14 rounded-2xl bg-warning/10 text-warning flex items-center justify-center mb-4">
+                <LucideKeyRound class="w-7 h-7" />
+             </div>
+             <h3 class="font-bold text-accent text-lg mb-1">Reset Password?</h3>
+             <p class="text-sm text-slate-500 leading-relaxed mb-1">
+                Password baru akan otomatis dibuat sistem dan dikirim lewat email ke
+                <span class="font-bold text-slate-700">{{ itemToReset.user?.email ?? 'tenaga kesehatan ini' }}</span>.
+                Password lama tidak akan berlaku lagi dan semua sesi login aktif akan keluar otomatis.
+             </p>
+             <p v-if="resetPasswordError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2 mt-4">{{ resetPasswordError }}</p>
+          </div>
+          <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
+             <button @click="showResetPasswordConfirm = false; itemToReset = null" class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors">Batal</button>
+             <button
+                @click="confirmResetPassword"
+                :disabled="isResettingPassword"
+                class="py-2.5 px-6 rounded-xl font-bold text-white bg-warning hover:bg-warning/90 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm"
+             >
+                <LucideLoader2 v-if="isResettingPassword" class="w-4 h-4 animate-spin" />
+                Ya, Reset Password
              </button>
           </div>
        </div>

@@ -259,6 +259,19 @@ export interface CreateKaderPayload {
   pj_id?: number | null
 }
 
+// PATCH /kader/{id} (UpdateKaderRequest) -- 'sometimes', semua opsional (PATCH parsial).
+// puskesmas_id SENGAJA tidak bisa diubah lewat sini (lihat docblock KaderService::update()).
+export interface UpdateKaderPayload {
+  name?: string
+  email?: string
+  no_hp?: string
+  no_wa?: string | null
+  alamat?: string | null
+  gender?: 'L' | 'P' | null
+  tgl_lahir?: string | null
+  pj_id?: number | null
+}
+
 // --- Tenaga Kesehatan (revisi Bu Kadis, app/Http/Controllers/Api/V1/TenagaKesehatanController.php) ---
 // Peran baru: pemeriksaan lanjutan di rumah pasien (beda dari kader yang fokus pendampingan
 // minum obat). Struktur mirror persis Kader.
@@ -285,6 +298,18 @@ export interface CreateTenagaKesehatanPayload {
   gender?: 'L' | 'P' | null
   tgl_lahir?: string | null
   puskesmas_id?: number | null
+}
+
+// PATCH /tenaga-kesehatan/{id} (UpdateTenagaKesehatanRequest) -- mirror UpdateKaderPayload.
+export interface UpdateTenagaKesehatanPayload {
+  name?: string
+  email?: string
+  no_hp?: string
+  no_wa?: string | null
+  alamat?: string | null
+  gender?: 'L' | 'P' | null
+  tgl_lahir?: string | null
+  pj_id?: number | null
 }
 
 // GET /kader/pj-options?puskesmas_id= -- dropdown pilihan PJ Prolanis saat registrasi kader
@@ -330,8 +355,8 @@ export interface UpdatePuskesmasPayload {
 }
 
 // --- Staff (app/Http/Controllers/Api/V1/StaffController.php) ---
-// POST /staff SAJA -- backend belum punya GET /staff (tidak ada endpoint listing), jangan
-// mengasumsikan ada cara menarik daftar staf yang sudah terdaftar.
+// GET/POST/PATCH/DELETE/reset-password /staff -- gerbang super_admin/admin_puskesmas (admin_
+// puskesmas dibatasi ke pj_prolanis puskesmas sendiri), reset-password super_admin saja.
 
 export interface Staff {
   id: number
@@ -357,6 +382,14 @@ export interface CreateStaffPayload {
   // diterima backend, gerbang sebenarnya tetap di service.
   role: 'super_admin' | 'admin_puskesmas' | 'pj_prolanis'
   puskesmas_id?: number | null
+}
+
+// PATCH /staff/{id} (UpdateStaffRequest) -- role/puskesmas_id SENGAJA tidak bisa diubah lewat
+// sini (lihat docblock StaffService::update()/ensureCanManage()).
+export interface UpdateStaffPayload {
+  name?: string
+  email?: string
+  no_hp?: string
 }
 
 // --- Visit Report (app/Http/Resources/VisitReportResource.php) ---

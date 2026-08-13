@@ -197,11 +197,11 @@ async function loadDashboardSummary() {
         colorClass: TOP_DISTRICT_COLORS[idx] ?? 'bg-primary/60'
       }))
 
-    // Tampilkan SEMUA puskesmas (bukan cuma 5 teratas seperti topDistricts) -- admin_puskesmas/
-    // pj_prolanis sudah otomatis cuma dapat 1 baris (puskesmasnya sendiri) dari backend
-    // (DashboardService::puskesmasPerformance() pakai $scopedPatients yang sudah terkunci per
-    // role), super_admin melihat seluruh puskesmas yang punya pasien membaik. Sudah terurut
-    // total_membaik desc dari backend, tidak perlu re-sort di sini.
+    // Leaderboard SE-KABUPATEN (revisi Bu Kadis) -- backend (DashboardService::
+    // puskesmasPerformance()) SENGAJA mengirim data seluruh puskesmas tanpa scope role, sama
+    // untuk semua role login (super_admin/admin_puskesmas/pj_prolanis), supaya "Top 5 Puskesmas
+    // Kinerja Terbaik" tetap jadi pembanding se-Kabupaten Sumenep, bukan cuma puskesmas sendiri.
+    // Sudah terurut total_membaik desc dari backend, tinggal dipotong 5 teratas di sini.
     const maxMembaik = Math.max(...data.puskesmas_performance.map((p) => p.total_membaik), 1)
     puskesmasPerformanceRows.value = data.puskesmas_performance.slice(0, 5).map((p) => ({
       name: p.puskesmas_nama,
