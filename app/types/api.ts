@@ -554,10 +554,19 @@ export interface DashboardSummary {
   tingkat_kepatuhan: number
   aktivitas_hari_ini: DashboardKaderActivity[]
   // BUKAN data poligon — cuma agregat untuk di-mapping ke peta yang sudah ada berdasarkan nama
-  // kecamatan (lihat mergeRiskData di pages/dashboard/index.vue).
+  // kecamatan (lihat mergeRiskData di pages/dashboard/index.vue). SCOPED sama seperti
+  // risiko_per_desa (puskesmas_id admin_puskesmas/pj_prolanis) -- dipakai peta.
   risiko_per_kecamatan: DashboardKecamatanRisk[]
+  // UNSCOPED (se-Kabupaten Sumenep, SEMUA role) -- SENGAJA beda dari risiko_per_kecamatan di
+  // atas, khusus widget "Top 5 Kecamatan Risiko Tertinggi" (perbandingan regency-wide). JANGAN
+  // dipakai untuk peta -- itu tugas risiko_per_kecamatan yang sudah scoped.
+  risiko_per_kecamatan_se_kabupaten: DashboardKecamatanRisk[]
   risiko_per_desa: DashboardDesaRisk[]
   puskesmas_performance: DashboardPuskesmasPerformance[]
+  // Caption personalisasi peta -- null kalau puskesmas tidak diketahui (super_admin tanpa
+  // filter) ATAU kecamatannya cuma py 1 puskesmas (caption tidak relevan). Hanya terisi saat
+  // kecamatan dibagi >1 puskesmas (mis. Pandian & Pamolokan sama-sama di Kota Sumenep).
+  kecamatan_context: { puskesmas_nama: string, kecamatan_nama: string, kecamatan_puskesmas_count: number } | null
 }
 
 // --- Announcement (app/Http/Controllers/Api/V1/AnnouncementController.php) ---
