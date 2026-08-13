@@ -167,11 +167,16 @@ async function loadCandidates() {
   candidatesError.value = ''
   try {
     const api = useApi()
-    const [patients, assignments] = await Promise.all([
+    // Kandidat kunjungan: risiko Berat DAN Sedang (permintaan Bu Kadis -- sebelumnya cuma Berat,
+    // lihat docs/planning/02 §12). GET /patients cuma terima 1 risk_level per request, jadi
+    // fetch 2x paralel lalu digabung, bukan ubah backend jadi array (endpoint ini dipakai
+    // dashboard/pasien juga, tidak ingin ubah kontraknya).
+    const [beratPatients, sedangPatients, assignments] = await Promise.all([
       fetchAllPages((page) => api('/patients', { query: { risk_level: 'berat', per_page: 100, page } })),
+      fetchAllPages((page) => api('/patients', { query: { risk_level: 'sedang', per_page: 100, page } })),
       fetchAllPages((page) => api('/visit-assignments', { query: { per_page: 100, page } }))
     ])
-    candidatePatients.value = patients
+    candidatePatients.value = [...beratPatients, ...sedangPatients]
     assignedPatientIds.value = new Set(
       assignments
         .filter((a) => a.status === 'pending' || a.status === 'in_progress')
@@ -233,6 +238,7 @@ function closeAssignFlow() {
   priority.value = 'berat'
   kecamatanFilter.value = ''
   desaFilter.value = ''
+  candidateSearchQuery.value = ''
   bulkResult.value = null
   bulkError.value = ''
 }
@@ -250,26 +256,37 @@ function toggleCompanionSelection(kaderId) {
   else selectedCompanionIds.value.splice(idx, 1)
 }
 
+// Kecamatan select di sini SELALU disabled/display-only (dikunci lockAssignKecamatan ke
+// kecamatan puskesmas sendiri, lihat template) -- BUKAN filter fungsional. candidatePatients
+// sudah 100% puskesmas sendiri lewat scoping backend (GET /patients), jadi seluruh kandidat di
+// sini otomatis berada di kecamatan yang SAMA; tidak ada gunanya dicocokkan lagi.
+//
+// Bug nyata sebelumnya: desaOptions & filteredCandidates ikut menyaring pakai
+// `p.kecamatan_raw === kecamatanFilter.value` -- p.kecamatan_raw teks mentah SiLAKES apa
+// adanya (kapitalisasi/ejaan macam-macam, mis. "KOTA" bukan "Kota Sumenep"), dibandingkan ke
+// nama kecamatan BAKU dari lockAssignKecamatan(). Cocok cuma kalau kebetulan identik persis --
+// untuk Puskesmas Pandian nyaris semua pasien gagal cocok, bikin daftar pasien & pilihan desa
+// tampil kosong total meski kandidatnya ada (sama persis kelas bug yang sudah diperbaiki di
+// dashboard/pasien/index.vue, lihat komentar lockKecamatanToOwnPuskesmas di sana). Dihapus di
+// sini, bukan diperbaiki jadi cocok ID kanonik -- toh sudah redundan (lihat paragraf atas).
 const kecamatanOptions = computed(() => {
   const set = new Set(candidatePatients.value.map((p) => p.kecamatan_raw).filter(Boolean))
-  // Kecamatan terkunci (lockAssignKecamatan) HARUS selalu jadi opsi valid, walau puskesmas ini
-  // kebetulan nol kandidat risiko Berat saat ini (select terkunci jadi tampil kosong kalau tidak).
   if (kecamatanFilter.value) set.add(kecamatanFilter.value)
   return [...set].sort()
 })
 const desaOptions = computed(() => {
-  const relevant = kecamatanFilter.value
-    ? candidatePatients.value.filter((p) => p.kecamatan_raw === kecamatanFilter.value)
-    : candidatePatients.value
-  const set = new Set(relevant.map((p) => p.kel_desa_raw).filter(Boolean))
+  const set = new Set(candidatePatients.value.map((p) => p.kel_desa_raw).filter(Boolean))
   return [...set].sort()
 })
 
+const candidateSearchQuery = ref('')
+
 const filteredCandidates = computed(() => {
+  const q = candidateSearchQuery.value.trim().toLowerCase()
   return candidatePatients.value.filter((p) => {
-    const matchKec = kecamatanFilter.value ? p.kecamatan_raw === kecamatanFilter.value : true
     const matchDesa = desaFilter.value ? p.kel_desa_raw === desaFilter.value : true
-    return matchKec && matchDesa
+    const matchSearch = q ? p.nama.toLowerCase().includes(q) || (p.no_reg ?? '').toLowerCase().includes(q) : true
+    return matchDesa && matchSearch
   })
 })
 
@@ -591,8 +608,9 @@ const submitValidation = async () => {
       </div>
     </div>
     
-    <!-- Add Modal — bulk assign (docs/planning/02 §12): filter wilayah, multi-select pasien
-         risiko Berat yang belum ditugaskan, kader+tanggal+prioritas berlaku 1 batch. -->
+    <!-- Add Modal — bulk assign (docs/planning/02 §12, diperluas ke risiko Sedang atas
+         permintaan Bu Kadis): filter wilayah/cari nama, multi-select pasien risiko Berat/Sedang
+         yang belum ditugaskan, kader+tanggal+prioritas berlaku 1 batch. -->
     <div v-if="showAddModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
        <div class="bg-white rounded-3xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
           <div class="border-b border-slate-100 px-6 py-4 flex items-center justify-between shrink-0">
@@ -606,10 +624,11 @@ const submitValidation = async () => {
           </div>
 
           <div class="p-6 space-y-5 overflow-y-auto">
-             <p class="text-xs text-slate-500 -mt-2">Kandidat: pasien risiko <b class="text-danger">Berat</b> di wilayah Puskesmas Anda.</p>
+             <p class="text-xs text-slate-500 -mt-2">Kandidat: pasien risiko <b class="text-danger">Berat</b> dan <b class="text-warning">Sedang</b> di wilayah Puskesmas Anda.</p>
 
              <!-- Filter wilayah -- kecamatan SELALU terkunci ke wilayah kerja puskesmas sendiri
-                  (lockAssignKecamatan, dipanggil saat modal dibuka), tidak bisa dipilih manual. -->
+                  (lockAssignKecamatan, dipanggil saat modal dibuka), tidak bisa dipilih manual;
+                  cuma label informatif, lihat komentar kecamatanOptions di script. -->
              <div class="grid grid-cols-2 gap-3">
                 <select v-model="kecamatanFilter" disabled class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm bg-slate-100 text-slate-500 cursor-not-allowed">
                    <option value="">Memuat kecamatan...</option>
@@ -619,6 +638,18 @@ const submitValidation = async () => {
                    <option value="">Semua Desa/Kelurahan</option>
                    <option v-for="desa in desaOptions" :key="desa" :value="desa">{{ desa }}</option>
                 </select>
+             </div>
+
+             <!-- Cari pasien -- filter client-side (kandidat sudah dimuat semua di awal, lihat
+                  loadCandidates), tidak perlu request baru tiap ketik. -->
+             <div class="relative">
+                <LucideSearch class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                   v-model="candidateSearchQuery"
+                   type="text"
+                   placeholder="Cari nama atau no. registrasi pasien..."
+                   class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white"
+                />
              </div>
 
              <!-- Daftar kandidat -->
@@ -659,6 +690,12 @@ const submitValidation = async () => {
                          </AppTooltip>
                          <span class="text-[11px] text-slate-500">{{ p.kel_desa_raw || '—' }}, {{ p.kecamatan_raw || '—' }}</span>
                       </div>
+                      <span
+                         class="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md shrink-0"
+                         :class="p.risk_level === 'berat' ? 'bg-danger/10 text-danger' : 'bg-warning/10 text-warning'"
+                      >
+                         {{ p.risk_level === 'berat' ? 'Berat' : 'Sedang' }}
+                      </span>
                       <span v-if="isPatientAssigned(p.id)" class="text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-500 px-2 py-1 rounded-md shrink-0">
                          Sudah Ditugaskan
                       </span>
