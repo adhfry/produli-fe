@@ -15,6 +15,7 @@ useHead({
 
 <template>
   <div>
+    <SimulationBanner />
     <slot />
   </div>
 </template>

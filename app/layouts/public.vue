@@ -18,6 +18,7 @@ useSeoMeta({
 
 <template>
   <div>
+    <SimulationBanner />
     <slot />
   </div>
 </template>

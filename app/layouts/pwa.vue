@@ -11,9 +11,10 @@ useHead({
 
 <template>
   <div class="min-h-screen bg-slate-100 dark:bg-slate-950 flex justify-center font-sans transition-colors duration-300">
+    <SimulationBanner />
     <!-- App Container (Fluid Full Width) -->
     <div class="w-full bg-slate-50 dark:bg-slate-900 min-h-screen flex flex-col relative transition-colors duration-300">
-      
+
       <NetworkStatus />
 
       <!-- Main Content Area -->

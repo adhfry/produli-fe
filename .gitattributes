@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+*.md diff=markdown
+*.vue diff=html
+
+# Skrip deploy VPS (Linux) -- WAJIB LF, CRLF akan bikin skrip gagal jalan di server
+# (shebang/bad interpreter error) kalau ke-commit dari mesin Windows.
+*.sh text eol=lf

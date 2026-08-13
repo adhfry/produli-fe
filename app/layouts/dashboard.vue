@@ -386,7 +386,8 @@ onMounted(loadSyncStatus)
 
 <template>
   <div class="min-h-screen bg-slate-50 flex text-slate-800 font-sans theme-transition">
-    
+    <SimulationBanner />
+
     <!-- Sidebar -->
     <aside 
       class="fixed top-0 left-0 h-screen w-64 bg-accent flex flex-col z-20 transition-transform duration-300 shadow-xl"
