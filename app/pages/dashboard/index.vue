@@ -185,8 +185,11 @@ async function loadDashboardSummary() {
       lastUpdate: formatWaktuAktivitas(a.last_update_at)
     }))
 
-    const maxBerat = Math.max(...data.risiko_per_kecamatan.map((k) => k.berat), 1)
-    topDistricts.value = [...data.risiko_per_kecamatan]
+    // SENGAJA pakai risiko_per_kecamatan_se_kabupaten (unscoped) -- widget ini perbandingan
+    // se-Kabupaten Sumenep untuk SEMUA role, beda dari risiko_per_kecamatan (scoped) yang
+    // dipakai peta lewat refreshMapRiskData().
+    const maxBerat = Math.max(...data.risiko_per_kecamatan_se_kabupaten.map((k) => k.berat), 1)
+    topDistricts.value = [...data.risiko_per_kecamatan_se_kabupaten]
       .sort((a, b) => (b.berat - a.berat) || ((b.berat + b.sedang + b.ringan) - (a.berat + a.sedang + a.ringan)))
       .slice(0, 5)
       .map((k, idx) => ({
@@ -1046,7 +1049,7 @@ const initMap = () => {
             <LucideMapPin class="w-5 h-5 text-primary" />
             Peta Sebaran Pasien Risiko
           </h3>
-          
+
           <div class="flex items-center gap-2">
             <!-- Search & Typeahead -->
             <div class="relative">
@@ -1097,7 +1100,15 @@ const initMap = () => {
             </button>
           </div>
         </div>
-        
+
+        <!-- Caption personalisasi -- HANYA muncul kalau kecamatan puskesmas sendiri dibagi
+        lebih dari 1 puskesmas (mis. Pandian & Pamolokan sama-sama di Kota Sumenep), supaya
+        admin_puskesmas/pj_prolanis paham peta di bawah cuma pasien puskesmas MEREKA sendiri,
+        bukan seluruh kecamatan. -->
+        <p v-if="dashboardSummary?.kecamatan_context" class="text-xs text-slate-400 -mt-3 mb-4">
+          Data untuk {{ dashboardSummary.kecamatan_context.puskesmas_nama }} yang berada di Kecamatan {{ dashboardSummary.kecamatan_context.kecamatan_nama }}
+        </p>
+
         <!-- Real Map UI -->
         <div class="relative flex-1 min-h-[350px] bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
            <div id="dashboard-map" ref="mapContainer" class="absolute inset-0 w-full h-full"></div>
