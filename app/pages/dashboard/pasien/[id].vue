@@ -575,6 +575,10 @@ async function triggerSyncFromHistory() {
                 <p class="text-sm font-bold text-slate-800">{{ patient.phone || '-' }}</p>
               </div>
               <div>
+                <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">NIK</p>
+                <p class="text-sm font-bold" :class="patient.nik === 'Tidak Diketahui' ? 'text-slate-400 italic font-semibold' : 'text-slate-800'">{{ patient.nik }}</p>
+              </div>
+              <div>
                 <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Alamat Domisili</p>
                 <p class="text-sm font-bold text-slate-800">{{ patient.alamat || '-' }}</p>
                 <p class="text-xs text-slate-500 font-medium mt-0.5">RT/RW {{ patient.rt_rw || '-' }}, Desa {{ patient.kel_desa_raw || '-' }}, Kec. {{ patient.kecamatan_raw || '-' }}</p>

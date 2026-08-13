@@ -129,6 +129,9 @@ export interface Patient {
   id: number
   external_patient_id: number
   no_reg: string | null
+  // Selalu sudah di-mask backend (App\Support\NikDisplay::resolve()) -- penuh kalau NIK diawali
+  // kode wilayah Sumenep (3529), selain itu string literal "Tidak Diketahui". Tidak pernah null.
+  nik: string
   nama: string
   gender: 'L' | 'P' | null
   tgl_lahir: string | null

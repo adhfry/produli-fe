@@ -520,7 +520,8 @@ function closeNikNotFoundModal() {
                      </div>
                      <div>
                         <span class="font-bold text-slate-800 block">{{ patient.nama }}</span>
-                        <span v-if="patient.phone" class="text-[11px] font-medium text-slate-500">{{ patient.phone }}</span>
+                        <span v-if="patient.phone" class="text-[11px] font-medium text-slate-500 block">{{ patient.phone }}</span>
+                        <span class="text-[11px] font-medium text-slate-400 block">NIK: {{ patient.nik }}</span>
                      </div>
                   </div>
                </td>
