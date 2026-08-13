@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import flatpickr from 'flatpickr'
+import 'flatpickr/dist/flatpickr.css'
+import { Indonesian } from 'flatpickr/dist/l10n/id.js'
 import type { ApiSuccessEnvelope, Puskesmas, UpdateProfilePayload, User } from '~/types/api'
 
 definePageMeta({
@@ -38,21 +41,55 @@ onMounted(async () => {
   }
 })
 
-// --- Edit data diri (PATCH /auth/profile: name/no_hp) ---
+// --- Edit data diri (PATCH /auth/profile: name/no_hp/no_wa/alamat/gender/tgl_lahir) ---
 // email/roles/puskesmas_id SENGAJA tidak masuk form ini -- identitas resmi & penugasan, dikunci
 // dari self-service (UpdateProfileRequest backend juga menolak field itu).
+// no_wa/alamat/gender/tgl_lahir dulu CUMA bisa diisi sekali saat onboarding (bug nyata -- tidak
+// ada jalan mengedit lagi setelahnya, halaman ini juga tidak pernah menampilkannya).
 const isEditingProfile = ref(false)
-const profileEditForm = ref({ name: '', no_hp: '' })
+const profileEditForm = ref({ name: '', no_hp: '', no_wa: '', alamat: '', gender: '', tgl_lahir: '' })
 const isSavingProfile = ref(false)
 const profileError = ref('')
+const dateInputRef = ref<HTMLInputElement | null>(null)
+
+const genderLabel = computed(() => {
+  if (authStore.user?.gender === 'L') return 'Laki-laki'
+  if (authStore.user?.gender === 'P') return 'Perempuan'
+  return '-'
+})
+
+const tglLahirLabel = computed(() => {
+  const tgl = authStore.user?.tgl_lahir
+  if (!tgl) return '-'
+  return new Date(tgl).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
+})
 
 function startEditProfile() {
   profileEditForm.value = {
     name: authStore.user?.name ?? '',
-    no_hp: authStore.user?.no_hp ?? ''
+    no_hp: authStore.user?.no_hp ?? '',
+    no_wa: authStore.user?.no_wa ?? '',
+    alamat: authStore.user?.alamat ?? '',
+    gender: authStore.user?.gender ?? '',
+    tgl_lahir: authStore.user?.tgl_lahir ?? ''
   }
   profileError.value = ''
   isEditingProfile.value = true
+  // flatpickr butuh elemen DOM sudah dirender (v-else mode edit) sebelum bisa di-attach --
+  // sama pola dengan onboarding.vue (watch(step, ...) di sana, di sini cukup nextTick sekali
+  // karena tidak ada wizard step berpindah-pindah).
+  nextTick(() => {
+    if (dateInputRef.value) {
+      flatpickr(dateInputRef.value, {
+        locale: Indonesian,
+        dateFormat: 'Y-m-d',
+        defaultDate: profileEditForm.value.tgl_lahir || undefined,
+        onChange: (selectedDates, dateStr) => {
+          profileEditForm.value.tgl_lahir = dateStr
+        }
+      })
+    }
+  })
 }
 
 function cancelEditProfile() {
@@ -71,7 +108,11 @@ async function saveProfile() {
     const api = useApi()
     const payload: UpdateProfilePayload = {
       name: profileEditForm.value.name.trim(),
-      no_hp: profileEditForm.value.no_hp.trim() || undefined
+      no_hp: profileEditForm.value.no_hp.trim() || undefined,
+      no_wa: profileEditForm.value.no_wa.trim() || undefined,
+      alamat: profileEditForm.value.alamat.trim() || undefined,
+      gender: (profileEditForm.value.gender as 'L' | 'P') || undefined,
+      tgl_lahir: profileEditForm.value.tgl_lahir || undefined
     }
     const res = await api('/auth/profile', {
       method: 'PATCH',
@@ -220,6 +261,22 @@ async function onAvatarSelected(e: Event) {
           <dt class="text-[10px] font-bold text-slate-400 uppercase tracking-wide">No. Telepon</dt>
           <dd class="text-sm font-bold text-slate-700 mt-0.5">{{ authStore.user?.no_hp || '-' }}</dd>
         </div>
+        <div class="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
+          <dt class="text-[10px] font-bold text-slate-400 uppercase tracking-wide">No. WhatsApp</dt>
+          <dd class="text-sm font-bold text-slate-700 mt-0.5">{{ authStore.user?.no_wa || '-' }}</dd>
+        </div>
+        <div class="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
+          <dt class="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Jenis Kelamin</dt>
+          <dd class="text-sm font-bold text-slate-700 mt-0.5">{{ genderLabel }}</dd>
+        </div>
+        <div class="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
+          <dt class="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Tanggal Lahir</dt>
+          <dd class="text-sm font-bold text-slate-700 mt-0.5">{{ tglLahirLabel }}</dd>
+        </div>
+        <div class="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 sm:col-span-2">
+          <dt class="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Alamat</dt>
+          <dd class="text-sm font-bold text-slate-700 mt-0.5">{{ authStore.user?.alamat || '-' }}</dd>
+        </div>
         <div class="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 relative">
           <dt class="text-[10px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1">Email <LucideLock class="w-2.5 h-2.5" /></dt>
           <dd class="text-sm font-bold text-slate-500 mt-0.5">{{ authStore.user?.email ?? '-' }}</dd>
@@ -253,6 +310,48 @@ async function onAvatarSelected(e: Event) {
             type="tel"
             placeholder="Mis. 081234567890"
             maxlength="20"
+            class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
+          />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">No. WhatsApp</label>
+          <input
+            v-model="profileEditForm.no_wa"
+            type="tel"
+            placeholder="Mis. 081234567890"
+            maxlength="20"
+            class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
+          />
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Jenis Kelamin</label>
+            <select
+              v-model="profileEditForm.gender"
+              class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors bg-white"
+            >
+              <option value="">Pilih...</option>
+              <option value="L">Laki-laki</option>
+              <option value="P">Perempuan</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tanggal Lahir</label>
+            <input
+              ref="dateInputRef"
+              v-model="profileEditForm.tgl_lahir"
+              type="text"
+              placeholder="Pilih tanggal lahir"
+              class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors cursor-pointer"
+            />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Alamat</label>
+          <textarea
+            v-model="profileEditForm.alamat"
+            rows="3"
+            placeholder="Alamat domisili Anda"
             class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
           />
         </div>

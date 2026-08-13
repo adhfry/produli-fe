@@ -101,6 +101,12 @@ export interface UpdateProfilePayload {
   email_notifications_enabled?: boolean
   name?: string
   no_hp?: string | null
+  // Sama dengan field onboarding (CompleteOnboardingRequest) -- dulu cuma bisa diisi sekali saat
+  // itu, sekarang bisa diedit lagi lewat endpoint ini juga.
+  no_wa?: string | null
+  alamat?: string | null
+  gender?: 'L' | 'P' | null
+  tgl_lahir?: string | null
 }
 
 // POST /auth/change-password (ChangePasswordRequest) -- tidak ada field konfirmasi di backend,
@@ -355,6 +361,24 @@ export interface UpdatePuskesmasPayload {
   latitude?: number | null
   longitude?: number | null
   deskripsi?: string | null
+}
+
+// POST /puskesmas/geocode-all (PuskesmasGeocodingService, super_admin only) -- cari-otomatis
+// koordinat via OpenStreetMap Nominatim (BUKAN Google -- proyek ini sengaja tidak pakai Google
+// Maps sama sekali).
+export interface PuskesmasGeocodeAllResult {
+  total: number
+  updated: number
+  skipped: number
+  failed: number
+  details: Array<{
+    puskesmas_id: number
+    nama: string
+    status: 'updated' | 'failed'
+    latitude?: number
+    longitude?: number
+    reason?: string
+  }>
 }
 
 // --- Staff (app/Http/Controllers/Api/V1/StaffController.php) ---
