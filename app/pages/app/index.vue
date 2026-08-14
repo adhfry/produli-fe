@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, Kader } from '~/types/api'
+import type { ApiSuccessEnvelope, Kader, TenagaKesehatan } from '~/types/api'
 
 definePageMeta({
   layout: 'pwa',
@@ -14,8 +14,17 @@ const toggleDark = () => {
   colorMode.preference = colorMode.value === 'dark' ? 'light' : 'dark'
 }
 
+// Hysteresis dua-ambang (bukan satu threshold tunggal) -- SEBELUMNYA `computed(() => scrollY > 60)`
+// bikin isScrolled flip-flop tiap kali posisi scroll goyang beberapa px di sekitar 60 (lazim
+// terjadi pas scroll pelan/momentum scroll di HP), tiap flip me-restart transisi 500ms di
+// ~10 elemen sekaligus -- itu yang tampak sebagai glitch/jitter. Naik butuh lewat 80, turun
+// harus di bawah 40 -- rentang aman di antaranya bikin state stabil, tidak ada re-trigger beruntun.
 const { y: scrollY } = useWindowScroll()
-const isScrolled = computed(() => scrollY.value > 60)
+const isScrolled = ref(false)
+watch(scrollY, (y) => {
+  if (!isScrolled.value && y > 80) isScrolled.value = true
+  else if (isScrolled.value && y < 40) isScrolled.value = false
+})
 
 const greeting = ref('Selamat Pagi,')
 const currentTime = ref('')
@@ -31,13 +40,15 @@ const kaderInitials = computed(() => {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('') || '?'
 })
 
-// GET /kader/profile -- dipakai kartu "Kontak Puskesmas" di bawah (nomor telepon/WA
-// puskesmas sendiri, bukan data pasien).
+// GET /kader/profile ATAU /tenaga-kesehatan/profile (tergantung role, revisi Bu Kadis PMO) --
+// dipakai kartu "Kontak Puskesmas" di bawah (nomor telepon/WA puskesmas sendiri, bukan data
+// pasien).
 const kaderPuskesmas = ref<{ id: number, nama: string, no_telp?: string | null, no_wa?: string | null, alamat?: string | null } | null>(null)
 async function loadKaderPuskesmas() {
   try {
     const api = useApi()
-    const res = await api('/kader/profile') as ApiSuccessEnvelope<Kader>
+    const endpoint = authStore.roles?.includes('tenaga_kesehatan') ? '/tenaga-kesehatan/profile' : '/kader/profile'
+    const res = await api(endpoint) as ApiSuccessEnvelope<Kader | TenagaKesehatan>
     if (res.data.puskesmas) {
       const detail = await api(`/puskesmas/${res.data.puskesmas.id}`) as ApiSuccessEnvelope<{ id: number, nama: string, no_telp: string | null, no_wa: string | null, alamat: string | null }>
       kaderPuskesmas.value = detail.data

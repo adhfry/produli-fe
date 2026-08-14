@@ -55,6 +55,14 @@ function isRepeat(task: VisitAssignment): boolean {
   return task.status === 'pending' && task.report?.validation_status === 'invalid'
 }
 
+// Kunjungan hari-1 bersama kader+nakes (revisi Bu Kadis PMO) -- companion di assignment milik
+// nakes berarti YANG DIDAMPINGI adalah nakes, bukan "kader lain" seperti kunjungan berombongan
+// kader biasa (assignment.tenaga_kesehatan/.kader saling eksklusif, lihat types/api.ts).
+function companionLabel(task: VisitAssignment): string {
+  if (task.tenaga_kesehatan) return `Anda mendampingi tenaga kesehatan ${task.tenaga_kesehatan.name ?? ''}`.trim()
+  return `Anda mendampingi ${task.kader?.name ?? 'kader lain'}`
+}
+
 const getRiskColor = (risk: RiskLevel) => {
   if (risk === 'berat') return 'text-danger bg-danger/10 border-danger/20'
   if (risk === 'sedang') return 'text-warning bg-warning/10 border-warning/20'
@@ -196,7 +204,7 @@ const handleTouchEnd = () => {
       <div v-if="task.role_in_assignment === 'companion'" class="flex items-center gap-2 mb-3 pl-2 -mt-1">
         <span class="inline-flex items-center gap-1.5 bg-info/10 text-info border border-info/20 px-2.5 py-1 rounded-full text-base font-bold">
           <LucideUsers class="w-4 h-4" />
-          Anda mendampingi {{ task.kader?.name ?? 'kader lain' }}
+          {{ companionLabel(task) }}
         </span>
       </div>
 
@@ -291,7 +299,7 @@ const handleTouchEnd = () => {
              <div v-if="selectedTask?.role_in_assignment === 'companion'" class="mb-2">
                 <span class="inline-flex items-center gap-1.5 bg-info/10 text-info border border-info/20 px-2.5 py-1 rounded-full text-sm font-bold">
                    <LucideUsers class="w-4 h-4" />
-                   Anda mendampingi {{ selectedTask.kader?.name ?? 'kader lain' }}
+                   {{ companionLabel(selectedTask) }}
                 </span>
              </div>
              <div v-if="selectedTask && isRepeat(selectedTask)" class="mb-2">

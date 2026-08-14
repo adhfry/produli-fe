@@ -15,13 +15,16 @@ export const useAuthStore = defineStore(
 
     const isAuthenticated = computed(() => !!accessToken.value && !!user.value)
 
-    // Kader murni (tanpa role lain) -> /app. Role apa pun selain itu, termasuk dual-role
-    // pj_prolanis+kader -> /dashboard (dashboard yang menyediakan entry point ke mode kader).
-    const isKaderOnly = computed(() => {
+    // Kader ATAU tenaga_kesehatan murni (tanpa role lain) -> /app -- keduanya pengguna lapangan
+    // dengan UI mobile-first yang sama (bottom nav Beranda/Tugas/Profil di layout 'pwa'), bukan
+    // pengguna dashboard. Role apa pun selain itu, termasuk kombinasi dual-role (mis.
+    // pj_prolanis+kader) -> /dashboard (dashboard yang menyediakan entry point ke mode kader).
+    const MOBILE_ONLY_ROLES: Role[] = ['kader', 'tenaga_kesehatan']
+    const isMobileOnly = computed(() => {
       const r = roles.value ?? []
-      return r.length === 1 && r[0] === 'kader'
+      return r.length === 1 && MOBILE_ONLY_ROLES.includes(r[0] as Role)
     })
-    const homeRoute = computed(() => (isKaderOnly.value ? '/app' : '/dashboard'))
+    const homeRoute = computed(() => (isMobileOnly.value ? '/app' : '/dashboard'))
 
     function ensureDeviceId() {
       if (!deviceId.value) {
@@ -112,7 +115,7 @@ export const useAuthStore = defineStore(
       expiresAt,
       deviceId,
       isAuthenticated,
-      isKaderOnly,
+      isMobileOnly,
       homeRoute,
       login,
       loginWithGoogleCode,

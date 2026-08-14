@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem, TenagaKesehatan, RiskClassificationHistory, RiskCriteriaSnapshotItem, VisitAssignment, PatientRiskLevel, LabResult } from '~/types/api'
+import type { ApiSuccessEnvelope, Kader, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem, TenagaKesehatan, RiskClassificationHistory, RiskCriteriaSnapshotItem, VisitAssignment, PatientRiskLevel, LabResult } from '~/types/api'
 import { Line } from 'vue-chartjs'
 import { Chart as ChartJS, Title, Tooltip, Legend, LineElement, CategoryScale, LinearScale, PointElement } from 'chart.js'
 
@@ -252,6 +252,28 @@ function visitAssigneeType(visit: VisitAssignment): string {
   return '-'
 }
 
+// Detail laporan kunjungan (revisi Bu Kadis PMO) -- field klinis (gda/gdp/dst) cuma diisi
+// nakes, field PMO (kepatuhan_obat/sisa_obat) cuma diisi kader (lihat /app/kunjungan/[id],
+// form-nya sudah dipisah per pemilik assignment sejak awal) -- label SAMA PERSIS dengan yang
+// dipakai di sana supaya konsisten.
+const TINDAKAN_LABELS: Record<string, string> = {
+  diberi_obat: 'Diberi Obat', dirujuk_puskesmas: 'Dirujuk ke Puskesmas', tidak_ada: 'Tidak Ada Tindakan'
+}
+const KEPATUHAN_OBAT_LABELS: Record<string, string> = {
+  patuh: 'Patuh', kurang_patuh: 'Kurang Patuh', tidak_patuh: 'Tidak Patuh'
+}
+const SISA_OBAT_LABELS: Record<string, string> = {
+  cukup: 'Cukup', menipis: 'Menipis', habis: 'Habis'
+}
+const VALIDATION_STATUS_LABELS: Record<string, string> = {
+  pending: 'Menunggu Validasi', valid: 'Tervalidasi', invalid: 'Ditolak'
+}
+const VALIDATION_STATUS_COLORS: Record<string, string> = {
+  pending: 'bg-warning/10 text-warning-700 border border-warning/20',
+  valid: 'bg-success/10 text-success border border-success/20',
+  invalid: 'bg-danger/10 text-danger border border-danger/20'
+}
+
 // Puskesmas binaan pasien -- kalau belum ter-resolve TAPI pengirim hasil labnya jelas rujukan
 // PERORANGAN (dokter/bidan, revisi Bu Kadis Fase 5), tampilkan nama perujuk itu, bukan "-"
 // polos -- datanya sebenarnya ADA, cuma memang bukan puskesmas. Sama persis dengan
@@ -311,20 +333,40 @@ const assignTkDate = ref(new Date().toISOString().slice(0, 10))
 const isAssigningTk = ref(false)
 const assignTkError = ref('')
 
+// Kunjungan hari-1 bersama kader (revisi Bu Kadis PMO) -- opsional: kalau dipilih, kader
+// ditandai pendamping kunjungan pertama nakes ini DAN rencana mingguan kader langsung aktif
+// (CareAssignmentService::assignTenagaKesehatan()). null = nakes sendirian seperti sebelumnya.
+const kaderOptions = ref<Kader[]>([])
+const isLoadingKaderOptions = ref(false)
+const selectedKaderId = ref<number | null>(null)
+
 async function openAssignTkModal() {
   showAssignTkModal.value = true
   assignTkError.value = ''
   selectedTkId.value = null
+  selectedKaderId.value = null
   assignTkDate.value = new Date().toISOString().slice(0, 10)
-  if (tkOptions.value.length) return
-  isLoadingTkOptions.value = true
-  try {
-    const api = useApi()
-    tkOptions.value = await fetchAllPages((page) => api('/tenaga-kesehatan', { query: { per_page: 100, page, status_aktif: true } }))
-  } catch (e) {
-    console.error(e)
-  } finally {
-    isLoadingTkOptions.value = false
+  if (!tkOptions.value.length) {
+    isLoadingTkOptions.value = true
+    try {
+      const api = useApi()
+      tkOptions.value = await fetchAllPages((page) => api('/tenaga-kesehatan', { query: { per_page: 100, page, status_aktif: true } }))
+    } catch (e) {
+      console.error(e)
+    } finally {
+      isLoadingTkOptions.value = false
+    }
+  }
+  if (!kaderOptions.value.length) {
+    isLoadingKaderOptions.value = true
+    try {
+      const api = useApi()
+      kaderOptions.value = await fetchAllPages((page) => api('/kader', { query: { per_page: 100, page, status_aktif: true } }))
+    } catch (e) {
+      console.error(e)
+    } finally {
+      isLoadingKaderOptions.value = false
+    }
   }
 }
 
@@ -339,7 +381,8 @@ async function assignTenagaKesehatan() {
       body: {
         patient_id: patient.value.id,
         tenaga_kesehatan_id: selectedTkId.value,
-        scheduled_date: assignTkDate.value
+        scheduled_date: assignTkDate.value,
+        kader_id: selectedKaderId.value
       }
     })
     showAssignTkModal.value = false
@@ -720,15 +763,44 @@ async function triggerSyncFromHistory() {
                   <div>
                     <p class="text-sm font-bold text-slate-800">{{ new Date(visit.scheduled_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) }}</p>
                     <p class="text-xs text-slate-500 mt-0.5">{{ visitAssigneeType(visit) }}: {{ visitAssigneeName(visit) }}</p>
+                    <!-- Kunjungan hari-1 bersama kader+nakes (revisi Bu Kadis PMO) -- kader
+                         pendamping ikut ditampilkan, bukan cuma pemilik assignment. -->
+                    <p v-if="visit.companions?.length" class="text-xs text-slate-400 mt-0.5">
+                      Didampingi: {{ visit.companions.map(c => c.nama ?? '-').join(', ') }}
+                    </p>
                   </div>
-                  <span class="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider shrink-0" :class="VISIT_STATUS_COLORS[visit.status] ?? 'bg-slate-100 text-slate-500 border border-slate-200'">
-                    {{ VISIT_STATUS_LABELS[visit.status] ?? visit.status }}
-                  </span>
+                  <div class="flex flex-col items-end gap-1.5 shrink-0">
+                    <span class="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider" :class="VISIT_STATUS_COLORS[visit.status] ?? 'bg-slate-100 text-slate-500 border border-slate-200'">
+                      {{ VISIT_STATUS_LABELS[visit.status] ?? visit.status }}
+                    </span>
+                    <span v-if="visit.report" class="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider" :class="VALIDATION_STATUS_COLORS[visit.report.validation_status] ?? 'bg-slate-100 text-slate-500 border border-slate-200'">
+                      {{ VALIDATION_STATUS_LABELS[visit.report.validation_status] ?? visit.report.validation_status }}
+                    </span>
+                  </div>
                 </div>
                 <div v-if="visit.report" class="mt-3 pt-3 border-t border-slate-50 text-xs text-slate-600 space-y-1">
                   <p><span class="font-semibold text-slate-700">Kondisi:</span> {{ visit.report.kondisi }}</p>
                   <p v-if="visit.report.keluhan"><span class="font-semibold text-slate-700">Keluhan:</span> {{ visit.report.keluhan }}</p>
                   <p v-if="visit.report.catatan"><span class="font-semibold text-slate-700">Catatan:</span> {{ visit.report.catatan }}</p>
+                  <p v-if="visit.report.validation_note" class="text-warning-700"><span class="font-semibold">Catatan Validasi:</span> {{ visit.report.validation_note }}</p>
+
+                  <!-- Pemeriksaan klinis (tenaga_kesehatan) -- tensi/GDA/GDP/dst, cuma tampil
+                       kalau memang diisi (semua opsional di backend). -->
+                  <div v-if="visit.report.systolic || visit.report.diastolic || visit.report.gda || visit.report.gdp || visit.report.gd2jpp || visit.report.uric_acid || visit.report.cholesterol" class="flex flex-wrap gap-x-4 gap-y-1 pt-1">
+                    <span v-if="visit.report.systolic || visit.report.diastolic">Tensi: <b>{{ visit.report.systolic ?? '-' }}/{{ visit.report.diastolic ?? '-' }}</b> mmHg</span>
+                    <span v-if="visit.report.gda">GDA: <b>{{ visit.report.gda }}</b> mg/dL</span>
+                    <span v-if="visit.report.gdp">GDP: <b>{{ visit.report.gdp }}</b> mg/dL</span>
+                    <span v-if="visit.report.gd2jpp">GD2JPP: <b>{{ visit.report.gd2jpp }}</b> mg/dL</span>
+                    <span v-if="visit.report.uric_acid">Asam Urat: <b>{{ visit.report.uric_acid }}</b> mg/dL</span>
+                    <span v-if="visit.report.cholesterol">Kolesterol: <b>{{ visit.report.cholesterol }}</b> mg/dL</span>
+                  </div>
+                  <p v-if="visit.report.tindakan"><span class="font-semibold text-slate-700">Tindakan:</span> {{ TINDAKAN_LABELS[visit.report.tindakan] ?? visit.report.tindakan }}</p>
+
+                  <!-- PMO mingguan (kader) -- kepatuhan minum obat + sisa obat. -->
+                  <div v-if="visit.report.kepatuhan_obat || visit.report.sisa_obat" class="flex flex-wrap gap-x-4 gap-y-1 pt-1">
+                    <span v-if="visit.report.kepatuhan_obat">Kepatuhan Obat: <b>{{ KEPATUHAN_OBAT_LABELS[visit.report.kepatuhan_obat] ?? visit.report.kepatuhan_obat }}</b></span>
+                    <span v-if="visit.report.sisa_obat">Sisa Obat: <b>{{ SISA_OBAT_LABELS[visit.report.sisa_obat] ?? visit.report.sisa_obat }}</b></span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -893,6 +965,14 @@ async function triggerSyncFromHistory() {
           <div>
             <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tanggal Kunjungan Pertama</label>
             <input v-model="assignTkDate" type="date" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kader Pendamping (opsional)</label>
+            <select v-model.number="selectedKaderId" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
+              <option :value="null">{{ isLoadingKaderOptions ? 'Memuat...' : 'Tanpa kader (nakes sendirian)' }}</option>
+              <option v-for="kader in kaderOptions" :key="kader.id" :value="kader.id">{{ kader.user?.name }}</option>
+            </select>
+            <p class="text-xs text-slate-400 mt-1.5">Kunjungan hari pertama biasanya kader ikut mendampingi -- pilih kadernya di sini supaya rencana kunjungan mingguan kader ini langsung aktif juga.</p>
           </div>
         </div>
         <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">

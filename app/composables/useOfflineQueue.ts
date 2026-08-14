@@ -32,6 +32,10 @@ export interface VisitReportDraftPayload {
   cholesterol: string | null
   keluhan: string | null
   tindakan: string | null
+  // PMO mingguan kader (revisi Bu Kadis) -- kunjungan kader-only, terpisah dari pemeriksaan
+  // klinis di atas yang jadi tanggung jawab tenaga_kesehatan.
+  kepatuhan_obat: string | null
+  sisa_obat: string | null
   attendeeKaderIds: number[]
   // SubmitVisitReportRequest::patientFieldUpdates() -- string fields + is_bpjs (boolean).
   patientFieldUpdates: Record<string, string | boolean> | null
@@ -183,6 +187,8 @@ export function draftToFormData(draft: VisitReportDraft): FormData {
   }
   if (p.keluhan) fd.append('keluhan', p.keluhan)
   if (p.tindakan) fd.append('tindakan', p.tindakan)
+  if (p.kepatuhan_obat) fd.append('kepatuhan_obat', p.kepatuhan_obat)
+  if (p.sisa_obat) fd.append('sisa_obat', p.sisa_obat)
 
   p.attendeeKaderIds.forEach((id) => fd.append('attendee_kader_ids[]', String(id)))
 

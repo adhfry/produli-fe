@@ -9,10 +9,14 @@ useHead({
   title: 'Riwayat Pengajuan Perubahan Data'
 })
 
-// GET /kader/update-requests -- riwayat usulan pembaruan data pasien yang PERNAH DIAJUKAN
-// kader ini sendiri saat kunjungan (docs/planning/01 §9), BUKAN daftar tugas/kunjungan biasa.
-// Cuma laporan kunjungan yang benar-benar mengusulkan sesuatu (geo dikonfirmasi atau field
-// lain diisi) yang muncul di sini -- lihat catatan lengkap di KaderController::updateRequests.
+// GET /kader/update-requests ATAU /tenaga-kesehatan/update-requests (tergantung role, revisi Bu
+// Kadis PMO) -- riwayat usulan pembaruan data pasien yang PERNAH DIAJUKAN kader/tenaga_kesehatan
+// ini sendiri saat kunjungan (docs/planning/01 §9), BUKAN daftar tugas/kunjungan biasa. Cuma
+// laporan kunjungan yang benar-benar mengusulkan sesuatu (geo dikonfirmasi atau field lain
+// diisi) yang muncul di sini -- lihat catatan lengkap di KaderController::updateRequests.
+const authStore = useAuthStore()
+const updateRequestsEndpoint = computed(() => (authStore.roles?.includes('tenaga_kesehatan') ? '/tenaga-kesehatan/update-requests' : '/kader/update-requests'))
+
 const requests = ref<KaderUpdateRequest[]>([])
 const currentPage = ref(1)
 const lastPage = ref(1)
@@ -24,7 +28,7 @@ async function loadRequests(page = 1) {
   loadError.value = ''
   try {
     const api = useApi()
-    const res = await api('/kader/update-requests', { query: { per_page: 20, page } }) as ApiSuccessEnvelope<PaginatedData<KaderUpdateRequest>>
+    const res = await api(updateRequestsEndpoint.value, { query: { per_page: 20, page } }) as ApiSuccessEnvelope<PaginatedData<KaderUpdateRequest>>
     requests.value = res.data.items
     currentPage.value = res.data.pagination.current_page
     lastPage.value = res.data.pagination.last_page

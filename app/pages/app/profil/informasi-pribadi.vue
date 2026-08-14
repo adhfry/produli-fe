@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import flatpickr from 'flatpickr'
 import 'flatpickr/dist/flatpickr.css'
 import { Indonesian } from 'flatpickr/dist/l10n/id.js'
@@ -18,8 +18,11 @@ const toast = useToast()
 // SEBELUMNYA form ini terisi data fiktif (user = ref({name: 'Siti Aminah', ...})) dan tombol
 // simpan cuma setTimeout+alert(), tidak pernah memanggil API sama sekali. Sekarang: name/no_hp
 // dari authStore.user (PATCH /auth/profile), no_wa/alamat/gender/tgl_lahir dari GET/PATCH
-// /kader/profile (field kader spesifik, docs/planning/02 §7 -- no_hp SENGAJA read-only,
-// itu wajib diisi PJ saat registrasi bukan self-service).
+// /kader/profile ATAU /tenaga-kesehatan/profile tergantung role (revisi Bu Kadis PMO -- keduanya
+// self-service field yang identik, no_hp SENGAJA read-only, itu wajib diisi PJ/admin saat
+// registrasi bukan self-service).
+const profileEndpoint = computed(() => (authStore.roles?.includes('tenaga_kesehatan') ? '/tenaga-kesehatan/profile' : '/kader/profile'))
+
 const form = ref({ name: '', no_hp: '', email: '', no_wa: '', gender: '', birthDate: '', address: '' })
 const isLoadingProfile = ref(true)
 const loadError = ref('')
@@ -29,7 +32,7 @@ async function loadProfile() {
   loadError.value = ''
   try {
     const api = useApi()
-    const res = await api('/kader/profile')
+    const res = await api(profileEndpoint.value)
     form.value = {
       name: authStore.user?.name ?? '',
       no_hp: authStore.user?.no_hp ?? '',
@@ -126,7 +129,7 @@ async function saveProfile() {
     const api = useApi()
     const [profileRes] = await Promise.all([
       api('/auth/profile', { method: 'PATCH', body: { name: form.value.name.trim() } }),
-      api('/kader/profile', {
+      api(profileEndpoint.value, {
         method: 'PATCH',
         body: {
           no_wa: form.value.no_wa.trim() || null,
