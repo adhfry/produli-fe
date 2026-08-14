@@ -535,7 +535,7 @@ async function submitData() {
           </NuxtLink>
           <div>
             <h1 class="font-black text-slate-800 dark:text-white text-lg leading-tight transition-colors">Laporan Kunjungan</h1>
-            <p class="text-base font-bold text-primary tracking-wide uppercase">Tugas Pemantauan Kader</p>
+            <p class="text-base font-bold text-primary tracking-wide uppercase">{{ isNakesAssignment ? "Tugas Kunjungan Nakes" : "Tugas Pemantauan Kader" }}</p>
           </div>
         </div>
       </div>
