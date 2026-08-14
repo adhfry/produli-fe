@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, Kader } from '~/types/api'
+import type { ApiSuccessEnvelope, Kader, TenagaKesehatan } from '~/types/api'
 
 definePageMeta({
   layout: 'pwa',
   middleware: 'auth'
 })
 useHead({
-  title: 'Profil Kader'
+  title: 'Profil Saya'
 })
 
 // Konfirmasi logout -- BUKAN window.confirm() bawaan browser. SEBELUMNYA juga tidak pernah
@@ -29,22 +29,27 @@ async function confirmLogout() {
 }
 
 // Identitas ASLI -- SEBELUMNYA "Siti Aminah" + "Kader Prolanis • Puskesmas Pamolokan" hardcode
-// total di header, tidak pernah ambil dari sesi login/GET /kader/profile sama sekali.
+// total di header, tidak pernah ambil dari sesi login sama sekali. Endpoint & label peran
+// dibedakan berdasarkan role (revisi Bu Kadis PMO -- tenaga_kesehatan sekarang juga pakai /app).
+const isTenagaKesehatan = computed(() => authStore.roles?.includes('tenaga_kesehatan') ?? false)
+const roleLabel = computed(() => (isTenagaKesehatan.value ? 'Tenaga Kesehatan' : 'Kader Prolanis'))
+
 const initials = computed(() => {
   const name = authStore.user?.name ?? ''
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('') || '?'
 })
 const puskesmasName = ref('')
-async function loadKaderProfile() {
+async function loadOwnProfile() {
   try {
     const api = useApi()
-    const res = await api('/kader/profile') as ApiSuccessEnvelope<Kader>
+    const endpoint = isTenagaKesehatan.value ? '/tenaga-kesehatan/profile' : '/kader/profile'
+    const res = await api(endpoint) as ApiSuccessEnvelope<Kader | TenagaKesehatan>
     if (res.data.puskesmas) puskesmasName.value = res.data.puskesmas.nama
   } catch (e) {
-    console.error('Gagal memuat profil kader', e)
+    console.error('Gagal memuat profil', e)
   }
 }
-onMounted(loadKaderProfile)
+onMounted(loadOwnProfile)
 
 // --- Akun Google (GET /auth/google/link/redirect, DELETE /auth/google/unlink) -- SEBELUMNYA
 // kartu ini SELALU tampil sebagai "Belum Tertaut" dengan tombol tanpa @click, terlepas status
@@ -82,7 +87,7 @@ async function linkGoogle() {
            </div>
         </div>
         <h2 class="text-xl font-black text-slate-800 dark:text-white mb-1 transition-colors">{{ authStore.user?.name ?? '...' }}</h2>
-        <p class="text-base text-slate-500 dark:text-slate-400 font-medium transition-colors">Kader Prolanis<template v-if="puskesmasName"> &bull; {{ puskesmasName }}</template></p>
+        <p class="text-base text-slate-500 dark:text-slate-400 font-medium transition-colors">{{ roleLabel }}<template v-if="puskesmasName"> &bull; {{ puskesmasName }}</template></p>
      </div>
 
      <!-- Google Link Warning -- cuma tampil kalau BENAR belum tertaut (SEBELUMNYA selalu
@@ -172,9 +177,12 @@ async function linkGoogle() {
         Keluar Akun
      </button>
   </div>
-  </div>
 
-  <!-- Konfirmasi Logout -- bukan window.confirm() bawaan browser. -->
+  <!-- Konfirmasi Logout -- bukan window.confirm() bawaan browser. Sengaja DI DALAM root div
+       yang sama (bukan sibling terpisah) -- komponen halaman Nuxt dibungkus <Transition> untuk
+       page transition (mode 'out-in'), yang mensyaratkan SATU root element per halaman. Dua root
+       node bikin transisi ke halaman berikutnya rusak (konten tampak kosong sesaat) saat pindah
+       dari halaman ini -- pernah dilaporkan pada navigasi profil -> tugas. -->
   <div v-if="showLogoutConfirm" class="fixed inset-0 z-70 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
      <div class="bg-white dark:bg-slate-800 rounded-3xl shadow-xl w-full max-w-sm max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in slide-in-from-bottom-4 sm:zoom-in duration-200">
         <div class="p-6 overflow-y-auto text-center flex flex-col items-center">
@@ -198,5 +206,6 @@ async function linkGoogle() {
            </button>
         </div>
      </div>
+  </div>
   </div>
 </template>

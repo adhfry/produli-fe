@@ -55,6 +55,13 @@ const canSubmit = computed(() => {
   return a.role_in_assignment !== "companion" && ["pending", "in_progress"].includes(a.status);
 });
 
+// Form kunjungan ditentukan MURNI oleh siapa pemilik assignment (kader_id vs tenaga_kesehatan_id
+// -- keduanya saling eksklusif, lihat VisitAssignment backend) -- BUKAN kolom "jenis kunjungan"
+// terpisah. Nakes isi pemeriksaan klinis lengkap (tensi/GDA/GDP/dst, kunjungan pertama +
+// bulanan); kader isi form PMO ringkas (kepatuhan obat/sisa obat, kunjungan mingguan).
+const isNakesAssignment = computed(() => !!assignment.value?.tenaga_kesehatan);
+const isKaderAssignment = computed(() => !!assignment.value?.kader);
+
 const patientAge = computed(() => null); // Tidak tersedia dari VisitAssignmentResource.patient (id/nama/alamat/phone/lat/lng/geo_status saja).
 
 // Kunjungan berombongan (docs/planning/02 §16) -- kader pendamping RENCANA saat assignment ini
@@ -118,6 +125,8 @@ const form = ref({
   cholesterol: "",
   keluhan: "",
   tindakan: "" as "" | "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada",
+  kepatuhan_obat: "" as "" | "patuh" | "kurang_patuh" | "tidak_patuh",
+  sisa_obat: "" as "" | "cukup" | "menipis" | "habis",
   notes: "",
   photoUrl: null as string | null,
   lat: null as number | null,
@@ -406,6 +415,8 @@ function buildDraftPayload(): VisitReportDraftPayload {
     cholesterol: form.value.cholesterol || null,
     keluhan: form.value.keluhan.trim() || null,
     tindakan: form.value.tindakan || null,
+    kepatuhan_obat: form.value.kepatuhan_obat || null,
+    sisa_obat: form.value.sisa_obat || null,
     attendeeKaderIds: [...attendeeKaderIds.value],
     patientFieldUpdates: buildPatientFieldUpdates(),
   };
@@ -432,6 +443,8 @@ function buildOnlineFormData(payload: VisitReportDraftPayload, photo: Blob): For
   }
   if (payload.keluhan) fd.append("keluhan", payload.keluhan);
   if (payload.tindakan) fd.append("tindakan", payload.tindakan);
+  if (payload.kepatuhan_obat) fd.append("kepatuhan_obat", payload.kepatuhan_obat);
+  if (payload.sisa_obat) fd.append("sisa_obat", payload.sisa_obat);
 
   // Dikirim eksplisit (termasuk kalau kosong) -- ini koreksi kehadiran AKTUAL kader primer,
   // bukan "tidak diisi" (yang akan membuat backend pre-fill ulang dari rencana companion).
@@ -631,8 +644,34 @@ async function submitData() {
         />
       </div>
 
-      <!-- Input Tanda Vital -->
-      <div class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+      <!-- PMO Mingguan (kader) -- kepatuhan minum obat + sisa obat, terpisah dari pemeriksaan
+           klinis nakes di bawah (revisi Bu Kadis PMO). -->
+      <div v-if="isKaderAssignment" class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+        <h2 class="font-bold text-slate-800 dark:text-slate-200 text-base mb-4">Pemantauan Minum Obat (PMO)</h2>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Kepatuhan Minum Obat</label>
+            <select v-model="form.kepatuhan_obat" class="w-full bg-transparent border-2 border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 text-base font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none transition-colors appearance-none">
+              <option value="">Pilih...</option>
+              <option value="patuh">Patuh</option>
+              <option value="kurang_patuh">Kurang Patuh</option>
+              <option value="tidak_patuh">Tidak Patuh</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Sisa Obat</label>
+            <select v-model="form.sisa_obat" class="w-full bg-transparent border-2 border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 text-base font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none transition-colors appearance-none">
+              <option value="">Pilih...</option>
+              <option value="cukup">Cukup</option>
+              <option value="menipis">Menipis</option>
+              <option value="habis">Habis</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Input Tanda Vital (nakes) -->
+      <div v-if="isNakesAssignment" class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
         <h2 class="font-bold text-slate-800 dark:text-slate-200 text-base mb-4">Pengukuran Tensi Darah</h2>
 
         <div class="flex items-center gap-3">
@@ -650,8 +689,8 @@ async function submitData() {
         </div>
       </div>
 
-      <!-- Pemeriksaan Tambahan -->
-      <div class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+      <!-- Pemeriksaan Tambahan (nakes) -->
+      <div v-if="isNakesAssignment" class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
         <h2 class="font-bold text-slate-800 dark:text-slate-200 text-base mb-4">Pemeriksaan Mandiri</h2>
 
         <div class="space-y-4">

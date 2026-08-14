@@ -295,6 +295,7 @@ export interface TenagaKesehatan {
   tgl_lahir: string | null
   user?: { id: number, name: string, email: string }
   puskesmas?: { id: number, nama: string }
+  pj?: { id: number, name: string } | null
   created_at: string
 }
 
@@ -446,6 +447,10 @@ export interface VisitReport {
   diastolic: number | null
   keluhan: string | null
   tindakan: TindakanKunjungan | null
+  // PMO mingguan kader (revisi Bu Kadis) -- opsional, terpisah dari pemeriksaan klinis di atas
+  // yang jadi tanggung jawab tenaga_kesehatan.
+  kepatuhan_obat: KepatuhanObat | null
+  sisa_obat: SisaObat | null
   attendees?: { id: number, nama: string | null }[]
   // Tahap 1 -- PJ Prolanis menerima laporan dari kadernya sendiri (idempotent, TIDAK
   // bergantung/menunggu tahap 2). null = belum diterima.
@@ -651,6 +656,11 @@ export interface AppNotification {
 
 export type TindakanKunjungan = 'diberi_obat' | 'dirujuk_puskesmas' | 'tidak_ada'
 
+// PMO mingguan kader (revisi Bu Kadis) -- kunjungan kader-only (assignment.kader_id, BUKAN
+// tenaga_kesehatan_id) selalu form ringkas ini, bukan pemeriksaan klinis gda/gdp/dst.
+export type KepatuhanObat = 'patuh' | 'kurang_patuh' | 'tidak_patuh'
+export type SisaObat = 'cukup' | 'menipis' | 'habis'
+
 // SubmitVisitReportRequest::patientFieldUpdates() -- usulan pelengkapan/koreksi data pasien
 // (docs/planning/01 §9), SEMUA opsional. Dikirim sebagai field individual dalam multipart yang
 // SAMA dengan POST /visit-reports (bukan endpoint terpisah). Selalu masuk sebagai pending_review
@@ -722,4 +732,6 @@ export interface VisitReportPemeriksaan {
   diastolic?: number | null
   keluhan?: string | null
   tindakan?: TindakanKunjungan | null
+  kepatuhan_obat?: KepatuhanObat | null
+  sisa_obat?: SisaObat | null
 }
