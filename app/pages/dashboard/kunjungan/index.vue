@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import type { ApiSuccessEnvelope, AssignmentStatus, VisitAssignment, Puskesmas } from '~/types/api'
+import flatpickr from 'flatpickr'
+import 'flatpickr/dist/flatpickr.css'
+import { Indonesian } from 'flatpickr/dist/l10n/id.js'
 
 definePageMeta({
   layout: 'dashboard',
@@ -106,7 +109,7 @@ function getStatusLabel(visit) {
 const filteredVisits = computed(() => {
   return visitsList.value.filter(v => {
     const q = searchQuery.value.toLowerCase()
-    const matchSearch = !q || (v.patient?.nama ?? '').toLowerCase().includes(q) || (v.kader?.name ?? '').toLowerCase().includes(q)
+    const matchSearch = !q || (v.patient?.nama ?? '').toLowerCase().includes(q) || (v.kader?.name ?? '').toLowerCase().includes(q) || (v.tenaga_kesehatan?.name ?? '').toLowerCase().includes(q)
     const matchStatus = filterStatus.value
       ? (filterStatus.value === 'terlambat' ? isOverdue(v) : filterStatus.value === 'diulang' ? isRepeat(v) : v.status === filterStatus.value)
       : true
@@ -124,6 +127,15 @@ const getStatusColor = (visit) => {
   if (s === 'diulang') return 'bg-warning/10 text-warning border border-warning/20'
   if (s === 'cancelled') return 'bg-slate-100 text-slate-600 border border-slate-200'
   return 'bg-slate-100 text-slate-600'
+}
+
+// Petugas bertugas -- kader ATAU tenaga_kesehatan (saling eksklusif, revisi Bu Kadis PMO).
+// Dipakai tabel/detail supaya baris kunjungan milik nakes tidak tampil "-" begitu saja.
+function petugasName(visit) {
+  return visit.kader?.name ?? visit.tenaga_kesehatan?.name ?? '-'
+}
+function petugasLabel(visit) {
+  return visit.tenaga_kesehatan ? 'Tenaga Kesehatan' : 'Kader'
 }
 
 const getRiskColor = (risk) => {
@@ -145,6 +157,22 @@ const kaderList = ref([])
 const isLoadingKader = ref(false)
 const kaderError = ref('')
 
+// Tenaga kesehatan (revisi Bu Kadis PMO) -- alternatif "Kader" sebagai jenis petugas yang
+// ditugaskan. POST /care-assignments TIDAK punya endpoint bulk seperti kader (cuma terima 1
+// patient_id per panggilan) -- assignTenagaKesehatanBatch() di bawah loop per pasien di
+// FRONTEND, mengumpulkan hasil ke bentuk {created, failed} yang SAMA seperti response bulk
+// kader, supaya modal konfirmasi & penanganan partial-success bisa dipakai bersama tanpa
+// duplikasi template.
+const petugasType = ref('kader') // 'kader' | 'tenaga_kesehatan'
+const tenagaKesehatanList = ref([])
+const isLoadingTenagaKesehatan = ref(false)
+const tenagaKesehatanError = ref('')
+const selectedTenagaKesehatanId = ref(null)
+// Kunjungan hari-1 bersama (CareAssignmentService::assignTenagaKesehatan) -- BEDA dari
+// selectedCompanionIds kader di bawah: cuma SATU kader pendamping (bukan daftar), backend
+// menandainya companion di kunjungan pertama nakes + langsung aktifkan rencana mingguan kader.
+const selectedNakesKaderCompanionId = ref(null)
+
 const kecamatanFilter = ref('')
 const desaFilter = ref('')
 const selectedPatientIds = ref([])
@@ -155,7 +183,30 @@ const selectedKaderId = ref(null)
 // partial-success seperti patient_ids.
 const selectedCompanionIds = ref([])
 const scheduledDate = ref('')
+const scheduledDateInputRef = ref(null)
 const priority = ref('berat')
+
+// Flatpickr (mirror pola dashboard/index.vue initDateRangePicker) -- dateFormat 'Y-m-d' PERSIS
+// yang diterima Laravel ('date' validation rule), altInput tampilkan format manusiawi terpisah
+// supaya v-model (scheduledDate) tidak pernah bergantung ke parsing string flatpickr baliknya.
+// Modal ini v-if (unmount total saat ditutup) -- setiap kali dibuka DOM input-nya baru, jadi
+// re-init aman tanpa perlu destroy instance lama.
+function initScheduledDatePicker() {
+  if (!scheduledDateInputRef.value) return
+  flatpickr(scheduledDateInputRef.value, {
+    locale: Indonesian,
+    dateFormat: 'Y-m-d',
+    altInput: true,
+    altFormat: 'j F Y',
+    minDate: 'today',
+    onChange: (selectedDates) => {
+      const d = selectedDates[0]
+      scheduledDate.value = d
+        ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        : ''
+    }
+  })
+}
 
 const showConfirmModal = ref(false)
 const isSubmittingBulk = ref(false)
@@ -203,6 +254,19 @@ async function loadKaderList() {
   }
 }
 
+async function loadTenagaKesehatanList() {
+  isLoadingTenagaKesehatan.value = true
+  tenagaKesehatanError.value = ''
+  try {
+    const api = useApi()
+    tenagaKesehatanList.value = await fetchAllPages((page) => api('/tenaga-kesehatan', { query: { status_aktif: true, per_page: 100, page } }))
+  } catch (e) {
+    tenagaKesehatanError.value = e instanceof ApiError ? e.message : 'Gagal memuat daftar tenaga kesehatan.'
+  } finally {
+    isLoadingTenagaKesehatan.value = false
+  }
+}
+
 // super_admin sudah tidak bisa buka modal ini sama sekali (tombolnya disembunyikan, lihat
 // v-if="!isSuperAdmin" di atas) -- siapa pun yang sampai sini pasti admin_puskesmas/pj_prolanis,
 // jadi kecamatan filter SELALU dikunci ke kecamatan puskesmas mereka sendiri (docs/planning §7
@@ -221,19 +285,25 @@ async function lockAssignKecamatan() {
   }
 }
 
-function openAssignModal() {
+async function openAssignModal() {
   showAddModal.value = true
   loadCandidates()
   loadKaderList()
+  loadTenagaKesehatanList()
   lockAssignKecamatan()
+  await nextTick()
+  initScheduledDatePicker()
 }
 
 function closeAssignFlow() {
   showAddModal.value = false
   showConfirmModal.value = false
+  petugasType.value = 'kader'
   selectedPatientIds.value = []
   selectedKaderId.value = null
   selectedCompanionIds.value = []
+  selectedTenagaKesehatanId.value = null
+  selectedNakesKaderCompanionId.value = null
   scheduledDate.value = ''
   priority.value = 'berat'
   kecamatanFilter.value = ''
@@ -311,9 +381,11 @@ const selectedPatients = computed(() =>
   candidatePatients.value.filter((p) => selectedPatientIds.value.includes(p.id))
 )
 
-const canProceedToConfirm = computed(() =>
-  selectedPatientIds.value.length > 0 && !!selectedKaderId.value && !!scheduledDate.value && !!priority.value
-)
+const canProceedToConfirm = computed(() => {
+  if (selectedPatientIds.value.length === 0 || !scheduledDate.value) return false
+  if (petugasType.value === 'tenaga_kesehatan') return !!selectedTenagaKesehatanId.value
+  return !!selectedKaderId.value && !!priority.value
+})
 
 function openConfirmModal() {
   if (!canProceedToConfirm.value) return
@@ -324,28 +396,61 @@ function failedReason(patientId) {
   return bulkResult.value?.failed.find((f) => f.patient_id === patientId)?.reason
 }
 
+// POST /care-assignments cuma terima 1 patient_id per panggilan (tidak seperti
+// /visit-assignments/bulk) -- loop sekuensial per pasien terpilih, kumpulkan hasil ke bentuk
+// {created, failed} yang SAMA seperti response bulk kader supaya modal konfirmasi & penanganan
+// partial-success di bawah tetap satu jalur untuk kedua jenis petugas.
+async function assignTenagaKesehatanBatch() {
+  const api = useApi()
+  const created = []
+  const failed = []
+  for (const patientId of selectedPatientIds.value) {
+    try {
+      const res = await api('/care-assignments', {
+        method: 'POST',
+        body: {
+          patient_id: patientId,
+          tenaga_kesehatan_id: selectedTenagaKesehatanId.value,
+          scheduled_date: scheduledDate.value,
+          kader_id: selectedNakesKaderCompanionId.value
+        }
+      })
+      created.push(res.data)
+    } catch (e) {
+      failed.push({ patient_id: patientId, reason: e instanceof ApiError ? e.message : 'Gagal menugaskan.' })
+    }
+  }
+  return { created, failed }
+}
+
 async function submitBulkAssignment() {
   isSubmittingBulk.value = true
   bulkError.value = ''
   try {
-    const api = useApi()
-    const res = await api('/visit-assignments/bulk', {
-      method: 'POST',
-      body: {
-        kader_id: selectedKaderId.value,
-        companion_kader_ids: selectedCompanionIds.value,
-        patient_ids: selectedPatientIds.value,
-        scheduled_date: scheduledDate.value,
-        priority: priority.value
-      }
-    })
-    bulkResult.value = res.data
-    for (const created of res.data.created) {
+    let resultData
+    if (petugasType.value === 'tenaga_kesehatan') {
+      resultData = await assignTenagaKesehatanBatch()
+    } else {
+      const api = useApi()
+      const res = await api('/visit-assignments/bulk', {
+        method: 'POST',
+        body: {
+          kader_id: selectedKaderId.value,
+          companion_kader_ids: selectedCompanionIds.value,
+          patient_ids: selectedPatientIds.value,
+          scheduled_date: scheduledDate.value,
+          priority: priority.value
+        }
+      })
+      resultData = res.data
+    }
+    bulkResult.value = resultData
+    for (const created of resultData.created) {
       if (created.patient?.id) assignedPatientIds.value.add(created.patient.id)
     }
     // Semua sukses tanpa kegagalan -> tutup alur langsung. Ada yang gagal -> biarkan modal
     // konfirmasi terbuka menampilkan hasil partial success supaya PJ tahu mana yang perlu ditinjau.
-    if (res.data.failed.length === 0) {
+    if (resultData.failed.length === 0) {
       closeAssignFlow()
     }
   } catch (e) {
@@ -509,7 +614,7 @@ const submitValidation = async () => {
           <thead>
             <tr class="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
               <th class="py-4 px-5 font-semibold">Pasien Prolanis</th>
-              <th class="py-4 px-5 font-semibold">Petugas (Kader)</th>
+              <th class="py-4 px-5 font-semibold">Petugas</th>
               <th class="py-4 px-5 font-semibold">Tenggat Waktu</th>
               <th class="py-4 px-5 font-semibold text-center">Status</th>
               <th class="py-4 px-5 font-semibold">Hasil Tensi</th>
@@ -541,8 +646,8 @@ const submitValidation = async () => {
                   </div>
                </td>
                <td class="py-4 px-5">
-                  <p class="text-sm font-bold text-slate-700 flex items-center gap-1.5"><LucideUser class="w-3.5 h-3.5 text-slate-400"/> {{ visit.kader?.name ?? '-' }}</p>
-                  <p class="text-[11px] text-slate-500 font-medium mt-1">{{ visit.puskesmas?.nama ?? '-' }}</p>
+                  <p class="text-sm font-bold text-slate-700 flex items-center gap-1.5"><LucideUser class="w-3.5 h-3.5 text-slate-400"/> {{ petugasName(visit) }}</p>
+                  <p class="text-[11px] text-slate-500 font-medium mt-1">{{ petugasLabel(visit) }} &bull; {{ visit.puskesmas?.nama ?? '-' }}</p>
                </td>
                <td class="py-4 px-5">
                   <span class="text-sm font-semibold text-slate-700 flex items-center gap-2">
@@ -704,8 +809,34 @@ const submitValidation = async () => {
                 </div>
              </div>
 
-             <!-- Kader + tanggal + prioritas (berlaku 1 batch) -->
-             <div class="grid grid-cols-2 gap-4">
+             <!-- Jenis Petugas (revisi Bu Kadis PMO) -- kader (pendampingan minum obat) ATAU
+                  tenaga_kesehatan (pemeriksaan lanjutan), gerbang backend beda: kader lewat
+                  POST /visit-assignments/bulk, nakes lewat POST /care-assignments (per pasien,
+                  di-loop di assignTenagaKesehatanBatch()). -->
+             <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Jenis Petugas</label>
+                <div class="grid grid-cols-2 gap-3">
+                   <button
+                      type="button"
+                      @click="petugasType = 'kader'"
+                      class="py-2.5 px-4 rounded-xl border-2 text-sm font-bold transition-all flex items-center justify-center gap-2"
+                      :class="petugasType === 'kader' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-500 hover:border-slate-300'"
+                   >
+                      <LucideUser class="w-4 h-4" /> Kader
+                   </button>
+                   <button
+                      type="button"
+                      @click="petugasType = 'tenaga_kesehatan'"
+                      class="py-2.5 px-4 rounded-xl border-2 text-sm font-bold transition-all flex items-center justify-center gap-2"
+                      :class="petugasType === 'tenaga_kesehatan' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-500 hover:border-slate-300'"
+                   >
+                      <LucideStethoscope class="w-4 h-4" /> Tenaga Kesehatan
+                   </button>
+                </div>
+             </div>
+
+             <!-- Kader Tujuan + Prioritas (jenis petugas: kader) -->
+             <div v-if="petugasType === 'kader'" class="grid grid-cols-2 gap-4">
                 <div>
                    <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kader Tujuan</label>
                    <select v-model="selectedKaderId" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white" :disabled="isLoadingKader">
@@ -723,13 +854,30 @@ const submitValidation = async () => {
                    </select>
                 </div>
              </div>
-             <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tanggal Kunjungan (berlaku untuk semua pasien terpilih)</label>
-                <input type="date" v-model="scheduledDate" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+
+             <!-- Tenaga Kesehatan Tujuan (jenis petugas: tenaga_kesehatan) -- tanpa prioritas,
+                  itu otomatis dari klasifikasi risiko pasien di backend (CareAssignmentService::
+                  createVisit()), bukan input manual seperti jalur kader. -->
+             <div v-else>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tenaga Kesehatan Tujuan</label>
+                <select v-model="selectedTenagaKesehatanId" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white" :disabled="isLoadingTenagaKesehatan">
+                   <option :value="null" disabled>{{ isLoadingTenagaKesehatan ? 'Memuat...' : 'Pilih tenaga kesehatan' }}</option>
+                   <option v-for="tk in tenagaKesehatanList" :key="tk.id" :value="tk.id">{{ tk.user?.name ?? `Tenaga Kesehatan #${tk.id}` }}</option>
+                </select>
+                <p v-if="tenagaKesehatanError" class="text-xs text-danger mt-1">{{ tenagaKesehatanError }}</p>
+                <p class="text-[11px] text-slate-400 mt-1.5">Prioritas kunjungan otomatis mengikuti klasifikasi risiko tiap pasien.</p>
              </div>
 
-             <!-- Kader Pendamping (opsional) — kunjungan berombongan, docs/planning/02 §16 -->
              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tanggal Kunjungan (berlaku untuk semua pasien terpilih)</label>
+                <input ref="scheduledDateInputRef" type="text" placeholder="Pilih tanggal..." readonly class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white cursor-pointer" />
+             </div>
+
+             <!-- Kader Pendamping (opsional) -- kunjungan berombongan (docs/planning/02 §16) kalau
+                  jenis petugas kader (multi-kader, badge di seluruh pasien batch ini), ATAU
+                  kunjungan hari-1 bersama (revisi Bu Kadis PMO) kalau jenis petugas tenaga_kesehatan
+                  (SATU kader companion saja per desain CareAssignmentService::assignTenagaKesehatan). -->
+             <div v-if="petugasType === 'kader'">
                 <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kader Pendamping (Opsional)</label>
                 <p class="text-[11px] text-slate-400 mb-2">Ikut mendampingi kader tujuan di seluruh pasien yang dipilih di batch ini.</p>
                 <div class="border border-slate-200 rounded-xl max-h-40 overflow-y-auto divide-y divide-slate-100">
@@ -744,6 +892,14 @@ const submitValidation = async () => {
                    </label>
                    <p v-if="companionOptions.length === 0" class="text-sm text-slate-400 text-center py-4">{{ isLoadingKader ? 'Memuat...' : 'Tidak ada kader lain yang tersedia.' }}</p>
                 </div>
+             </div>
+             <div v-else>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kader Pendamping (Opsional)</label>
+                <p class="text-[11px] text-slate-400 mb-2">Kunjungan hari pertama biasanya kader ikut mendampingi -- pilih kadernya di sini supaya rencana kunjungan mingguan kader ini langsung aktif juga (berlaku ke semua pasien di batch ini).</p>
+                <select v-model="selectedNakesKaderCompanionId" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white" :disabled="isLoadingKader">
+                   <option :value="null">{{ isLoadingKader ? 'Memuat...' : 'Tanpa kader (nakes sendirian)' }}</option>
+                   <option v-for="k in kaderList" :key="k.id" :value="k.id">{{ k.user?.name ?? `Kader #${k.id}` }}</option>
+                </select>
              </div>
           </div>
 
@@ -778,10 +934,16 @@ const submitValidation = async () => {
 
           <div class="p-6 space-y-4 overflow-y-auto">
              <div class="bg-slate-50 rounded-xl border border-slate-100 p-4 text-sm space-y-1.5">
-                <p><span class="text-slate-500">Kader:</span> <b class="text-slate-800">{{ kaderList.find(k => k.id === selectedKaderId)?.user?.name }}</b></p>
-                <p v-if="selectedCompanionIds.length"><span class="text-slate-500">Pendamping:</span> <b class="text-slate-800">{{ kaderList.filter(k => selectedCompanionIds.includes(k.id)).map(k => k.user?.name).join(', ') }}</b></p>
+                <template v-if="petugasType === 'kader'">
+                   <p><span class="text-slate-500">Kader:</span> <b class="text-slate-800">{{ kaderList.find(k => k.id === selectedKaderId)?.user?.name }}</b></p>
+                   <p v-if="selectedCompanionIds.length"><span class="text-slate-500">Pendamping:</span> <b class="text-slate-800">{{ kaderList.filter(k => selectedCompanionIds.includes(k.id)).map(k => k.user?.name).join(', ') }}</b></p>
+                   <p><span class="text-slate-500">Prioritas:</span> <b class="text-slate-800 capitalize">{{ priority }}</b></p>
+                </template>
+                <template v-else>
+                   <p><span class="text-slate-500">Tenaga Kesehatan:</span> <b class="text-slate-800">{{ tenagaKesehatanList.find(tk => tk.id === selectedTenagaKesehatanId)?.user?.name }}</b></p>
+                   <p v-if="selectedNakesKaderCompanionId"><span class="text-slate-500">Kader Pendamping:</span> <b class="text-slate-800">{{ kaderList.find(k => k.id === selectedNakesKaderCompanionId)?.user?.name }}</b></p>
+                </template>
                 <p><span class="text-slate-500">Tanggal:</span> <b class="text-slate-800">{{ scheduledDate }}</b></p>
-                <p><span class="text-slate-500">Prioritas:</span> <b class="text-slate-800 capitalize">{{ priority }}</b></p>
              </div>
 
              <div>
@@ -847,8 +1009,8 @@ const submitValidation = async () => {
                    <p class="text-sm font-bold text-slate-800">{{ selectedVisit.patient?.nama ?? '-' }}</p>
                 </div>
                 <div>
-                   <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Kader Bertugas</p>
-                   <p class="text-sm font-bold text-slate-800">{{ selectedVisit.kader?.name ?? '-' }}</p>
+                   <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">{{ petugasLabel(selectedVisit) }} Bertugas</p>
+                   <p class="text-sm font-bold text-slate-800">{{ petugasName(selectedVisit) }}</p>
                 </div>
              </div>
 
@@ -946,7 +1108,7 @@ const submitValidation = async () => {
           </div>
 
           <div class="p-6 space-y-5 overflow-y-auto">
-             <p class="text-sm text-slate-600">Tentukan apakah laporan kunjungan dari kader <span class="font-bold text-slate-800">{{ selectedVisit.kader?.name ?? '-' }}</span> ini valid atau tidak.</p>
+             <p class="text-sm text-slate-600">Tentukan apakah laporan kunjungan dari {{ petugasLabel(selectedVisit).toLowerCase() }} <span class="font-bold text-slate-800">{{ petugasName(selectedVisit) }}</span> ini valid atau tidak.</p>
              <p v-if="validationError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ validationError }}</p>
 
              <div>
