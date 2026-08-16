@@ -25,9 +25,47 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 // Dipanggil browser saat push masuk TAPI app tidak sedang dibuka/fokus (kalau app terbuka,
-// foreground handler di useFcm.ts yang jalan, bukan ini) -- FCM SDK sendiri sudah otomatis
-// tampilkan notifikasi dari payload `notification`, ini cuma dipakai untuk logging/kustomisasi
-// tambahan kalau perlu nanti (mis. custom icon per jenis notifikasi).
+// foreground handler di useFcm.ts yang jalan, bukan ini). Menampilkan notifikasi SENDIRI lewat
+// showNotification (bukan andalkan auto-display SDK) -- satu-satunya cara nambah tombol aksi
+// "Lihat Kunjungan" (action_url/action_label dikirim backend, lihat
+// VisitReportService::notifyReportSubmitted) dan requireInteraction untuk notifikasi danger
+// (severity dari data payload) supaya tidak otomatis hilang sebelum admin/PJ sempat lihat.
 messaging.onBackgroundMessage((payload) => {
   console.log("[firebase-messaging-sw.js] Pesan background diterima:", payload);
+
+  const title = payload.notification?.title ?? "Notifikasi Baru";
+  const actionUrl = payload.data?.action_url ?? "/";
+  const actionLabel = payload.data?.action_label ?? "Lihat";
+  const isDanger = payload.data?.severity === "danger";
+
+  self.registration.showNotification(title, {
+    body: payload.notification?.body,
+    icon: "/pwa-192x192.png",
+    badge: "/pwa-192x192.png",
+    requireInteraction: isDanger,
+    data: { url: actionUrl },
+    actions: actionUrl !== "/" ? [{ action: "open_action_url", title: actionLabel }] : [],
+  });
+});
+
+// Klik notifikasi (background/app tertutup) -- fokuskan tab yang sudah terbuka kalau ada
+// (dinavigasikan ke halaman detail), atau buka tab baru kalau belum ada satu pun.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url ?? "/";
+
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        const clientUrl = new URL(client.url);
+        if (clientUrl.origin === self.location.origin && "focus" in client) {
+          if ("navigate" in client) client.navigate(targetUrl);
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
+    })
+  );
 });

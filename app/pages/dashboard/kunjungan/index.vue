@@ -468,6 +468,22 @@ const viewVisit = (visit) => {
   showViewModal.value = true
 }
 
+// Deep-link dari notifikasi bel / tombol "Lihat Kunjungan" di FCM (laporan kunjungan baru) --
+// ?assignment_id= buka langsung modal detail assignment terkait, tanpa perlu klik manual di
+// tabel. Sama pola validasinya dgn ?status= di atas (whitelist/format ketat, bukan pakai nilai
+// URL apa adanya). visitsList baru terisi setelah loadVisits() (async) selesai, jadi pakai
+// watch (bukan cek langsung) supaya tetap kebuka meski query hadir sebelum data siap.
+if (typeof route.query.assignment_id === 'string' && /^\d+$/.test(route.query.assignment_id)) {
+  const targetAssignmentId = Number(route.query.assignment_id)
+  const stopAssignmentDeepLink = watch(visitsList, (list) => {
+    const found = list.find((v) => v.id === targetAssignmentId)
+    if (found) {
+      viewVisit(found)
+      stopAssignmentDeepLink()
+    }
+  }, { immediate: true })
+}
+
 // Role gating asli -- pola sama dgn dashboard/index.vue (authStore.roles, BUKAN toggle mock).
 const authStore = useAuthStore()
 const isSuperAdmin = computed(() => (authStore.roles ?? []).includes('super_admin'))
