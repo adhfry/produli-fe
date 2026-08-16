@@ -259,6 +259,16 @@ function visitAssigneeType(visit: VisitAssignment): string {
 const TINDAKAN_LABELS: Record<string, string> = {
   diberi_obat: 'Diberi Obat', dirujuk_puskesmas: 'Dirujuk ke Puskesmas', tidak_ada: 'Tidak Ada Tindakan'
 }
+const CARA_RUJUKAN_LABELS: Record<string, string> = {
+  datang_sendiri: 'Datang Sendiri', dijemput_ambulan: 'Dijemput Ambulan',
+  diantar_keluarga: 'Diantar Keluarga', diantar_nakes_kader: 'Diantar Nakes/Kader'
+}
+// tindakan bisa >1 sekaligus sejak Fase 2 (sebelumnya string tunggal) -- gabung jadi satu baris
+// label dipisah koma, bukan render array mentah.
+function formatTindakan(tindakan: string[] | string | null): string {
+  const list = Array.isArray(tindakan) ? tindakan : tindakan ? [tindakan] : []
+  return list.map((t) => TINDAKAN_LABELS[t] ?? t).join(', ')
+}
 const KEPATUHAN_OBAT_LABELS: Record<string, string> = {
   patuh: 'Patuh', kurang_patuh: 'Kurang Patuh', tidak_patuh: 'Tidak Patuh'
 }
@@ -794,7 +804,8 @@ async function triggerSyncFromHistory() {
                     <span v-if="visit.report.uric_acid">Asam Urat: <b>{{ visit.report.uric_acid }}</b> mg/dL</span>
                     <span v-if="visit.report.cholesterol">Kolesterol: <b>{{ visit.report.cholesterol }}</b> mg/dL</span>
                   </div>
-                  <p v-if="visit.report.tindakan"><span class="font-semibold text-slate-700">Tindakan:</span> {{ TINDAKAN_LABELS[visit.report.tindakan] ?? visit.report.tindakan }}</p>
+                  <p v-if="visit.report.tindakan?.length"><span class="font-semibold text-slate-700">Tindakan:</span> {{ formatTindakan(visit.report.tindakan) }}</p>
+                  <p v-if="visit.report.cara_rujukan"><span class="font-semibold text-slate-700">Cara Rujukan:</span> {{ CARA_RUJUKAN_LABELS[visit.report.cara_rujukan] ?? visit.report.cara_rujukan }}</p>
 
                   <!-- PMO mingguan (kader) -- kepatuhan minum obat + sisa obat. -->
                   <div v-if="visit.report.kepatuhan_obat || visit.report.sisa_obat" class="flex flex-wrap gap-x-4 gap-y-1 pt-1">

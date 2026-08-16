@@ -124,7 +124,10 @@ const form = ref({
   uric_acid: "",
   cholesterol: "",
   keluhan: "",
-  tindakan: "" as "" | "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada",
+  // Bisa lebih dari satu tindakan sekaligus (Fase 2, sebelumnya select tunggal) -- lihat
+  // toggleTindakan() di bawah, pola sama dgn toggleAttendee().
+  tindakan: [] as ("diberi_obat" | "dirujuk_puskesmas" | "tidak_ada")[],
+  cara_rujukan: "" as "" | "datang_sendiri" | "dijemput_ambulan" | "diantar_keluarga" | "diantar_nakes_kader",
   kepatuhan_obat: "" as "" | "patuh" | "kurang_patuh" | "tidak_patuh",
   sisa_obat: "" as "" | "cukup" | "menipis" | "habis",
   notes: "",
@@ -135,6 +138,18 @@ const form = ref({
   gpsCapturedAt: null as string | null,
   fullAddress: "Mencari detail alamat...",
 });
+
+// Tindakan multi-select (Fase 2) -- checkbox-card, pola toggle sama dgn toggleAttendee() di
+// atas. Kader JUGA bisa mencatat tindakan (termasuk rujukan) -- BUKAN cuma nakes, jadi kartu ini
+// (lihat template) sengaja tidak lagi digerbang isNakesAssignment.
+const isTindakanChecked = (value: "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada") => form.value.tindakan.includes(value);
+const toggleTindakan = (value: "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada") => {
+  const idx = form.value.tindakan.indexOf(value);
+  if (idx === -1) form.value.tindakan.push(value);
+  else form.value.tindakan.splice(idx, 1);
+  if (!form.value.tindakan.includes("dirujuk_puskesmas")) form.value.cara_rujukan = "";
+};
+const isRujukan = computed(() => form.value.tindakan.includes("dirujuk_puskesmas"));
 
 const locationName = ref("Mencari lokasi...");
 const countryFlag = ref("");
@@ -414,7 +429,8 @@ function buildDraftPayload(): VisitReportDraftPayload {
     uric_acid: form.value.uric_acid || null,
     cholesterol: form.value.cholesterol || null,
     keluhan: form.value.keluhan.trim() || null,
-    tindakan: form.value.tindakan || null,
+    tindakan: form.value.tindakan.length > 0 ? [...form.value.tindakan] : null,
+    cara_rujukan: form.value.cara_rujukan || null,
     kepatuhan_obat: form.value.kepatuhan_obat || null,
     sisa_obat: form.value.sisa_obat || null,
     attendeeKaderIds: [...attendeeKaderIds.value],
@@ -442,7 +458,8 @@ function buildOnlineFormData(payload: VisitReportDraftPayload, photo: Blob): For
     if (value !== null) fd.append(key, value);
   }
   if (payload.keluhan) fd.append("keluhan", payload.keluhan);
-  if (payload.tindakan) fd.append("tindakan", payload.tindakan);
+  payload.tindakan?.forEach((t) => fd.append("tindakan[]", t));
+  if (payload.cara_rujukan) fd.append("cara_rujukan", payload.cara_rujukan);
   if (payload.kepatuhan_obat) fd.append("kepatuhan_obat", payload.kepatuhan_obat);
   if (payload.sisa_obat) fd.append("sisa_obat", payload.sisa_obat);
 
@@ -482,6 +499,10 @@ async function submitData() {
   }
   if (!form.value.kondisi.trim()) {
     submitError.value = "Isi kondisi pasien saat kunjungan terlebih dahulu.";
+    return;
+  }
+  if (isRujukan.value && !form.value.cara_rujukan) {
+    submitError.value = "Pilih cara rujukan pasien ke puskesmas terlebih dahulu.";
     return;
   }
 
@@ -727,15 +748,40 @@ async function submitData() {
             <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Keluhan Pasien</label>
             <textarea v-model="form.keluhan" rows="2" placeholder="Keluhan yang dirasakan pasien saat kunjungan..." class="w-full bg-transparent border-2 border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-warning focus:ring-0 outline-none transition-colors resize-none"></textarea>
           </div>
-          <div>
-            <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Tindakan</label>
-            <select v-model="form.tindakan" class="w-full bg-transparent border-2 border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-warning focus:ring-0 outline-none transition-colors appearance-none">
-              <option value="">Pilih tindakan...</option>
-              <option value="diberi_obat">Diberi Obat</option>
-              <option value="dirujuk_puskesmas">Dirujuk ke Puskesmas</option>
-              <option value="tidak_ada">Tidak Ada Tindakan</option>
-            </select>
-          </div>
+        </div>
+      </div>
+
+      <!-- Tindakan (Fase 2) -- multi-select, KADER JUGA bisa mencatat (bukan cuma nakes),
+           makanya kartu ini TIDAK digerbang isNakesAssignment (beda dari "Pemeriksaan Mandiri"
+           di atas yang memang nakes-only). -->
+      <div class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+        <h2 class="font-bold text-slate-800 dark:text-slate-200 text-base mb-1">Tindakan</h2>
+        <p class="text-base text-slate-500 dark:text-slate-400 mb-4">Bisa pilih lebih dari satu kalau perlu.</p>
+        <div class="grid grid-cols-1 gap-2.5">
+          <label
+            v-for="opt in [
+              { value: 'diberi_obat', label: 'Diberi Obat' },
+              { value: 'dirujuk_puskesmas', label: 'Dirujuk ke Puskesmas' },
+              { value: 'tidak_ada', label: 'Tidak Ada Tindakan' },
+            ]"
+            :key="opt.value"
+            class="flex items-center gap-3 border-2 rounded-xl px-4 py-3 cursor-pointer transition-colors"
+            :class="isTindakanChecked(opt.value as any) ? 'border-primary bg-primary/5 dark:bg-primary/10' : 'border-slate-200 dark:border-slate-700'"
+          >
+            <input type="checkbox" :checked="isTindakanChecked(opt.value as any)" @change="toggleTindakan(opt.value as any)" class="w-5 h-5 rounded border-slate-300 text-primary focus:ring-primary/30 shrink-0" />
+            <span class="text-base font-bold text-slate-800 dark:text-white">{{ opt.label }}</span>
+          </label>
+        </div>
+
+        <div v-if="isRujukan" class="mt-4">
+          <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Cara Rujukan <span class="text-danger">*</span></label>
+          <select v-model="form.cara_rujukan" class="w-full bg-transparent border-2 border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 text-base font-medium text-slate-800 dark:text-white focus:border-danger focus:ring-0 outline-none transition-colors appearance-none">
+            <option value="">Pilih cara rujukan...</option>
+            <option value="datang_sendiri">Datang Sendiri</option>
+            <option value="dijemput_ambulan">Dijemput Ambulan</option>
+            <option value="diantar_keluarga">Diantar Keluarga</option>
+            <option value="diantar_nakes_kader">Diantar Nakes/Kader</option>
+          </select>
         </div>
       </div>
 

@@ -31,7 +31,9 @@ export interface VisitReportDraftPayload {
   uric_acid: string | null
   cholesterol: string | null
   keluhan: string | null
-  tindakan: string | null
+  // Bisa lebih dari satu tindakan sekaligus (Fase 2, sebelumnya string tunggal).
+  tindakan: string[] | null
+  cara_rujukan: string | null
   // PMO mingguan kader (revisi Bu Kadis) -- kunjungan kader-only, terpisah dari pemeriksaan
   // klinis di atas yang jadi tanggung jawab tenaga_kesehatan.
   kepatuhan_obat: string | null
@@ -186,7 +188,8 @@ export function draftToFormData(draft: VisitReportDraft): FormData {
     if (value !== null && value !== '') fd.append(key, value)
   }
   if (p.keluhan) fd.append('keluhan', p.keluhan)
-  if (p.tindakan) fd.append('tindakan', p.tindakan)
+  p.tindakan?.forEach((t) => fd.append('tindakan[]', t))
+  if (p.cara_rujukan) fd.append('cara_rujukan', p.cara_rujukan)
   if (p.kepatuhan_obat) fd.append('kepatuhan_obat', p.kepatuhan_obat)
   if (p.sisa_obat) fd.append('sisa_obat', p.sisa_obat)
 

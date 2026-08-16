@@ -199,6 +199,13 @@ export interface RiskCriteriaSnapshotItem {
   threshold_max: number | null
   level: PatientRiskLevel
   is_direct_classifier: boolean
+  // Baris baru (integrasi presisi SiLAKES, lihat SilakesReferenceRangeService di backend) --
+  // hadir HANYA saat parameter ini diklasifikasi lewat reference_ranges_cache umur+gender,
+  // bukan RiskThreshold lama. operator/threshold_min/threshold_max tetap bentuk yang sama,
+  // jadi rendering existing (lihat OPERATOR_LABELS di app/pages/dashboard/pasien/[id].vue)
+  // tidak perlu berubah -- dua field ini opsional, cuma info tambahan.
+  source?: 'silakes_reference_ranges'
+  category_label?: string
 }
 
 // GET /patients/{id}/risk-history (revisi Bu Kadis, Fase 5) -- satu baris riwayat klasifikasi,
@@ -446,7 +453,13 @@ export interface VisitReport {
   systolic: number | null
   diastolic: number | null
   keluhan: string | null
-  tindakan: TindakanKunjungan | null
+  // Bisa lebih dari satu tindakan sekaligus (Fase 2, sebelumnya enum tunggal) -- null kalau
+  // belum diisi sama sekali.
+  tindakan: TindakanKunjungan[] | null
+  // Alur rujukan (Fase 2/3) -- cara_rujukan diisi kalau tindakan mencakup 'dirujuk_puskesmas',
+  // rujukan_status diubah admin_puskesmas/pj_prolanis di /dashboard/rujukan (Fase 3).
+  cara_rujukan: CaraRujukan | null
+  rujukan_status: RujukanStatus | null
   // PMO mingguan kader (revisi Bu Kadis) -- opsional, terpisah dari pemeriksaan klinis di atas
   // yang jadi tanggung jawab tenaga_kesehatan.
   kepatuhan_obat: KepatuhanObat | null
@@ -464,6 +477,26 @@ export interface VisitReport {
   validated_by?: { id: number, name: string } | null
   validation_note: string | null
   created_at: string
+}
+
+// --- Rujukan (Fase 3, app/Http/Controllers/Api/V1/RujukanController.php) ---
+// GET /rujukan -- admin_puskesmas/pj_prolanis: rujukan dari kader/nakes DI PUSKESMASNYA sendiri
+// (RujukanService::scopedQuery, ikut puskesmas KADER/NAKES pelapor, bukan puskesmas pasien),
+// super_admin: semua. PATCH /rujukan/{id}/konfirmasi -- admin_puskesmas/pj_prolanis puskesmas
+// terkait saja (super_admin cuma bisa lihat, tidak bisa konfirmasi).
+export interface Rujukan {
+  id: number
+  assignment_id: number
+  patient: { id: number, nama: string } | null
+  petugas: { id: number, nama: string | null, tipe: 'kader' | 'tenaga_kesehatan' } | null
+  puskesmas: { id: number, nama: string } | null
+  cara_rujukan: CaraRujukan | null
+  rujukan_status: RujukanStatus | null
+  created_at: string | null
+}
+
+export interface ConfirmRujukanPayload {
+  status: 'dikonfirmasi' | 'dibatalkan'
 }
 
 // PATCH /validasi-laporan/{visitReport} (ValidateVisitReportRequest) -- super_admin saja.
@@ -629,12 +662,21 @@ export interface CreateAnnouncementPayload {
 // menambah 3 type baru: 'silakes_sync_completed' {patients_synced, lab_results_synced,
 // patients_classified}, 'patient_updated' {patient_id, patient_nama, updated_by},
 // 'care_visit_adhoc' {care_assignment_id, visit_assignment_id, patient_nama, scheduled_date}.
+// 'visit_report_submitted' (baru, notifikasi ke ATAS kader/nakes -> admin_puskesmas+pj_prolanis
+// di puskesmas PETUGAS pelapor, lihat VisitReportService::notifyReportSubmitted())
+// {assignment_id, patient_id, severity: 'danger', action_url, action_label}.
+// 'pasien_dirujuk' (Fase 2, VisitReportService::notifyPasienDirujuk() -- dipicu HANYA kalau
+// tindakan mencakup 'dirujuk_puskesmas', channel push+fcm+email, beda dari visit_report_submitted
+// yang notifikasi biasa) {assignment_id, visit_report_id, patient_id, severity: 'danger',
+// action_url, action_label}.
 export type NotificationType =
   | 'visit_reminder'
   | 'visit_report_invalidated'
   | 'silakes_sync_completed'
   | 'patient_updated'
   | 'care_visit_adhoc'
+  | 'visit_report_submitted'
+  | 'pasien_dirujuk'
   | string
 
 export interface AppNotification {
@@ -655,6 +697,13 @@ export interface AppNotification {
 // 7-layer VisitValidationService anti-fraud).
 
 export type TindakanKunjungan = 'diberi_obat' | 'dirujuk_puskesmas' | 'tidak_ada'
+
+// Alur rujukan (Fase 2/3) -- cara_rujukan wajib diisi kader/nakes kalau tindakan mencakup
+// 'dirujuk_puskesmas' (SubmitVisitReportRequest). rujukan_status server-computed (bukan input
+// klien): 'menunggu_konfirmasi' otomatis saat submit, diubah admin_puskesmas/pj_prolanis di
+// /dashboard/rujukan (Fase 3, halaman belum dibangun).
+export type CaraRujukan = 'datang_sendiri' | 'dijemput_ambulan' | 'diantar_keluarga' | 'diantar_nakes_kader'
+export type RujukanStatus = 'menunggu_konfirmasi' | 'dikonfirmasi' | 'dibatalkan'
 
 // PMO mingguan kader (revisi Bu Kadis) -- kunjungan kader-only (assignment.kader_id, BUKAN
 // tenaga_kesehatan_id) selalu form ringkas ini, bukan pemeriksaan klinis gda/gdp/dst.
@@ -731,7 +780,8 @@ export interface VisitReportPemeriksaan {
   systolic?: number | null
   diastolic?: number | null
   keluhan?: string | null
-  tindakan?: TindakanKunjungan | null
+  tindakan?: TindakanKunjungan[] | null
+  cara_rujukan?: CaraRujukan | null
   kepatuhan_obat?: KepatuhanObat | null
   sisa_obat?: SisaObat | null
 }
