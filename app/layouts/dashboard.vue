@@ -336,9 +336,9 @@ onMounted(loadSyncStatus)
 
     <!-- Sidebar -->
     <aside
-      class="fixed left-0 h-dvh w-64 bg-accent flex flex-col z-20 transition-transform duration-300 shadow-xl"
+      class="fixed left-0 w-64 bg-accent flex flex-col z-20 transition-transform duration-300 shadow-xl"
       :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full'"
-      :style="bannerActive ? { top: bannerOffsetTop, height: `calc(100dvh - ${SIMULATION_BANNER_HEIGHT_PX}px)` } : { top: '0px' }"
+      :style="{ top: bannerOffsetTop, bottom: '0px' }"
     >
       <!-- Logo Area -->
       <div class="h-16 flex items-center px-6 bg-white shrink-0 border-b border-slate-200 theme-transition">
