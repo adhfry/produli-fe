@@ -39,6 +39,7 @@ onMounted(() => {
     <div class="w-full bg-slate-50 dark:bg-slate-900 min-h-screen flex flex-col relative transition-colors duration-300">
 
       <NetworkStatus />
+      <AnnouncementInboxModal />
 
       <!-- Top bar: cuma bel notifikasi (layout ini mobile-first, tidak ada header lengkap
            seperti dashboard desktop) -->

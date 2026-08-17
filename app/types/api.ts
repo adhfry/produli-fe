@@ -689,16 +689,30 @@ export interface DashboardSummary {
 }
 
 // --- Announcement (app/Http/Controllers/Api/V1/AnnouncementController.php) ---
-// GET /announcements: semua role login berhak baca (global, tidak ter-scope puskesmas/kader).
-// POST /announcements: super_admin saja (SystemAnnouncementPolicy::create).
+// GET /announcements (feed) & GET /announcements/unread (modal inbox login pertama): semua role
+// login berhak baca, TAPI di-scope ke target_roles user (null/[] = semua role) --
+// AnnouncementService::paginateForUser()/unreadForUser() backend. POST/DELETE: super_admin saja.
 
-export type AnnouncementType = 'info' | 'success' | 'warning'
+export type AnnouncementUrgency = 'info' | 'penting' | 'darurat'
+// Kunci warna tema terbatas (CreateAnnouncementRequest backend, in:...) -- BUKAN hex bebas,
+// selalu salah satu token Tailwind yang sudah didefinisikan (app/assets/css/main.css).
+export type AnnouncementColor = 'primary' | 'secondary' | 'success' | 'warning' | 'danger' | 'info' | 'accent'
 
 export interface Announcement {
   id: number
   title: string
   description: string
-  type: AnnouncementType
+  urgency: AnnouncementUrgency
+  icon: string | null
+  color: AnnouncementColor | null
+  image_url: string | null
+  button_label: string | null
+  button_url: string | null
+  // null/[] = tampil ke semua role.
+  target_roles: Role[] | null
+  // null kalau Resource dipakai di luar index()/unread() (mis. response store()) -- treat null
+  // sebagai "tidak diketahui", JANGAN anggap otomatis false/true.
+  is_read: boolean | null
   posted_by: { id: number, name: string } | null
   created_at: string | null
 }
@@ -706,7 +720,13 @@ export interface Announcement {
 export interface CreateAnnouncementPayload {
   title: string
   description: string
-  type: AnnouncementType
+  urgency: AnnouncementUrgency
+  icon?: string | null
+  color?: AnnouncementColor | null
+  image_url?: string | null
+  button_label?: string | null
+  button_url?: string | null
+  target_roles?: Role[] | null
 }
 
 // --- Notification (app/Http/Controllers/Api/V1/NotificationController.php) ---
