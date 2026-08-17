@@ -7,6 +7,7 @@ import {
   LucideHeartPulse,
   LucideCalendarCheck,
   LucideUserCog,
+  LucideMegaphone,
   LucideBuilding2,
   LucideSettings,
   LucideSun,
@@ -151,6 +152,10 @@ const menuGroups = ref([
       // sebelumnya 403 total, sekarang boleh lihat staf puskesmasnya sendiri); store() (daftarkan
       // staf baru) TETAP super_admin/admin_puskesmas saja, digerbangi terpisah di halamannya sendiri.
       { name: 'Manajemen Staf', icon: LucideUserCog, to: '/dashboard/staf', roles: ['admin_puskesmas', 'pj_prolanis', 'super_admin'] },
+      // SystemAnnouncementPolicy::create -- super_admin saja (halaman pembuat pengumuman,
+      // daftar/feed-nya sendiri tetap tampil di /dashboard untuk semua role lewat kartu
+      // "Pengumuman", menu ini cuma jalan pintas ke editornya).
+      { name: 'Buat Pengumuman', icon: LucideMegaphone, to: '/dashboard/pengumuman', roles: ['super_admin'] },
       // PuskesmasPolicy::viewAny -- SEMUA role login boleh lihat (tidak ada `roles` di sini
       // sengaja); edit (admin_puskesmas puskesmas sendiri/super_admin bebas) digerbangi di
       // dalam halaman itu sendiri, bukan di menu.
@@ -172,7 +177,7 @@ const visibleMenuGroups = computed(() => {
   return menuGroups.value
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => !item.roles || item.roles.some((r: Role) => roles.includes(r)))
+      items: group.items.filter((item) => !item.roles || item.roles.some((r: string) => roles.includes(r as Role)))
     }))
     .filter((group) => group.items.length > 0)
 })
@@ -326,6 +331,7 @@ onMounted(loadSyncStatus)
 <template>
   <div class="min-h-screen bg-slate-50 flex text-slate-800 font-sans theme-transition">
     <SimulationBanner />
+    <AnnouncementInboxModal />
 
     <!-- Sidebar -->
     <aside

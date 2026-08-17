@@ -24,8 +24,9 @@ import {
   LucideTrendingUp,
   LucideShieldCheck
 } from "#components"
+import * as icons from '#components'
 
-import type { ApiSuccessEnvelope, DashboardSummary, DashboardKecamatanRisk, DashboardDesaRisk, PaginatedData, Announcement, AnnouncementType, Puskesmas } from '~/types/api'
+import type { ApiSuccessEnvelope, DashboardSummary, DashboardKecamatanRisk, DashboardDesaRisk, PaginatedData, Announcement, Puskesmas } from '~/types/api'
 import flatpickr from 'flatpickr'
 import 'flatpickr/dist/flatpickr.css'
 import { Indonesian } from 'flatpickr/dist/l10n/id.js'
@@ -264,6 +265,13 @@ async function loadAnnouncements() {
   }
 }
 
+// Resolusi ikon dinamis by-nama (Announcement.icon, string) -- ikon lain di import block atas
+// cuma dipakai statis di template, ini lookup RUNTIME (icons[name]) untuk ikon yang disimpan
+// sebagai string di DB, sama pola dengan dashboard/pengumuman/index.vue.
+function iconComponentFor(name: string) {
+  return (icons as Record<string, unknown>)[name] ?? LucideBellRing
+}
+
 // Form posting pengumuman baru — super_admin saja (gerbang sesungguhnya tetap di backend Policy,
 // ini cuma menyembunyikan tombolnya dari role lain).
 const authStore = useAuthStore()
@@ -368,42 +376,10 @@ function clearDateRange() {
   loadDashboardSummary()
 }
 
-const showAnnouncementModal = ref(false)
-const announcementForm = ref<{ title: string, description: string, type: AnnouncementType }>({ title: '', description: '', type: 'info' })
-const isSubmittingAnnouncement = ref(false)
-const announcementFormError = ref('')
-const announcementFieldErrors = ref<Record<string, string[]>>({})
-
-function openAnnouncementModal() {
-  announcementForm.value = { title: '', description: '', type: 'info' }
-  announcementFormError.value = ''
-  announcementFieldErrors.value = {}
-  showAnnouncementModal.value = true
-}
-
-async function submitAnnouncement() {
-  isSubmittingAnnouncement.value = true
-  announcementFormError.value = ''
-  announcementFieldErrors.value = {}
-  try {
-    const api = useApi()
-    const res = await api('/announcements', {
-      method: 'POST',
-      body: announcementForm.value
-    }) as ApiSuccessEnvelope<Announcement>
-    notifications.value = [{ ...res.data, time: formatRelativeTime(res.data.created_at) }, ...notifications.value]
-    showAnnouncementModal.value = false
-  } catch (e) {
-    if (e instanceof ApiError) {
-      announcementFormError.value = e.message
-      announcementFieldErrors.value = e.errors ?? {}
-    } else {
-      announcementFormError.value = 'Gagal membuat pengumuman.'
-    }
-  } finally {
-    isSubmittingAnnouncement.value = false
-  }
-}
+// Pembuatan pengumuman DIPINDAH ke halaman khusus /dashboard/pengumuman (super_admin, editor
+// urgensi/ikon/warna/gambar/tombol/target-role) -- dashboard ini sekarang cuma FEED baca-saja
+// + tombol pintasan ke halaman itu. loadAnnouncements() di atas tetap dipanggil di sini untuk
+// menampilkan riwayat, bukan lagi untuk modal buat-baru.
 
 // ANIMASI MUNCUL DAN COUNT TO
 const isLoaded = ref(false)
@@ -1516,104 +1492,41 @@ const initMap = () => {
         </div>
       </div>
 
-      <!-- Kanan: Notifikasi -->
+      <!-- Kanan: Pengumuman -->
       <div class="bg-white rounded-2xl border border-slate-100 shadow-card p-5 flex flex-col">
         <div class="flex items-center justify-between mb-5">
           <h3 class="font-bold text-accent text-base flex items-center gap-2">
             <LucideBellRing class="w-4 h-4 text-slate-500" />
-            Informasi Pembaruan Sistem
+            Pengumuman
           </h3>
-          <button v-if="isSuperAdmin" @click="openAnnouncementModal"
+          <NuxtLink v-if="isSuperAdmin" to="/dashboard/pengumuman"
             class="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors shrink-0"
             title="Buat Pengumuman Baru">
             <LucidePlus class="w-4 h-4" />
-          </button>
+          </NuxtLink>
         </div>
 
         <p v-if="announcementsError" class="text-xs font-semibold text-danger mb-3">{{ announcementsError }}</p>
 
-        <div class="space-y-0 flex-1 overflow-y-auto pr-2 no-scrollbar mt-2">
-          <div v-for="(notif, idx) in notifications" :key="notif.id" class="flex gap-4 relative pb-5 last:pb-0">
-             <!-- Timeline Line -->
-             <div v-if="idx !== notifications.length - 1" class="absolute left-3.5 top-8 bottom-0 w-px bg-slate-200"></div>
-
-             <!-- Icon Circle -->
-             <div class="relative z-10 w-7 h-7 rounded-full flex items-center justify-center bg-white shrink-0 shadow-sm border border-slate-100 mt-0.5"
-                  :class="{
-                    'bg-success/10 text-success': notif.type === 'success',
-                    'bg-warning/10 text-warning': notif.type === 'warning',
-                    'bg-info/10 text-info': notif.type === 'info',
-                  }">
-                 <LucideCheck v-if="notif.type === 'success'" class="w-3.5 h-3.5" />
-                 <LucideFolder v-else-if="notif.type === 'warning'" class="w-3.5 h-3.5" />
-                 <LucideRefreshCw v-else-if="notif.type === 'info'" class="w-3.5 h-3.5" />
-             </div>
-
-             <!-- Content -->
-             <div class="flex-1 pb-1">
-                <div class="flex justify-between items-start mb-0.5 gap-2">
-                   <p class="text-sm font-bold text-slate-800">{{ notif.title }}</p>
-                   <span class="text-[10px] font-semibold text-slate-400 whitespace-nowrap mt-0.5">{{ notif.time }}</span>
-                </div>
-                <p class="text-xs text-slate-500 leading-relaxed">{{ notif.description }}</p>
-             </div>
+        <!-- Stack "|- [urgensi]" -- format sama dengan riwayat di /dashboard/pengumuman,
+             konsisten di seluruh sistem. -->
+        <div class="space-y-1 flex-1 overflow-y-auto pr-2 no-scrollbar mt-2">
+          <div v-for="notif in notifications" :key="notif.id" class="flex items-start gap-2.5 py-2 border-b border-slate-50 last:border-0">
+            <span class="text-slate-300 font-mono text-xs mt-0.5 shrink-0">|-</span>
+            <component :is="iconComponentFor(announcementIconOf(notif))" class="w-3.5 h-3.5 mt-0.5 shrink-0" :class="ANNOUNCEMENT_COLOR_CLASSES[announcementColorOf(notif)].text" />
+            <div class="flex-1 min-w-0">
+              <div class="flex justify-between items-start gap-2">
+                <p class="text-sm font-bold text-slate-800 truncate">{{ notif.title }}</p>
+                <span class="text-[10px] font-semibold text-slate-400 whitespace-nowrap mt-0.5">{{ notif.time }}</span>
+              </div>
+              <p class="text-xs text-slate-500 leading-relaxed line-clamp-2">{{ notif.description }}</p>
+              <span v-if="notif.is_read === false" class="inline-block mt-1 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-danger/10 text-danger">Baru</span>
+            </div>
           </div>
           <p v-if="!isLoadingAnnouncements && !notifications.length && !announcementsError" class="text-sm text-slate-400 text-center py-6">Belum ada pengumuman.</p>
         </div>
       </div>
 
-    </div>
-
-    <!-- Modal: Buat Pengumuman Baru (super_admin) -->
-    <div v-if="showAnnouncementModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-       <div class="bg-white rounded-3xl shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
-          <div class="border-b border-slate-100 px-6 py-4 flex items-center justify-between shrink-0">
-             <h3 class="font-bold text-accent text-lg flex items-center gap-2">
-               <LucideBellRing class="w-5 h-5 text-primary" />
-               Buat Pengumuman Baru
-             </h3>
-             <button @click="showAnnouncementModal = false" class="text-slate-400 hover:text-slate-600 p-1">
-                <LucideX class="w-5 h-5" />
-             </button>
-          </div>
-
-          <div class="p-6 space-y-4 overflow-y-auto">
-             <p v-if="announcementFormError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ announcementFormError }}</p>
-
-             <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Judul</label>
-                <input v-model="announcementForm.title" type="text" maxlength="150" placeholder="Judul pengumuman..."
-                  class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
-                <p v-if="announcementFieldErrors.title" class="text-xs text-danger mt-1">{{ announcementFieldErrors.title[0] }}</p>
-             </div>
-
-             <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Deskripsi</label>
-                <textarea v-model="announcementForm.description" rows="3" placeholder="Isi pengumuman..."
-                  class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-none"></textarea>
-                <p v-if="announcementFieldErrors.description" class="text-xs text-danger mt-1">{{ announcementFieldErrors.description[0] }}</p>
-             </div>
-
-             <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tipe</label>
-                <select v-model="announcementForm.type" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
-                   <option value="info">Info</option>
-                   <option value="success">Success</option>
-                   <option value="warning">Warning</option>
-                </select>
-                <p v-if="announcementFieldErrors.type" class="text-xs text-danger mt-1">{{ announcementFieldErrors.type[0] }}</p>
-             </div>
-          </div>
-
-          <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
-             <button @click="showAnnouncementModal = false" class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors">Batal</button>
-             <button @click="submitAnnouncement" :disabled="isSubmittingAnnouncement || !announcementForm.title || !announcementForm.description"
-               class="py-2.5 px-6 rounded-xl font-bold text-white bg-primary hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm">
-                <LucideLoader2 v-if="isSubmittingAnnouncement" class="w-4 h-4 animate-spin" />
-                {{ isSubmittingAnnouncement ? 'Menyimpan...' : 'Terbitkan' }}
-             </button>
-          </div>
-       </div>
     </div>
   </div>
 </template>
