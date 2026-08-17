@@ -5,7 +5,8 @@ import {
   LucidePencil,
   LucideStethoscope,
   LucideClipboardList,
-  LucideSiren
+  LucideSiren,
+  LucideCalendarPlus
 } from '#components'
 import type { ApiSuccessEnvelope, AppNotification, PaginatedData } from '~/types/api'
 
@@ -93,6 +94,15 @@ export function useNotifications() {
         desc: 'Ada pasien yang dirujuk kader/tenaga kesehatan, menunggu konfirmasi kedatangan.'
       }
     }
+    if (n.type === 'visit_assigned') {
+      const count = Number(n.data.task_count ?? 1)
+      return {
+        title: 'Tugas Kunjungan Baru',
+        desc: count > 1
+          ? `${count} kunjungan baru dijadwalkan ${n.data.scheduled_date ?? '-'}.`
+          : `Kunjungan baru dijadwalkan ${n.data.scheduled_date ?? '-'}.`
+      }
+    }
     return { title: n.type ?? 'Notifikasi', desc: '' }
   }
 
@@ -110,6 +120,7 @@ export function useNotifications() {
     if (type === 'care_visit_adhoc') return LucideStethoscope
     if (type === 'visit_report_submitted') return LucideClipboardList
     if (type === 'pasien_dirujuk') return LucideSiren
+    if (type === 'visit_assigned') return LucideCalendarPlus
     return LucideCalendarClock
   }
 

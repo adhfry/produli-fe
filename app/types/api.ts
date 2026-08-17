@@ -135,6 +135,10 @@ export interface Patient {
   id: number
   external_patient_id: number
   no_reg: string | null
+  // Revisi Bu Kadis -- staf labkesda kadang copas no_reg ke kolom no_bpjs saat input manual di
+  // SiLAKES, jadi frontend perlu tandai kasus no_bpjs === no_reg (lihat isNoBpjsSuspicious()
+  // di dashboard/pasien/index.vue).
+  no_bpjs: string | null
   // Selalu sudah di-mask backend (App\Support\NikDisplay::resolve()) -- penuh kalau NIK diawali
   // kode wilayah Sumenep (3529), selain itu string literal "Tidak Diketahui". Tidak pernah null.
   nik: string
@@ -444,6 +448,10 @@ export interface VisitReport {
   latitude: number | null
   longitude: number | null
   face_detected: boolean | null
+  // URL sementara (15 menit, VisitReport::photoUrl() -- presigned S3/MinIO) untuk foto bukti
+  // kunjungan. null kalau belum ada foto ATAU disk driver tidak mendukung temporary URL --
+  // frontend WAJIB tangani null (jangan andalkan selalu ada), lihat dashboard/kunjungan/[id].vue.
+  photo_url: string | null
   sync_status: string
   gda: number | null
   gdp: number | null
@@ -518,10 +526,10 @@ export interface VisitAssignment {
   // tapi ada no. telepon — kader diarahkan hubungi lewat telepon, bukan peta).
   assignment_method: 'wilayah_resolved' | 'phone_contact'
   patient?: { id: number, nama: string, alamat: string | null, phone: string | null, latitude: number | null, longitude: number | null, geo_status: string }
-  kader?: { id: number, name: string | null } | null
+  kader?: { id: number, name: string | null, no_hp: string | null } | null
   // Petugas tenaga_kesehatan (revisi Bu Kadis, Fase 2/5) -- kader/tenaga_kesehatan saling
   // eksklusif per assignment (lihat visit_origin di backend), null kalau assignment ini kader.
-  tenaga_kesehatan?: { id: number, name: string | null } | null
+  tenaga_kesehatan?: { id: number, name: string | null, no_hp: string | null } | null
   assigned_by?: { id: number, name: string } | null
   // Snapshot puskesmas saat assignment dibuat -- relevan terutama super_admin (lintas
   // puskesmas), admin_puskesmas/pj_prolanis selalu cuma lihat puskesmasnya sendiri.
@@ -538,6 +546,35 @@ export interface VisitAssignment {
   // super_admin), bukan assignment baru -- lihat /app/tugas & dashboard/kunjungan.
   report?: VisitReport | null
   created_at: string
+}
+
+// GET /visit-assignments/monitoring (revisi Bu Kadis, dashboard/kunjungan monitoring) -- SAMA
+// scope dgn GET /visit-assignments (VisitAssignmentService::scopedQuery()). 'overdue' = jumlah
+// assignment scheduled_date SUDAH LEWAT tapi masih pending/in_progress ("tenggat lewat").
+export interface VisitMonitoringSummary {
+  pending: number
+  in_progress: number
+  completed: number
+  cancelled: number
+  overdue: number
+}
+
+// per_desa HANYA menyertakan pasien yang desa-nya sudah resolved (sama prinsip
+// DashboardKecamatanRisk/DashboardDesaRisk) -- totalnya BISA lebih kecil dari jumlah summary
+// di atas, itu bukan bug, cuma sebagian pasien belum ke-resolve ke desa mana pun.
+export interface VisitMonitoringDesaRow {
+  desa_id: number
+  desa_nama: string
+  total: number
+  pending: number
+  in_progress: number
+  completed: number
+  petugas: string[]
+}
+
+export interface VisitMonitoringResponse {
+  summary: VisitMonitoringSummary
+  per_desa: VisitMonitoringDesaRow[]
 }
 
 // POST /visit-assignments/bulk — docs/planning/02 §12/§16 (backend).
@@ -589,6 +626,22 @@ export interface DashboardDesaRisk {
   berat: number
 }
 
+// Revisi Bu Kadis -- agregat risiko per puskesmas untuk peta mode 'puskesmas' (circle marker,
+// lihat pages/dashboard/index.vue). UNSCOPED (SEMUA 31 puskesmas se-Kabupaten Sumenep, semua
+// role) -- termasuk puskesmas yang belum py pasien berisiko sama sekali (semua count 0, TETAP
+// muncul sebagai titik "belum ada data"). latitude/longitude null kalau puskesmas belum di-pin
+// koordinatnya (lihat dashboard/instansi) -- frontend skip render titik untuk baris begini.
+export interface DashboardPuskesmasRisk {
+  puskesmas_id: number
+  puskesmas_nama: string
+  latitude: number | null
+  longitude: number | null
+  tidak_berisiko: number
+  ringan: number
+  sedang: number
+  berat: number
+}
+
 // Fase 4 (revisi Bu Kadis) -- jumlah pasien yang levelnya MEMBAIK (turun keparahan) antar 2
 // klasifikasi berurutan, dikelompokkan per puskesmas tempat pasien terdaftar SAAT INI. breakdown
 // kunci dinamis berbentuk "{level_lama}_ke_{level_baru}" (mis. "berat_ke_sedang"), bukan daftar
@@ -624,6 +677,7 @@ export interface DashboardSummary {
   // dipakai untuk peta -- itu tugas risiko_per_kecamatan yang sudah scoped.
   risiko_per_kecamatan_se_kabupaten: DashboardKecamatanRisk[]
   risiko_per_desa: DashboardDesaRisk[]
+  risiko_per_puskesmas: DashboardPuskesmasRisk[]
   puskesmas_performance: DashboardPuskesmasPerformance[]
   // Caption personalisasi peta -- null kalau puskesmas tidak diketahui (super_admin tanpa
   // filter) ATAU kecamatannya cuma py 1 puskesmas (caption tidak relevan). Hanya terisi saat
@@ -669,6 +723,9 @@ export interface CreateAnnouncementPayload {
 // tindakan mencakup 'dirujuk_puskesmas', channel push+fcm+email, beda dari visit_report_submitted
 // yang notifikasi biasa) {assignment_id, visit_report_id, patient_id, severity: 'danger',
 // action_url, action_label}.
+// 'visit_assigned' (fix gap admin->kader/nakes yang sebelumnya cuma email/tidak ada sama sekali
+// -- lihat VisitAssignmentService::notifyAssignedKaders() & CareAssignmentService::
+// notifyVisitAssigned()) {task_count, scheduled_date, action_url, action_label}.
 export type NotificationType =
   | 'visit_reminder'
   | 'visit_report_invalidated'
@@ -677,6 +734,7 @@ export type NotificationType =
   | 'care_visit_adhoc'
   | 'visit_report_submitted'
   | 'pasien_dirujuk'
+  | 'visit_assigned'
   | string
 
 export interface AppNotification {
