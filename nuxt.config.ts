@@ -78,7 +78,17 @@ export default defineNuxtConfig({
     "/dashboard/**": { ssr: false },
     "/app": { ssr: false },
     "/app/**": { ssr: false },
-    "/auth/login": { ssr: false },
+    // prerender:true -- Nitro menulis shell SPA rute ini (div mount kosong + tag script, sama
+    // untuk path apa pun karena ssr:false) sebagai file .html statis saat build, bukan dirender
+    // ulang tiap request. Ini yang jadi target `pwa.workbox.navigateFallback` di bawah supaya
+    // Service Worker bisa menyajikannya offline -- tanpa ini tidak ada satu pun file HTML masuk
+    // precache manifest Workbox (dikonfirmasi lewat inspeksi .output/public/sw.js), jadi navigasi
+    // apa pun yang gagal di jaringan langsung jatuh ke halaman offline bawaan browser.
+    "/auth/login": { ssr: false, prerender: true },
+    // Landing page murni statis (tidak ada panggilan API di app/pages/index.vue) -- prerender
+    // supaya versi SUNGGUHAN-nya (bukan cuma fallback shell) ikut masuk precache & bisa diakses
+    // offline apa adanya.
+    "/": { prerender: true },
     // /onboarding & /ganti-password DAPAT middleware:'auth' juga (bukan cuma /dashboard & /app) --
     // tanpa ssr:false, hard-navigation ke sini SSR duluan dengan authStore kosong (cookie belum
     // dipulihkan di server), auth.ts salah redirect ke /auth/login walau sesi valid -- lalu
@@ -144,7 +154,15 @@ export default defineNuxtConfig({
       ],
     },
     workbox: {
-      navigateFallback: null,
+      // docs/planning/12 (mode offline) -- shell SPA /auth/login (routeRules di atas,
+      // prerender:true) dipakai sebagai app-shell UNIVERSAL untuk navigasi apa pun yang gagal di
+      // jaringan & tidak ketemu di precache (/, /app/**, /dashboard/** semua boleh masuk sini
+      // juga -- URL asli tetap di address bar, Vue Router yang baca window.location.pathname
+      // begitu JS boot, prinsip SPA-fallback standar). navigateFallbackDenylist mengecualikan
+      // aset build (_nuxt/*) supaya request 404 aset tetap 404 apa adanya, bukan ikut disulap
+      // jadi HTML.
+      navigateFallback: "/auth/login",
+      navigateFallbackDenylist: [/^\/_nuxt\//, /^\/api\//],
       maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       globPatterns: ["**/*.{js,css,html,png,svg,ico,woff2}"],
       // docs/planning/10 §5 + docs/planning/11 -- tile server sendiri (bukan CARTO/Google lagi,

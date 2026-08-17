@@ -18,11 +18,14 @@ onMounted(() => {
   loadDraftCount()
 })
 
-// Badge jumlah draft belum terkirim (docs/planning/10 §3) -- link ke /app/draft.
+// Badge jumlah laporan belum terkirim (docs/planning/10 §3) -- link ke /app/draft. SENGAJA
+// tidak menghitung draft WIP ('draft', docs/planning/14) -- badge ini "perlu perhatian karena
+// belum sampai server", bukan "ada kerja belum selesai" (itu urusan kader sendiri di halaman
+// kunjungannya, sudah ada indikator auto-save di sana).
 const offlineQueue = useOfflineQueue()
 const draftCount = ref(0)
 async function loadDraftCount() {
-  draftCount.value = (await offlineQueue.getAllDrafts()).length
+  draftCount.value = (await offlineQueue.getAllDrafts()).filter((d) => d.status !== 'draft').length
 }
 
 const activeTab = ref('semua')
@@ -179,6 +182,15 @@ const handleTouchEnd = () => {
   </div>
 
   <div class="p-5 space-y-4">
+    <!-- docs/planning/12: fetch terakhir gagal karena jaringan mati, ini data tersimpan terakhir
+         dari IndexedDB (useOfflineCache) -- bukan basi tanpa peringatan, kader perlu tahu ini
+         bukan hasil GET yang baru saja sukses. Di LUAR rantai v-if/v-else di bawah (bukan
+         v-else-if) supaya tidak memutus rantainya -- tetap tampil berbarengan dengan daftarnya. -->
+    <div v-if="assignmentStore.loadedFromCache && !assignmentStore.isLoading" class="flex items-center gap-2 text-sm font-semibold text-info bg-info/10 border border-info/20 rounded-2xl px-4 py-2.5">
+      <LucideDatabaseZap class="w-4 h-4 shrink-0" />
+      <span>Menampilkan data tersimpan (offline) — mungkin tidak terbaru.</span>
+    </div>
+
     <!-- Loading -->
     <div v-if="assignmentStore.isLoading" class="flex flex-col items-center justify-center py-16 text-slate-400">
       <LucideLoader2 class="w-8 h-8 animate-spin mb-3" />

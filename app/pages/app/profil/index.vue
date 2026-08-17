@@ -137,6 +137,15 @@ async function linkGoogle() {
            </div>
            <LucideChevronRight class="w-5 h-5 text-slate-300 dark:text-slate-600 transition-colors" />
         </NuxtLink>
+        <NuxtLink to="/app/profil/sinkronisasi-otomatis" class="w-full flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-700 active:bg-slate-50 dark:active:bg-slate-700 transition-colors">
+           <div class="flex items-center gap-3">
+              <div class="w-10 h-10 bg-info/10 text-info rounded-xl flex items-center justify-center">
+                 <LucideRefreshCw class="w-5 h-5" />
+              </div>
+              <span class="font-bold text-slate-700 dark:text-slate-200 transition-colors">Sinkronisasi Otomatis</span>
+           </div>
+           <LucideChevronRight class="w-5 h-5 text-slate-300 dark:text-slate-600 transition-colors" />
+        </NuxtLink>
         <NuxtLink to="/app/profil/riwayat-pengajuan" class="w-full flex items-center justify-between p-4 active:bg-slate-50 dark:active:bg-slate-700 transition-colors">
            <div class="flex items-center gap-3">
               <div class="w-10 h-10 bg-secondary/10 text-secondary rounded-xl flex items-center justify-center">

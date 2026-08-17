@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { LucideCloudOff } from '#components'
+import { LucideCloudOff, LucideShieldAlert } from '#components'
 
 const isOnline = ref(true)
+const authStore = useAuthStore()
+// docs/planning/12: mode "sesi tepercaya" -- authStore.refresh() gagal murni karena jaringan
+// mati, tapi user tetap diizinkan masuk pakai lastKnownProfile (middleware/auth.ts). Banner ini
+// yang membuat status itu KELIHATAN, supaya tidak diam-diam terasa seperti online normal.
+const isSessionUnverified = computed(() => authStore.restoreStatus === 'network-unknown')
 
 // docs/planning/10 §2: navigator.onLine cukup buat sinyal awal tapi tidak selalu akurat (bisa
 // true walau internet sebenarnya mati), jadi ditegaskan dengan ping ringan ke backend.
@@ -41,42 +46,60 @@ const checkConnectivity = async () => {
 }
 
 let pingInterval: ReturnType<typeof setInterval>
+// Temuan audit (docs/planning/15): SEBELUMNYA fungsi anonim baru didaftarkan di 'offline'
+// listener lalu fungsi anonim BEDA (referensi lain) dipakai saat removeEventListener --
+// removeEventListener selalu no-op karena referensinya tidak pernah cocok, listener menumpuk
+// tiap komponen ini remount (mis. layout pwa.vue). Referensi bernama di sini supaya
+// add/removeEventListener benar-benar menunjuk fungsi yang SAMA.
+const handleOffline = () => { isOnline.value = false }
 
 onMounted(() => {
   isOnline.value = navigator.onLine
   checkConnectivity()
 
   window.addEventListener('online', checkConnectivity)
-  window.addEventListener('offline', () => { isOnline.value = false })
+  window.addEventListener('offline', handleOffline)
 
   pingInterval = setInterval(checkConnectivity, 15000)
 })
 
 onUnmounted(() => {
   window.removeEventListener('online', checkConnectivity)
-  window.removeEventListener('offline', () => { isOnline.value = false })
+  window.removeEventListener('offline', handleOffline)
   clearInterval(pingInterval)
 })
 </script>
 
 <template>
-  <div 
+  <div
     class="sticky top-0 z-[100] flex justify-center pointer-events-none transition-all duration-300"
-    :class="isOnline ? 'h-0 overflow-visible pt-2' : 'h-auto pt-0 bg-warning text-warning-950 shadow-md pointer-events-auto'"
+    :class="!isOnline ? 'h-auto pt-0 bg-warning text-warning-950 shadow-md pointer-events-auto'
+      : isSessionUnverified ? 'h-auto pt-0 bg-info text-info-950 shadow-md pointer-events-auto'
+      : 'h-0 overflow-visible pt-2'"
   >
-    <div 
-      v-if="isOnline" 
-      class="bg-success/90 backdrop-blur-sm text-white px-3 py-1 rounded-full shadow-sm flex items-center gap-1.5 text-[10px] font-bold pointer-events-auto transition-all"
-    >
-      <div class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
-      Online
-    </div>
-    <div 
-      v-else 
+    <div
+      v-if="!isOnline"
       class="w-full px-4 py-2 flex items-center justify-center gap-2 text-[11px] font-bold transition-all"
     >
       <LucideCloudOff class="w-4 h-4 shrink-0" />
       <span>Mode Offline — data akan tersimpan lokal</span>
+    </div>
+    <!-- docs/planning/12: authStore.restoreStatus 'network-unknown' -- user diizinkan masuk
+         pakai profil tersimpan (lastKnownProfile), tapi sesi belum sungguh terverifikasi ke
+         server. Beda warna dari banner offline murni supaya tidak dikira status jaringan biasa. -->
+    <div
+      v-else-if="isSessionUnverified"
+      class="w-full px-4 py-2 flex items-center justify-center gap-2 text-[11px] font-bold transition-all"
+    >
+      <LucideShieldAlert class="w-4 h-4 shrink-0" />
+      <span>Sesi belum terverifikasi — data yang tampil mungkin tidak terbaru</span>
+    </div>
+    <div
+      v-else
+      class="bg-success/90 backdrop-blur-sm text-white px-3 py-1 rounded-full shadow-sm flex items-center gap-1.5 text-[10px] font-bold pointer-events-auto transition-all"
+    >
+      <div class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
+      Online
     </div>
   </div>
 </template>

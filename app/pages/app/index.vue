@@ -154,11 +154,12 @@ const monthlyProgressPercent = computed(() =>
 // setTimeout palsu lagi.
 const progressDashOffset = computed(() => 251.2 - (251.2 * monthlyProgressPercent.value) / 100)
 
-// GET draft offline tertunda (docs/planning/10 §3) -- pola sama dengan /app/tugas.
+// GET laporan offline tertunda (docs/planning/10 §3) -- pola sama dengan /app/tugas. Tidak
+// menghitung draft WIP ('draft', docs/planning/14) -- lihat catatan di tugas.vue.
 const offlineQueue = useOfflineQueue()
 const draftCount = ref(0)
 async function loadDraftCount() {
-  draftCount.value = (await offlineQueue.getAllDrafts()).length
+  draftCount.value = (await offlineQueue.getAllDrafts()).filter((d) => d.status !== 'draft').length
 }
 
 const isDownloadingMap = ref(false)
@@ -334,8 +335,7 @@ onMounted(async () => {
         <button
           v-else
           @click="downloadWorkAreaMap"
-          :disabled="todayAssignmentsWithLocation.length === 0"
-          class="w-full py-2.5 bg-info/10 text-info rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100"
+          class="w-full py-2.5 bg-info/10 text-info rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 active:scale-[0.98]"
         >
           <LucideDownload class="w-4 h-4" />
           Unduh Peta Wilayah Kerja
@@ -343,7 +343,15 @@ onMounted(async () => {
 
         <p v-if="mapDownloadError" class="text-xs font-semibold text-danger mt-2">{{ mapDownloadError }}</p>
         <p v-else-if="mapDownloadResult" class="text-xs font-semibold text-success mt-2">{{ mapDownloadResult }}</p>
-        <p v-else-if="todayAssignmentsWithLocation.length === 0" class="text-xs text-slate-400 mt-2">Belum ada tugas hari ini dengan lokasi diketahui untuk diunduh petanya.</p>
+        <!-- docs/planning/12: tombol TETAP aktif walau 0 tugas berkoordinat -- downloadWorkAreaMap
+             otomatis jatuh ke cakupan Kabupaten Sumenep penuh (computeKabupatenBoundingBox), jadi
+             ini murni informasi, bukan lagi alasan tombol dimatikan. -->
+        <p v-else-if="todayAssignmentsWithLocation.length === 0" class="text-xs text-slate-400 mt-2">Belum ada tugas hari ini dengan lokasi diketahui — unduhan akan mencakup seluruh Kabupaten Sumenep.</p>
+
+        <NuxtLink to="/app/mode-offline" class="mt-3 w-full py-2.5 border border-info/30 text-info rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 active:scale-[0.98] hover:bg-info/5">
+          <LucidePackageCheck class="w-4 h-4" />
+          Siapkan Mode Offline Lengkap
+        </NuxtLink>
       </div>
 
       <!-- Progress Kinerja -->

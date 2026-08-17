@@ -4,6 +4,17 @@ import type { ApiSuccessEnvelope, AuthTokenResponse, MeResponse, Role, User } fr
 // Hanya `deviceId` yang disimpan (bukan kredensial, cuma identitas perangkat untuk
 // /auth/login & /auth/refresh) — accessToken/user/roles selalu di-memory, dipulihkan lewat
 // refresh() (httpOnly cookie) saat app di-reload.
+// Profil tampilan non-rahasia yang di-cache untuk mode "sesi tepercaya" saat offline (docs/
+// planning/12) -- BUKAN kredensial (tidak ada token/permission granular di sini), aman dipersist
+// ke localStorage. Dipakai middleware/auth.ts & role-area.global.ts sebagai fallback SEKALI
+// refresh() gagal murni karena jaringan mati (bukan ditolak server).
+export interface LastKnownProfile {
+  name: string
+  avatarUrl: string | null
+  homeRoute: string
+  roles: Role[]
+}
+
 export const useAuthStore = defineStore(
   'auth',
   () => {
@@ -12,6 +23,14 @@ export const useAuthStore = defineStore(
     const accessToken = ref<string | null>(null)
     const expiresAt = ref<string | null>(null)
     const deviceId = ref<string>('')
+
+    // 'idle' -- belum pernah dicoba. 'pending' -- refresh() sedang berjalan. 'ok' -- sesi valid
+    // terverifikasi server. 'network-unknown' -- refresh() gagal MURNI karena jaringan mati (tidak
+    // ada jawaban server sama sekali), tapi lastKnownProfile ada -- sesi dianggap "tepercaya
+    // sementara" sampai bisa diverifikasi ulang. 'rejected' -- server MENJAWAB (401 dkk), sesi
+    // benar-benar habis, ini logout sungguhan.
+    const restoreStatus = ref<'idle' | 'pending' | 'ok' | 'network-unknown' | 'rejected'>('idle')
+    const lastKnownProfile = ref<LastKnownProfile | null>(null)
 
     const isAuthenticated = computed(() => !!accessToken.value && !!user.value)
 
@@ -44,11 +63,26 @@ export const useAuthStore = defineStore(
       }
     }
 
+    // Snapshot profil tampilan non-rahasia (docs/planning/12) -- dipanggil setelah user/roles
+    // benar-benar terisi (akhir refresh()/login()/loginWithGoogleCode()), JADI homeRoute yang
+    // ter-snapshot sudah pasti sesuai roles terbaru.
+    function snapshotLastKnownProfile() {
+      if (!user.value) return
+      lastKnownProfile.value = {
+        name: user.value.name,
+        avatarUrl: user.value.avatar_url ?? null,
+        homeRoute: homeRoute.value,
+        roles: roles.value ?? []
+      }
+    }
+
     function clearSession() {
       accessToken.value = null
       expiresAt.value = null
       user.value = null
       roles.value = null
+      lastKnownProfile.value = null
+      restoreStatus.value = 'idle'
     }
 
     async function fetchMe() {
@@ -70,6 +104,8 @@ export const useAuthStore = defineStore(
         }
       })
       setSession(res.data)
+      snapshotLastKnownProfile()
+      restoreStatus.value = 'ok'
     }
 
     async function loginWithGoogleCode(code: string) {
@@ -82,20 +118,48 @@ export const useAuthStore = defineStore(
         }
       })
       setSession(res.data)
+      snapshotLastKnownProfile()
+      restoreStatus.value = 'ok'
     }
 
-    // Dipanggil saat app boot untuk memulihkan sesi dari httpOnly cookie produli_refresh_token
-    // (lihat docs/planning/05 §Auth) — belum di-wire ke plugin/middleware, itu langkah berikutnya.
+    // Dipanggil saat app boot (plugins/auth.client.ts) untuk memulihkan sesi dari httpOnly cookie
+    // produli_refresh_token, DAN dipanggil ulang tiap kali koneksi kembali (event 'online') supaya
+    // user yang mendarat di /auth/login karena boot offline otomatis masuk lagi tanpa refresh
+    // manual (docs/planning/12). restoreStatus membedakan "server benar-benar menolak" (rejected,
+    // logout sungguhan) dari "jaringan mati, tidak sempat tanya server sama sekali"
+    // (network-unknown, sesi lama TETAP dipercaya lewat lastKnownProfile -- middleware/auth.ts
+    // yang memakainya).
     async function refresh() {
+      restoreStatus.value = 'pending'
       const api = useApi()
-      const res = await api<ApiSuccessEnvelope<AuthTokenResponse>>('/auth/refresh', {
-        method: 'POST',
-        headers: { 'X-Device-Id': ensureDeviceId() }
-      })
-      setSession(res.data)
-      // /auth/refresh sengaja tidak mengirim ulang user/roles — ambil terpisah kalau belum ada di state.
-      if (!user.value) {
-        await fetchMe()
+      try {
+        const res = await api<ApiSuccessEnvelope<AuthTokenResponse>>('/auth/refresh', {
+          method: 'POST',
+          headers: { 'X-Device-Id': ensureDeviceId() }
+        })
+        setSession(res.data)
+        // /auth/refresh sengaja tidak mengirim ulang user/roles — ambil terpisah kalau belum ada di state.
+        if (!user.value) {
+          await fetchMe()
+        }
+        snapshotLastKnownProfile()
+        restoreStatus.value = 'ok'
+      } catch (err) {
+        if (err instanceof ApiError) {
+          // Server MENJAWAB (401 dkk) -- refresh token sungguh ditolak/kedaluwarsa, ini logout
+          // sungguhan, cache profil lama tidak boleh dipakai lagi.
+          clearSession()
+          restoreStatus.value = 'rejected'
+        } else if (lastKnownProfile.value) {
+          // Exception jaringan murni (server tidak sempat menjawab) TAPI ada profil tepercaya
+          // dari sesi sebelumnya -- JANGAN treat sebagai logout, biarkan user tetap masuk pakai
+          // data cache sampai bisa diverifikasi ulang saat online (accessToken tetap null,
+          // panggilan API yang butuh otentikasi tetap akan gagal apa adanya).
+          restoreStatus.value = 'network-unknown'
+        } else {
+          restoreStatus.value = 'rejected'
+        }
+        throw err
       }
     }
 
@@ -114,6 +178,8 @@ export const useAuthStore = defineStore(
       accessToken,
       expiresAt,
       deviceId,
+      restoreStatus,
+      lastKnownProfile,
       isAuthenticated,
       isMobileOnly,
       homeRoute,
@@ -126,7 +192,10 @@ export const useAuthStore = defineStore(
   },
   {
     persist: {
-      pick: ['deviceId'],
+      // lastKnownProfile BUKAN kredensial (nama, avatar, homeRoute, roles -- semua sudah tampil
+      // di UI mana pun, tidak ada yang rahasia) -- accessToken tetap TIDAK PERNAH masuk sini,
+      // CLAUDE.md tetap dipatuhi.
+      pick: ['deviceId', 'lastKnownProfile'],
       storage: piniaPluginPersistedstate.localStorage()
     }
   }

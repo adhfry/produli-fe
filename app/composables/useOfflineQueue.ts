@@ -48,10 +48,19 @@ export interface VisitReportDraft {
   // OfflineQueueHandler (Layer 7) & VisitValidationContext.clientSubmissionId.
   patientNama: string
   createdAt: string
-  status: 'pending_sync' | 'failed'
+  updatedAt: string
+  // docs/planning/14: 'draft' -- sengaja disimpan user (manual ATAU auto-save berkala) SELAGI
+  // masih mengisi, BELUM pernah dicoba dikirim, TIDAK ikut disinkron otomatis. 'pending_sync' --
+  // pernah dicoba dikirim (baik manual submit maupun promosi dari draft) tapi gagal karena
+  // jaringan, MENUNGGU disinkron otomatis. 'failed' -- sudah dicoba sinkron tapi gagal lagi.
+  status: 'draft' | 'pending_sync' | 'failed'
   lastError: string | null
   payload: VisitReportDraftPayload
-  photo: Blob
+  // Nullable -- draft tahap awal (auto-save sebelum foto diambil) belum tentu punya foto.
+  // syncOneDraft() cuma pernah dipanggil untuk status 'pending_sync'/'failed', dan keduanya
+  // HANYA tercipta lewat submitData() yang sudah memvalidasi foto ada sebelum sampai situ --
+  // jadi foto null hanya mungkin muncul pada status 'draft'.
+  photo: Blob | null
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -81,23 +90,54 @@ async function withStore<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore
 }
 
 export function useOfflineQueue() {
-  async function addDraft(payload: VisitReportDraftPayload, photo: Blob, patientNama: string): Promise<VisitReportDraft> {
+  async function getAllDrafts(): Promise<VisitReportDraft[]> {
+    const all = await withStore<VisitReportDraft[]>('readonly', (store) => store.getAll())
+    return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  }
+
+  // docs/planning/14: SATU draft per assignment_id (bukan bertumpuk) -- auto-save berkala &
+  // "Simpan sebagai Draf" manual berkali-kali untuk assignment yang SAMA menimpa entri lama
+  // (dicari lewat scan getAllDrafts(), dataset kecil per kader jadi aman), bukan bikin baris
+  // baru tiap kali. Draft yang SUDAH 'pending_sync'/'failed' (pernah dicoba kirim) TIDAK ditimpa
+  // status-nya balik ke 'draft' oleh auto-save -- cuma promoteDraftToPendingSync() yang boleh
+  // pindah ke arah situ, satu arah saja.
+  async function getDraftForAssignment(assignmentId: number): Promise<VisitReportDraft | null> {
+    const all = await getAllDrafts()
+    return all.find((d) => d.payload.assignment_id === assignmentId) ?? null
+  }
+
+  async function saveDraft(
+    payload: VisitReportDraftPayload,
+    photo: Blob | null,
+    patientNama: string,
+    status: 'draft' | 'pending_sync' = 'draft'
+  ): Promise<VisitReportDraft> {
+    const existing = await getDraftForAssignment(payload.assignment_id)
     const draft: VisitReportDraft = {
-      id: crypto.randomUUID(),
+      id: existing?.id ?? crypto.randomUUID(),
       patientNama,
-      createdAt: new Date().toISOString(),
-      status: 'pending_sync',
-      lastError: null,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      // Draft yang sudah pernah gagal dikirim ('pending_sync'/'failed') tetap begitu meski
+      // auto-save jalan lagi di halaman yang sama -- jangan mundur jadi 'draft' diam-diam.
+      status: existing && existing.status !== 'draft' ? existing.status : status,
+      lastError: existing?.status === 'draft' ? null : (existing?.lastError ?? null),
       payload,
-      photo
+      photo: photo ?? existing?.photo ?? null
     }
     await withStore('readwrite', (store) => store.put(draft))
     return draft
   }
 
-  async function getAllDrafts(): Promise<VisitReportDraft[]> {
-    const all = await withStore<VisitReportDraft[]>('readonly', (store) => store.getAll())
-    return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  // Dipanggil saat user menekan "Kirim" pada draft yang sebelumnya cuma disimpan (status
+  // 'draft', belum pernah dicoba kirim) sementara offline -- pindah ke 'pending_sync' supaya
+  // ikut diambil syncAllDrafts()/plugin auto-sync berikutnya.
+  async function promoteDraftToPendingSync(id: string): Promise<void> {
+    const draft = await withStore<VisitReportDraft | undefined>('readonly', (store) => store.get(id))
+    if (!draft) return
+    draft.status = 'pending_sync'
+    draft.updatedAt = new Date().toISOString()
+    await withStore('readwrite', (store) => store.put(draft))
   }
 
   async function deleteDraft(id: string): Promise<void> {
@@ -116,6 +156,12 @@ export function useOfflineQueue() {
   // perlu endpoint baru. Sukses -> draft dihapus dari IndexedDB. Gagal -> ditandai 'failed' +
   // alasannya (bukan dihapus), tetap ada di /app/draft supaya kader bisa coba sinkron ulang.
   async function syncOneDraft(draft: VisitReportDraft): Promise<{ ok: boolean, error?: string }> {
+    // Status 'draft' murni WIP milik user -- belum tentu lengkap (mis. foto belum diambil),
+    // sengaja TIDAK pernah ikut disinkron otomatis. Cuma promoteDraftToPendingSync() (dipicu
+    // user menekan "Kirim" pada draft-nya sendiri) yang boleh membawanya ke sini.
+    if (draft.status === 'draft' || !draft.photo) {
+      return { ok: false, error: 'Draft belum siap dikirim.' }
+    }
     try {
       const api = useApi()
       await api('/visit-reports', { method: 'POST', body: draftToFormData(draft) })
@@ -146,7 +192,9 @@ export function useOfflineQueue() {
     if (syncInFlight) return { succeeded: 0, failed: 0 }
     syncInFlight = true
     try {
-      const drafts = await getAllDrafts()
+      // 'draft' (WIP, belum pernah dicoba kirim) sengaja TIDAK ikut -- lihat catatan
+      // promoteDraftToPendingSync() di atas.
+      const drafts = (await getAllDrafts()).filter((d) => d.status !== 'draft')
       let succeeded = 0
       let failed = 0
       for (let i = 0; i < drafts.length; i++) {
@@ -161,17 +209,27 @@ export function useOfflineQueue() {
     }
   }
 
-  return { addDraft, getAllDrafts, deleteDraft, markDraftFailed, syncOneDraft, syncAllDrafts }
+  return {
+    getAllDrafts,
+    getDraftForAssignment,
+    saveDraft,
+    promoteDraftToPendingSync,
+    deleteDraft,
+    markDraftFailed,
+    syncOneDraft,
+    syncAllDrafts
+  }
 }
 
 // Membangun FormData POST /visit-reports dari draft tersimpan -- field & urutan SAMA PERSIS
 // dengan submitData() di /app/kunjungan/[id].vue supaya draft lama (dibuat sebelum field baru
-// ditambah) tetap valid dikirim.
+// ditambah) tetap valid dikirim. Cuma dipanggil dari syncOneDraft() SETELAH draft.photo
+// dipastikan ada (status 'draft' tanpa foto sudah ditolak di sana) -- aman non-null di sini.
 export function draftToFormData(draft: VisitReportDraft): FormData {
   const fd = new FormData()
   const p = draft.payload
   fd.append('assignment_id', String(p.assignment_id))
-  fd.append('photo', draft.photo, 'kunjungan.jpg')
+  fd.append('photo', draft.photo!, 'kunjungan.jpg')
   fd.append('latitude', String(p.latitude))
   fd.append('longitude', String(p.longitude))
   if (p.gps_accuracy_meters !== null) fd.append('gps_accuracy_meters', String(p.gps_accuracy_meters))

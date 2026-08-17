@@ -84,30 +84,29 @@ export function useMapTileDownload() {
     }
   }
 
-  /**
-   * Assignment HARI INI (tugas kader, docs/planning/11 §9) -- bukan seluruh riwayat, cakupan
-   * kecil sesuai wilayah kerja aktual hari itu. Satu tile gagal (mis. area itu tidak ada data,
-   * 404) TIDAK menghentikan proses, sama pola partial-success dengan sinkronisasi draft.
-   */
-  async function downloadTilesForAssignments(
-    assignments: VisitAssignment[],
-    onProgress?: (progress: TileDownloadProgress) => void
-  ): Promise<TileDownloadResult> {
-    if (!('caches' in window)) {
-      return { ok: false, downloaded: 0, total: 0, error: 'Perangkat/browser ini tidak mendukung penyimpanan offline.' }
+  // Bounding box RESMI dari tile server sendiri (bukan tebak koordinat manual) -- TileJSON
+  // sumenep.json (sudah SELALU diunduh sebagai salah satu baseUrls di bawah) punya field standar
+  // `.bounds` [west, south, east, north] yang mencerminkan cakupan data yang BENAR-BENAR ada
+  // (docs/planning/12). Dipakai sebagai fallback saat tidak ada assignment berkoordinat (kartu
+  // "Peta Offline Wilayah Kerja" tidak lagi mati total), dan sebagai opsi "Seluruh Kabupaten
+  // Sumenep" di wizard "Siapkan Mode Offline".
+  async function computeKabupatenBoundingBox(): Promise<[number, number, number, number] | null> {
+    try {
+      const config = useRuntimeConfig()
+      const base = config.public.tileServerUrl as string
+      const res = await fetch(`${base}/data/sumenep.json`)
+      if (!res.ok) return null
+      const tileJson = (await res.json()) as { bounds?: [number, number, number, number] }
+      return tileJson.bounds ?? null
+    } catch {
+      return null
     }
+  }
 
-    const bbox = computeBoundingBox(assignments)
-    if (!bbox) {
-      return { ok: false, downloaded: 0, total: 0, error: 'Tidak ada tugas dengan lokasi diketahui untuk diunduh petanya hari ini.' }
-    }
-
-    const config = useRuntimeConfig()
-    const base = config.public.tileServerUrl as string
-
-    // Style/sprite/TileJSON dulu -- dibutuhkan SEKALI supaya MapLibre bisa render sama sekali
-    // saat offline, bukan cuma ubin .pbf mentahnya.
-    const baseUrls = [
+  function buildBaseUrls(base: string): string[] {
+    // Style/sprite/TileJSON -- dibutuhkan SEKALI supaya MapLibre bisa render sama sekali saat
+    // offline, bukan cuma ubin .pbf mentahnya.
+    return [
       `${base}/styles/basemap/style.json`,
       `${base}/styles/basemap/sprite.json`,
       `${base}/styles/basemap/sprite.png`,
@@ -115,10 +114,27 @@ export function useMapTileDownload() {
       `${base}/styles/basemap/sprite@2x.png`,
       `${base}/data/sumenep.json`,
     ]
+  }
+
+  /**
+   * Inti unduh tile untuk SATU bounding box apa pun (dipakai baik untuk wilayah tugas hari ini
+   * maupun seluruh Kabupaten Sumenep, docs/planning/12) -- satu tile gagal (mis. area itu tidak
+   * ada data, 404) TIDAK menghentikan proses, sama pola partial-success dengan sinkronisasi draft.
+   */
+  async function downloadTilesForBoundingBox(
+    bbox: [number, number, number, number],
+    onProgress?: (progress: TileDownloadProgress) => void
+  ): Promise<TileDownloadResult> {
+    if (!('caches' in window)) {
+      return { ok: false, downloaded: 0, total: 0, error: 'Perangkat/browser ini tidak mendukung penyimpanan offline.' }
+    }
+
+    const config = useRuntimeConfig()
+    const base = config.public.tileServerUrl as string
 
     const tiles = buildTileList(bbox)
     const tileUrls = tiles.map((t) => `${base}/data/sumenep/${t.z}/${t.x}/${t.y}.pbf`)
-    const allUrls = [...baseUrls, ...tileUrls]
+    const allUrls = [...buildBaseUrls(base), ...tileUrls]
 
     const cache = await caches.open(CACHE_NAME)
     let downloaded = 0
@@ -137,6 +153,28 @@ export function useMapTileDownload() {
     return { ok: true, downloaded, total: allUrls.length }
   }
 
+  /**
+   * Assignment HARI INI (tugas kader, docs/planning/11 §9) -- bukan seluruh riwayat, cakupan
+   * kecil sesuai wilayah kerja aktual hari itu. Fallback ke bounding box Kabupaten Sumenep penuh
+   * kalau tidak ada assignment berkoordinat (docs/planning/12) -- tombol unduh TIDAK lagi mati
+   * total, cuma cakupannya yang lebih luas dari biasanya.
+   */
+  async function downloadTilesForAssignments(
+    assignments: VisitAssignment[],
+    onProgress?: (progress: TileDownloadProgress) => void
+  ): Promise<TileDownloadResult> {
+    if (!('caches' in window)) {
+      return { ok: false, downloaded: 0, total: 0, error: 'Perangkat/browser ini tidak mendukung penyimpanan offline.' }
+    }
+
+    const bbox = computeBoundingBox(assignments) ?? (await computeKabupatenBoundingBox())
+    if (!bbox) {
+      return { ok: false, downloaded: 0, total: 0, error: 'Gagal menentukan cakupan peta yang akan diunduh. Coba lagi saat koneksi lebih stabil.' }
+    }
+
+    return downloadTilesForBoundingBox(bbox, onProgress)
+  }
+
   async function getCachedTileInfo(): Promise<{ count: number, supported: boolean }> {
     if (!('caches' in window)) return { count: 0, supported: false }
     const cache = await caches.open(CACHE_NAME)
@@ -149,5 +187,13 @@ export function useMapTileDownload() {
     await caches.delete(CACHE_NAME)
   }
 
-  return { computeBoundingBox, buildTileList, downloadTilesForAssignments, getCachedTileInfo, clearCachedTiles }
+  return {
+    computeBoundingBox,
+    computeKabupatenBoundingBox,
+    buildTileList,
+    downloadTilesForBoundingBox,
+    downloadTilesForAssignments,
+    getCachedTileInfo,
+    clearCachedTiles
+  }
 }
