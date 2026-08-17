@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import * as icons from '#components'
 import { LucideMegaphone, LucideX } from '#components'
+import { resolveAnnouncementIcon } from '~/utils/announcement-icons'
 import type { Announcement } from '~/types/api'
 
 // Modal LEBAR (bukan dialog kecil) untuk pengumuman yang belum dibaca user, ditarget ke role-nya
@@ -28,7 +28,7 @@ async function dismissBackdrop() {
 }
 
 function iconComponent(name: string) {
-  return (icons as Record<string, unknown>)[name] ?? LucideMegaphone
+  return resolveAnnouncementIcon(name)
 }
 </script>
 
