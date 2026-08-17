@@ -41,6 +41,7 @@ onMounted(() => {
 
       <NetworkStatus />
       <AnnouncementInboxModal />
+      <ConfirmDialog />
 
       <!-- Top bar: cuma bel notifikasi (layout ini mobile-first, tidak ada header lengkap
            seperti dashboard desktop) -->

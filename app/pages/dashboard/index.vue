@@ -24,7 +24,7 @@ import {
   LucideTrendingUp,
   LucideShieldCheck
 } from "#components"
-import * as icons from '#components'
+import { resolveAnnouncementIcon } from '~/utils/announcement-icons'
 
 import type { ApiSuccessEnvelope, DashboardSummary, DashboardKecamatanRisk, DashboardDesaRisk, PaginatedData, Announcement, Puskesmas } from '~/types/api'
 import flatpickr from 'flatpickr'
@@ -266,10 +266,12 @@ async function loadAnnouncements() {
 }
 
 // Resolusi ikon dinamis by-nama (Announcement.icon, string) -- ikon lain di import block atas
-// cuma dipakai statis di template, ini lookup RUNTIME (icons[name]) untuk ikon yang disimpan
-// sebagai string di DB, sama pola dengan dashboard/pengumuman/index.vue.
+// cuma dipakai statis di template. Sumber kebenaran ~/utils/announcement-icons.ts (dipakai
+// bersama dashboard/pengumuman/index.vue & AnnouncementInboxModal.vue) -- lihat docblock di
+// sana untuk kenapa lookup dinamis WAJIB lewat import eksplisit '@lucide/vue', bukan wildcard
+// '#components' (bug 500 "icons is not defined" di build produksi).
 function iconComponentFor(name: string) {
-  return (icons as Record<string, unknown>)[name] ?? LucideBellRing
+  return resolveAnnouncementIcon(name)
 }
 
 // Form posting pengumuman baru — super_admin saja (gerbang sesungguhnya tetap di backend Policy,

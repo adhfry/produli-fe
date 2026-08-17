@@ -34,7 +34,14 @@ async function linkGoogle() {
 }
 
 async function unlinkGoogle() {
-  if (!confirm('Lepas tautan akun Google? Anda tetap bisa login dengan email/password.')) return
+  const confirmed = await useConfirm().confirm({
+    title: 'Lepas Tautan Akun Google?',
+    description: 'Anda tetap dapat login menggunakan email dan kata sandi.',
+    confirmLabel: 'Ya, Lepas Tautan',
+    tone: 'warning'
+  })
+  if (!confirmed) return
+
   isUnlinkingGoogle.value = true
   googleError.value = ''
   try {

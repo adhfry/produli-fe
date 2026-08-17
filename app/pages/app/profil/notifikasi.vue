@@ -19,7 +19,7 @@ const saveSettings = () => {
   isSaving.value = true
   setTimeout(() => {
     isSaving.value = false
-    alert("Pengaturan notifikasi disimpan!")
+    useToast().add({ title: 'Pengaturan notifikasi disimpan', color: 'success' })
   }, 800)
 }
 </script>

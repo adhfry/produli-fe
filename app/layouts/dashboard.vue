@@ -332,12 +332,13 @@ onMounted(loadSyncStatus)
   <div class="min-h-screen bg-slate-50 flex text-slate-800 font-sans theme-transition">
     <SimulationBanner />
     <AnnouncementInboxModal />
+    <ConfirmDialog />
 
     <!-- Sidebar -->
     <aside
-      class="fixed left-0 h-screen w-64 bg-accent flex flex-col z-20 transition-transform duration-300 shadow-xl"
+      class="fixed left-0 h-dvh w-64 bg-accent flex flex-col z-20 transition-transform duration-300 shadow-xl"
       :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full'"
-      :style="bannerActive ? { top: bannerOffsetTop, height: `calc(100vh - ${SIMULATION_BANNER_HEIGHT_PX}px)` } : { top: '0px' }"
+      :style="bannerActive ? { top: bannerOffsetTop, height: `calc(100dvh - ${SIMULATION_BANNER_HEIGHT_PX}px)` } : { top: '0px' }"
     >
       <!-- Logo Area -->
       <div class="h-16 flex items-center px-6 bg-white shrink-0 border-b border-slate-200 theme-transition">
