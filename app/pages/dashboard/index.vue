@@ -412,7 +412,9 @@ const isLoaded = ref(false)
 const searchQuery = ref('')
 const showSuggestions = ref(false)
 const filteredSuggestions = ref<any[]>([])
-const mapMode = ref('kecamatan')
+// 'puskesmas' (circle per puskesmas, revisi Bu Kadis) jadi DEFAULT -- permintaan eksplisit user
+// ("jadikan filter puskesmas sebagai default"), sebelumnya 'kecamatan' (choropleth poligon).
+const mapMode = ref('puskesmas')
 const showFilterMenu = ref(false)
 const desaLoaded = ref(false)
 const searchIndexData = ref<any[]>([])
@@ -481,6 +483,39 @@ function mergeRiskData<T extends { ringan: number, sedang: number, berat: number
 let rawKecamatanGeoJson: any = null
 let rawDesaGeoJson: any = null
 
+// Titik (BUKAN poligon) satu per puskesmas -- risiko_per_puskesmas SUDAH agregat siap pakai
+// (UNSCOPED, semua 31 puskesmas, lihat DashboardService::risikoPerPuskesmas()), tidak perlu
+// geojson eksternal seperti kecamatan/desa. Skip baris yang belum py koordinat (belum di-pin
+// lewat dashboard/instansi) -- titik itu tidak punya tempat untuk digambar di peta.
+// Warna 'risk' pakai prioritas keparahan SAMA PERSIS getRiskColor (dashboard/pasien/index.vue):
+// berat > sedang > ringan > tidak_berisiko > null (belum ada data sama sekali).
+function buildPuskesmasGeoJson() {
+  const rows = dashboardSummary.value?.risiko_per_puskesmas ?? []
+  return {
+    type: 'FeatureCollection',
+    features: rows
+      .filter((r) => r.latitude !== null && r.longitude !== null)
+      .map((r) => {
+        const totalAktif = r.ringan + r.sedang + r.berat
+        const risk = r.berat > 0 ? 'berat' : r.sedang > 0 ? 'sedang' : r.ringan > 0 ? 'ringan' : (r.tidak_berisiko > 0 ? 'tidak_berisiko' : null)
+        return {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [r.longitude, r.latitude] },
+          properties: {
+            puskesmas_id: r.puskesmas_id,
+            name: r.puskesmas_nama,
+            risk,
+            tidak_berisiko: r.tidak_berisiko,
+            ringan: r.ringan,
+            sedang: r.sedang,
+            berat: r.berat,
+            total_aktif: totalAktif
+          }
+        }
+      })
+  }
+}
+
 function refreshMapRiskData() {
   if (!mapInstance) return
   if (rawKecamatanGeoJson && mapInstance.getSource('sumenep-districts')) {
@@ -500,6 +535,9 @@ function refreshMapRiskData() {
       (props: any) => props.name || props.NAMOBJ || props.DESA || props.WADMKD || ''
     )
     mapInstance.getSource('sumenep-desa').setData(merged)
+  }
+  if (mapInstance.getSource('sumenep-puskesmas')) {
+    mapInstance.getSource('sumenep-puskesmas').setData(buildPuskesmasGeoJson())
   }
 }
 
@@ -590,6 +628,11 @@ const setMapMode = async (mode: string) => {
          }
        })
      }
+     ['puskesmas-circles', 'puskesmas-circles-stroke'].forEach(id => {
+       if (mapInstance.getLayer(id)) {
+         mapInstance.setLayoutProperty(id, 'visibility', mode === 'puskesmas' ? 'visible' : 'none')
+       }
+     })
   }
 }
 
@@ -814,6 +857,11 @@ const initMap = () => {
             id: 'sumenep-fills',
             type: 'fill',
             source: 'sumenep-districts',
+            // Visibility awal ikuti mapMode SAAT map ini load ('puskesmas' sekarang default,
+            // bukan lagi 'kecamatan') -- dipasang di sini (bukan andalkan setMapMode dipanggil
+            // belakangan) karena addLayer ini sendiri di dalam .then() ASYNC, race dgn kode
+            // lain yang berjalan sinkron setelah fetch di-trigger.
+            layout: { visibility: mapMode.value === 'kecamatan' ? 'visible' : 'none' },
              paint: {
                 'fill-color': [
                    'match',
@@ -832,6 +880,7 @@ const initMap = () => {
             id: 'sumenep-borders',
             type: 'line',
             source: 'sumenep-districts',
+            layout: { visibility: mapMode.value === 'kecamatan' ? 'visible' : 'none' },
             paint: {
                'line-color': '#ffffff',
                'line-width': 1,
@@ -855,7 +904,8 @@ const initMap = () => {
                'text-field': ['get', 'name'],
                'text-font': ['Noto Sans Bold'],
                'text-size': 10,
-               'text-anchor': 'center'
+               'text-anchor': 'center',
+               visibility: mapMode.value === 'kecamatan' ? 'visible' : 'none'
             },
              paint: {
                 'text-color': '#1e293b',
@@ -889,6 +939,108 @@ const initMap = () => {
       mapInstance.getCanvas().style.cursor = 'pointer';
     });
     mapInstance.on('mouseleave', 'sumenep-fills', () => {
+      mapInstance.getCanvas().style.cursor = '';
+    });
+
+    // --- Mode 'puskesmas' (revisi Bu Kadis, DEFAULT sekarang) -- circle satu per puskesmas,
+    // BUKAN poligon, jadi tidak perlu fetch geojson eksternal seperti kecamatan/desa di atas.
+    // Sinkron (bukan dalam .then()) karena datanya sudah tersedia dari dashboardSummary.value
+    // (loadDashboardSummary() SELALU selesai sebelum initMap() dipanggil, lihat onMounted). ---
+    mapInstance.addSource('sumenep-puskesmas', { type: 'geojson', data: buildPuskesmasGeoJson() });
+
+    // Warna TOKEN TEMA RESMI (docs/planning wajib-harus-sama... primary/success/warning/danger),
+    // BUKAN raw hex arbitrer seperti sumenep-fills di atas (poligon lama belum sempat dirapikan
+    // ke token resmi) -- lingkaran ini baru, sekalian benar dari awal.
+    mapInstance.addLayer({
+      id: 'puskesmas-circles-stroke',
+      type: 'circle',
+      source: 'sumenep-puskesmas',
+      layout: { visibility: mapMode.value === 'puskesmas' ? 'visible' : 'none' },
+      paint: {
+        'circle-radius': 12,
+        'circle-color': '#ffffff',
+        'circle-opacity': 1
+      }
+    });
+    mapInstance.addLayer({
+      id: 'puskesmas-circles',
+      type: 'circle',
+      source: 'sumenep-puskesmas',
+      layout: { visibility: mapMode.value === 'puskesmas' ? 'visible' : 'none' },
+      paint: {
+        'circle-radius': 9,
+        'circle-color': [
+          'match',
+          ['get', 'risk'],
+          'berat', '#EF4444',
+          'sedang', '#F59E0B',
+          'ringan', '#10B981',
+          'tidak_berisiko', '#00A59A',
+          '#94a3b8' // belum ada data risiko sama sekali
+        ],
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#ffffff'
+      }
+    });
+
+    mapInstance.on('click', 'puskesmas-circles', (e: any) => {
+      if (!e.features || e.features.length === 0) return;
+      const p = e.features[0].properties;
+      const riskMeta: Record<string, { label: string, color: string, bg: string }> = {
+        berat: { label: 'Perlu Tindakan Segera', color: '#EF4444', bg: 'rgba(239,68,68,0.12)' },
+        sedang: { label: 'Perlu Atensi', color: '#F59E0B', bg: 'rgba(245,158,11,0.12)' },
+        ringan: { label: 'Terpantau Aman', color: '#10B981', bg: 'rgba(16,185,129,0.12)' },
+        tidak_berisiko: { label: 'Seluruhnya Terkendali', color: '#00A59A', bg: 'rgba(0,165,154,0.12)' }
+      };
+      const meta = riskMeta[p.risk] ?? { label: 'Belum Ada Data Risiko', color: '#64748B', bg: 'rgba(100,116,139,0.12)' };
+
+      const html = `
+        <div class="min-w-[230px]">
+          <div class="flex items-center gap-2.5 px-3.5 pt-3.5 pb-2.5 border-b border-slate-100">
+            <div class="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style="background:${meta.bg}">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${meta.color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14l7-3 7 3v-3"/><path d="M9 22V12h6v4"/><path d="M12 7v5"/><path d="M9.5 9.5h5"/></svg>
+            </div>
+            <div class="min-w-0">
+              <p class="font-bold text-accent text-sm truncate">${p.name}</p>
+              <p class="text-[11px] font-bold" style="color:${meta.color}">${meta.label}</p>
+            </div>
+          </div>
+          <div class="px-3.5 pt-2.5 pb-1">
+            <div class="flex items-baseline gap-1.5">
+              <span class="text-2xl font-extrabold text-accent leading-none">${p.total_aktif}</span>
+              <span class="text-[11px] text-slate-500 font-semibold">pasien aktif</span>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-1.5 px-3.5 pb-3.5 pt-1.5">
+            <div class="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-primary/10">
+              <span class="text-[11px] font-semibold text-primary">Terkendali</span>
+              <span class="text-xs font-extrabold text-primary">${p.tidak_berisiko}</span>
+            </div>
+            <div class="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-success/10">
+              <span class="text-[11px] font-semibold text-success">Ringan</span>
+              <span class="text-xs font-extrabold text-success">${p.ringan}</span>
+            </div>
+            <div class="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-warning/10">
+              <span class="text-[11px] font-semibold text-warning">Sedang</span>
+              <span class="text-xs font-extrabold text-warning">${p.sedang}</span>
+            </div>
+            <div class="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-danger/10">
+              <span class="text-[11px] font-semibold text-danger">Berat</span>
+              <span class="text-xs font-extrabold text-danger">${p.berat}</span>
+            </div>
+          </div>
+        </div>
+      `;
+
+      new maplibregl.Popup({ className: 'produli-puskesmas-popup', closeButton: true, maxWidth: '260px', offset: 14 })
+        .setLngLat(e.lngLat)
+        .setHTML(html)
+        .addTo(mapInstance);
+    });
+    mapInstance.on('mouseenter', 'puskesmas-circles', () => {
+      mapInstance.getCanvas().style.cursor = 'pointer';
+    });
+    mapInstance.on('mouseleave', 'puskesmas-circles', () => {
       mapInstance.getCanvas().style.cursor = '';
     });
   });
@@ -1049,7 +1201,7 @@ const initMap = () => {
             <LucideMapPin class="w-5 h-5 text-primary" />
             Peta Sebaran Pasien Risiko
           </h3>
-          
+
           <div class="flex items-center gap-2">
             <!-- Search & Typeahead -->
             <div class="relative">
@@ -1079,9 +1231,15 @@ const initMap = () => {
               </button>
               
               <div v-if="showFilterMenu" class="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-20 p-1">
-                <button @click="setMapMode('kecamatan')" 
-                  :class="mapMode === 'kecamatan' ? 'bg-primary/10 text-primary font-semibold' : 'text-slate-600 hover:bg-slate-50'" 
+                <button @click="setMapMode('puskesmas')"
+                  :class="mapMode === 'puskesmas' ? 'bg-primary/10 text-primary font-semibold' : 'text-slate-600 hover:bg-slate-50'"
                   class="w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center justify-between">
+                  Per Puskesmas
+                  <LucideCheckCircle2 v-if="mapMode === 'puskesmas'" class="w-3.5 h-3.5" />
+                </button>
+                <button @click="setMapMode('kecamatan')"
+                  :class="mapMode === 'kecamatan' ? 'bg-primary/10 text-primary font-semibold' : 'text-slate-600 hover:bg-slate-50'"
+                  class="w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center justify-between mt-0.5">
                   Per Kecamatan
                   <LucideCheckCircle2 v-if="mapMode === 'kecamatan'" class="w-3.5 h-3.5" />
                 </button>
@@ -1467,5 +1625,36 @@ const initMap = () => {
 }
 .no-scrollbar {
   scrollbar-width: none;
+}
+</style>
+
+<style>
+/* Popup peta puskesmas (mode 'puskesmas') -- konten di-inject via innerHTML (bukan template Vue,
+   lihat click handler 'puskesmas-circles' di initMap()), jadi TIDAK bisa kena <style scoped>.
+   Override default MapLibre popup (padding/border-radius kotak polos) supaya konten custom di
+   atas (header+angka+grid breakdown) terasa satu kartu utuh, bukan nempel siku di tepi. */
+.produli-puskesmas-popup .maplibregl-popup-content {
+  padding: 0;
+  border-radius: 1rem;
+  box-shadow: 0 12px 32px -8px rgba(0, 59, 92, 0.25), 0 4px 10px -4px rgba(0, 59, 92, 0.12);
+  overflow: hidden;
+  animation: produli-popup-in 0.15s ease-out;
+}
+.produli-puskesmas-popup .maplibregl-popup-tip {
+  border-top-color: #ffffff;
+}
+.produli-puskesmas-popup .maplibregl-popup-close-button {
+  font-size: 18px;
+  color: #94a3b8;
+  padding: 4px 8px;
+  transition: color 0.15s ease;
+}
+.produli-puskesmas-popup .maplibregl-popup-close-button:hover {
+  color: #003b5c;
+  background: transparent;
+}
+@keyframes produli-popup-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 </style>

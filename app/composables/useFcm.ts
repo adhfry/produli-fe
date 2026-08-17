@@ -61,10 +61,22 @@ export function useFcm() {
         // Foreground: app sedang dibuka & fokus -- tampilkan toast, JANGAN andalkan browser
         // notification bawaan (itu cuma muncul kalau tab tidak fokus/background).
         onMessage(messaging, (payload) => {
+          useNotificationSound().playFcm();
+          const actionUrl = payload.data?.action_url;
+          const isDanger = payload.data?.severity === "danger";
           toast.add({
             title: payload.notification?.title ?? "Notifikasi Baru",
             description: payload.notification?.body,
-            icon: "i-lucide-bell",
+            icon: isDanger ? "i-lucide-alert-triangle" : "i-lucide-bell",
+            color: isDanger ? "error" : undefined,
+            actions: actionUrl
+              ? [
+                  {
+                    label: payload.data?.action_label || "Lihat",
+                    onClick: () => navigateTo(actionUrl),
+                  },
+                ]
+              : undefined,
           });
         });
       }

@@ -9,6 +9,14 @@ useHead({
 
 // Placeholder disengaja (docs/planning/02 §17) — risk_thresholds dkk belum ada endpoint
 // backend-nya sama sekali (backlog terpisah), jangan janji isi menu sebelum kontennya ada.
+
+// Temuan audit (docs/planning/15) -- sidebar (layouts/dashboard.vue) sudah menyembunyikan menu
+// ini untuk role selain super_admin, tapi halaman ini sendiri belum punya guard-nya sendiri.
+// Reuse pola isSuperAdmin computed yang sama dengan dashboard/instansi & dashboard/staf --
+// v-if di template, BUKAN redirect middleware (halaman lain di dashboard juga tidak pakai
+// redirect, cukup sembunyikan konten kalau nanti diisi data sungguhan yang sensitif).
+const authStore = useAuthStore()
+const isSuperAdmin = computed(() => (authStore.roles ?? []).includes('super_admin'))
 </script>
 
 <template>
@@ -24,10 +32,14 @@ useHead({
       <p class="text-sm text-slate-500 mt-1">Pengaturan tingkat sistem untuk super_admin.</p>
     </div>
 
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-card p-12 text-center text-slate-400">
+    <div v-if="isSuperAdmin" class="bg-white rounded-2xl border border-slate-100 shadow-card p-12 text-center text-slate-400">
       <LucideSettings class="w-10 h-10 mx-auto mb-3 text-slate-300" />
       <p class="font-medium text-slate-500">Halaman ini belum memiliki konten.</p>
       <p class="text-xs text-slate-400 mt-1">Menunggu endpoint backend terkait (mis. ambang batas risiko) — backlog terpisah.</p>
+    </div>
+    <div v-else class="bg-white rounded-2xl border border-slate-100 shadow-card p-12 text-center text-slate-400">
+      <LucideLock class="w-10 h-10 mx-auto mb-3 text-slate-300" />
+      <p class="font-medium text-slate-500">Halaman ini khusus super_admin.</p>
     </div>
   </div>
 </template>

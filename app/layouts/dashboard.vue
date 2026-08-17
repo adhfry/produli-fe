@@ -20,12 +20,11 @@ import {
   LucideLogOut,
   LucideCheckCircle2,
   LucideAlertTriangle,
-  LucideCalendarClock,
-  LucideFileWarning,
   LucideSmartphone,
-  LucideStethoscope
+  LucideStethoscope,
+  LucideAmbulance
 } from "#components"
-import type { ApiSuccessEnvelope, AppNotification, PaginatedData, Role } from '~/types/api'
+import type { ApiSuccessEnvelope, Role } from '~/types/api'
 
 const isSidebarOpen = ref(true)
 
@@ -135,6 +134,9 @@ const menuGroups = ref([
       { name: 'Dashboard', icon: LucideLayoutDashboard, to: '/dashboard' },
       { name: 'Data Pasien', icon: LucideHeartPulse, to: '/dashboard/pasien' },
       { name: 'Kunjungan', icon: LucideCalendarCheck, to: '/dashboard/kunjungan' },
+      // Fase 3 (docs plan) -- rujukan dari kader/nakes, digerbangi VisitReportPolicy::viewAnyRujukan
+      // (super_admin/admin_puskesmas/pj_prolanis, scope puskesmas ditegakkan di backend).
+      { name: 'Rujukan', icon: LucideAmbulance, to: '/dashboard/rujukan', roles: ['admin_puskesmas', 'pj_prolanis', 'super_admin'] },
     ]
   },
   {
@@ -202,30 +204,21 @@ const toggleTheme = () => {
 }
 
 // Notification Dropdown -- GET /api/v1/notifications (tabel `notifications` bawaan Laravel,
-// ter-scope ke user login sendiri lewat backend). `data` bentuknya beda per notification type
-// (lihat app/Notifications/*.php di backend), BUKAN title/desc generik seperti Announcement --
-// diformat per type di formatNotification() di bawah. Sering kosong utk role staf yang belum
-// dapat reminder kunjungan/laporan tidak valid apa pun -- itu wajar, bukan bug.
+// ter-scope ke user login sendiri lewat backend). Logic (load/format/markRead) diekstrak ke
+// useNotifications() (composables/useNotifications.ts) supaya dipakai bersama layouts/pwa.vue.
 const isNotifOpen = ref(false)
-const headerNotifications = ref<AppNotification[]>([])
-const unreadCount = ref(0)
-const isLoadingNotif = ref(false)
-const notifError = ref('')
-
-async function loadNotifications() {
-  isLoadingNotif.value = true
-  notifError.value = ''
-  try {
-    const api = useApi()
-    const res = await api('/notifications', { query: { per_page: 20 } }) as ApiSuccessEnvelope<PaginatedData<AppNotification> & { unread_count: number }>
-    headerNotifications.value = res.data.items
-    unreadCount.value = res.data.unread_count
-  } catch (e) {
-    notifError.value = e instanceof ApiError ? e.message : 'Gagal memuat notifikasi.'
-  } finally {
-    isLoadingNotif.value = false
-  }
-}
+const {
+  headerNotifications,
+  unreadCount,
+  isLoadingNotif,
+  notifError,
+  loadNotifications,
+  formatNotification,
+  notifIcon,
+  markAllRead,
+  openNotification,
+  isDangerNotif
+} = useNotifications()
 
 onMounted(loadNotifications)
 
@@ -234,71 +227,6 @@ onMounted(loadNotifications)
 onMounted(() => {
   useFcm().registerAndSendToken()
 })
-
-// Format per type -- backend TIDAK kirim title/desc siap-pakai, cuma payload mentah per type
-// (lihat komentar AppNotification di types/api.ts). Type yang tidak dikenal ditampilkan apa
-// adanya (type mentah sebagai judul), bukan dikarang isinya.
-function formatNotification(n: AppNotification) {
-  if (n.type === 'visit_reminder') {
-    return {
-      title: 'Pengingat Kunjungan',
-      desc: `Kunjungan untuk pasien ${n.data.patient_nama ?? '-'} dijadwalkan ${n.data.scheduled_date ?? '-'} (prioritas ${n.data.priority ?? '-'}).`
-    }
-  }
-  if (n.type === 'visit_report_invalidated') {
-    return {
-      title: 'Laporan Kunjungan Tidak Valid',
-      desc: `Laporan untuk pasien ${n.data.patient_nama ?? '-'} dinyatakan tidak valid.${n.data.validation_note ? ' Catatan: ' + n.data.validation_note : ''}`
-    }
-  }
-  // 3 type baru (revisi Bu Kadis, NotifyService) -- lihat komentar NotificationType di types/api.ts.
-  if (n.type === 'silakes_sync_completed') {
-    return {
-      title: 'Sinkronisasi SiLAKES Selesai',
-      desc: `${n.data.patients_synced ?? 0} pasien, ${n.data.lab_results_synced ?? 0} hasil lab tersinkron.`
-    }
-  }
-  if (n.type === 'patient_updated') {
-    return {
-      title: 'Data Pasien Diperbarui',
-      desc: `${n.data.updated_by ?? 'Seseorang'} mengajukan perubahan data pasien ${n.data.patient_nama ?? '-'}.`
-    }
-  }
-  if (n.type === 'care_visit_adhoc') {
-    return {
-      title: 'Kunjungan Tambahan Mendesak',
-      desc: `Kunjungan intensif tambahan untuk ${n.data.patient_nama ?? '-'} dijadwalkan ${n.data.scheduled_date ?? '-'}.`
-    }
-  }
-  return { title: n.type ?? 'Notifikasi', desc: '' }
-}
-
-function notifIcon(type: string | null) {
-  if (type === 'visit_report_invalidated') return LucideFileWarning
-  if (type === 'silakes_sync_completed') return LucideRefreshCw
-  if (type === 'patient_updated') return LucidePencil
-  if (type === 'care_visit_adhoc') return LucideStethoscope
-  return LucideCalendarClock
-}
-
-async function markRead(notif: AppNotification) {
-  if (notif.is_read) return
-  notif.is_read = true
-  unreadCount.value = Math.max(0, unreadCount.value - 1)
-  try {
-    const api = useApi()
-    await api(`/notifications/${notif.id}/read`, { method: 'PATCH' })
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-// Backend cuma punya PATCH /notifications/{id}/read (per-item), tidak ada endpoint bulk --
-// "tandai semua" jalan lewat beberapa panggilan individual sungguhan, bukan cuma ubah state lokal.
-async function markAllRead() {
-  const unread = headerNotifications.value.filter((n) => !n.is_read)
-  await Promise.all(unread.map((n) => markRead(n)))
-}
 
 // User Profile
 const isProfileOpen = ref(false)
@@ -556,12 +484,13 @@ onMounted(loadSyncStatus)
                     <div v-else-if="headerNotifications.length === 0" class="p-8 text-center text-slate-400 text-sm">
                        Tidak ada notifikasi.
                     </div>
-                    <div v-for="n in headerNotifications" :key="n.id" @click="markRead(n)"
+                    <div v-for="n in headerNotifications" :key="n.id" @click="openNotification(n)"
                          class="p-4 border-b border-slate-50 last:border-0 cursor-pointer transition-all duration-300 relative"
-                         :class="n.is_read ? 'bg-white hover:bg-slate-50' : 'bg-primary/5 hover:bg-primary/10 border-l-[3px] border-l-primary'">
+                         :class="n.is_read ? 'bg-white hover:bg-slate-50' : (isDangerNotif(n) ? 'bg-danger/5 hover:bg-danger/10 border-l-[3px] border-l-danger' : 'bg-primary/5 hover:bg-primary/10 border-l-[3px] border-l-primary')">
 
                        <div class="flex items-start gap-3">
-                          <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shadow-sm border border-slate-200 shrink-0">
+                          <div class="w-8 h-8 rounded-full flex items-center justify-center shadow-sm border shrink-0"
+                               :class="isDangerNotif(n) ? 'bg-danger/10 text-danger border-danger/30' : 'bg-slate-100 text-slate-500 border-slate-200'">
                              <component :is="notifIcon(n.type)" class="w-4 h-4" />
                           </div>
                           <div class="flex-1 min-w-0">
@@ -569,7 +498,7 @@ onMounted(loadSyncStatus)
                              <p v-if="formatNotification(n).desc" class="text-[11px] font-medium text-slate-500 mt-1 leading-relaxed">{{ formatNotification(n).desc }}</p>
                              <div class="flex items-center justify-between mt-2">
                                 <p class="text-[10px] font-bold text-slate-400">{{ new Date(n.created_at).toLocaleString('id-ID') }}</p>
-                                <span v-if="!n.is_read" class="text-[10px] font-bold text-primary">Baru</span>
+                                <span v-if="!n.is_read" class="text-[10px] font-bold" :class="isDangerNotif(n) ? 'text-danger' : 'text-primary'">{{ isDangerNotif(n) ? 'Perlu Tindakan' : 'Baru' }}</span>
                              </div>
                           </div>
                        </div>

@@ -37,6 +37,25 @@ const filterWilayahStatus = ref('')
 // role lain diisi juga (via lockKecamatanToOwnPuskesmas di bawah), murni UX -- disabled dropdown
 // yang menampilkan nama puskesmas sendiri, sama pola dengan filterKecamatanId.
 const filterPuskesmasId = ref<number | null>(null)
+// "Deteksi Dini Aktif" (revisi Bu Kadis) -- pasien Sedang yang berpotensi memburuk ke Berat
+// (early_detection_flag di latestRiskClassification, sudah dipakai ikon peringatan di tabel
+// sebelumnya, sekarang jadi filter cepat juga).
+const filterEarlyDetectionOnly = ref(false)
+
+// Header tabel yang bisa diklik utk sort asc/desc (revisi Bu Kadis) -- 'nama' default asc (sama
+// perilaku sebelum fitur ini ada, backend juga default ke ini kalau sort_by tidak dikirim).
+type SortField = 'nama' | 'risk_level'
+const sortBy = ref<SortField>('nama')
+const sortDirection = ref<'asc' | 'desc'>('asc')
+
+function toggleSort(field: SortField) {
+  if (sortBy.value === field) {
+    sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortBy.value = field
+    sortDirection.value = 'asc'
+  }
+}
 
 // admin_puskesmas/pj_prolanis: kecamatan & puskesmas filter OTOMATIS terkunci ke puskesmas
 // mereka sendiri (docs/planning §7 lanjutan) -- backend GET /patients SUDAH scope ke puskesmas
@@ -95,7 +114,12 @@ async function loadPatients(page = 1) {
         ...(filterWilayahStatus.value ? { wilayah_status: filterWilayahStatus.value } : {}),
         ...(filterKecamatanId.value ? { kecamatan_id: filterKecamatanId.value } : {}),
         ...(filterPuskesmasId.value ? { puskesmas_id: filterPuskesmasId.value } : {}),
-        ...(searchQuery.value.trim() ? { search: searchQuery.value.trim() } : {})
+        // '1' (BUKAN boolean true) -- rule 'boolean' Laravel cuma terima true/false/1/0/"1"/"0",
+        // BUKAN string "true" (yang dihasilkan query serializer kalau dikirim boolean literal).
+        ...(filterEarlyDetectionOnly.value ? { early_detection_only: 1 } : {}),
+        ...(searchQuery.value.trim() ? { search: searchQuery.value.trim() } : {}),
+        sort_by: sortBy.value,
+        sort_direction: sortDirection.value
       }
     }) as ApiSuccessEnvelope<PaginatedData<Patient>>
     patients.value = res.data.items
@@ -133,6 +157,8 @@ watch(filterRisk, () => loadPatients(1))
 watch(filterWilayahStatus, () => loadPatients(1))
 watch(filterKecamatanId, () => loadPatients(1))
 watch(filterPuskesmasId, () => loadPatients(1))
+watch(filterEarlyDetectionOnly, () => loadPatients(1))
+watch([sortBy, sortDirection], () => loadPatients(1))
 
 // Debounce pencarian nama/no. registrasi -- SERVER-SIDE sekarang, jangan panggil API di setiap
 // ketukan huruf.
@@ -218,6 +244,13 @@ function puskesmasCellTitle(patient: Patient): string | undefined {
   return puskesmasCellLabel(patient)
 }
 
+// Revisi Bu Kadis -- staf labkesda kadang copas no_reg ke kolom no_bpjs saat input manual di
+// SiLAKES (bukan No BPJS asli). Bandingkan APA ADANYA (bukan cuma format/panjang) -- kalau
+// persis sama dengan no_reg, hampir pasti salah input, bukan kebetulan.
+function isNoBpjsSuspicious(patient: Patient): boolean {
+  return !!patient.no_bpjs && patient.no_bpjs === patient.no_reg
+}
+
 const getWilayahColor = (status) => {
   if (status === 'resolved') return 'bg-success/10 text-success border border-success/20'
   if (status === 'unresolved') return 'bg-warning/10 text-warning border border-warning/20'
@@ -267,6 +300,7 @@ const filterSummaryText = computed(() => {
   if (filterWilayahStatus.value && WILAYAH_STATUS_LABELS[filterWilayahStatus.value]) {
     qualifiers.push(WILAYAH_STATUS_LABELS[filterWilayahStatus.value])
   }
+  if (filterEarlyDetectionOnly.value) qualifiers.push('Deteksi Dini Aktif')
   if (searchQuery.value.trim()) qualifiers.push(`kata kunci "${searchQuery.value.trim()}"`)
 
   let sentence = `${formatId(totalCount.value)} Data Pasien`
@@ -304,6 +338,9 @@ async function exportPdf() {
         ...(filterWilayahStatus.value ? { wilayah_status: filterWilayahStatus.value } : {}),
         ...(filterKecamatanId.value ? { kecamatan_id: filterKecamatanId.value } : {}),
         ...(filterPuskesmasId.value ? { puskesmas_id: filterPuskesmasId.value } : {}),
+        // '1' (BUKAN boolean true) -- rule 'boolean' Laravel cuma terima true/false/1/0/"1"/"0",
+        // BUKAN string "true" (yang dihasilkan query serializer kalau dikirim boolean literal).
+        ...(filterEarlyDetectionOnly.value ? { early_detection_only: 1 } : {}),
         ...(searchQuery.value.trim() ? { search: searchQuery.value.trim() } : {})
       },
       responseType: 'blob'
@@ -470,6 +507,14 @@ function closeNikNotFoundModal() {
             :disabled="!isSuperAdmin"
             class="flex-1 md:w-48"
           />
+          <label
+            class="flex items-center gap-2 py-2.5 px-3 rounded-xl border text-sm font-semibold cursor-pointer transition-colors shrink-0"
+            :class="filterEarlyDetectionOnly ? 'border-danger bg-danger/10 text-danger' : 'border-slate-200 text-slate-600 hover:border-slate-300'"
+          >
+            <input v-model="filterEarlyDetectionOnly" type="checkbox" class="rounded border-slate-300 text-danger focus:ring-danger/30" />
+            <LucideAlertTriangle class="w-3.5 h-3.5 shrink-0" />
+            Deteksi Dini Aktif
+          </label>
         </div>
       </div>
 
@@ -494,20 +539,35 @@ function closeNikNotFoundModal() {
         <table class="w-full text-left border-collapse min-w-[1150px]">
           <thead>
             <tr class="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
-              <th class="py-4 px-5 font-semibold">Nama Pasien</th>
+              <th class="py-4 px-5 font-semibold">
+                <button type="button" @click="toggleSort('nama')" class="flex items-center gap-1 hover:text-primary transition-colors">
+                  Nama Pasien
+                  <LucideArrowUp v-if="sortBy === 'nama' && sortDirection === 'asc'" class="w-3 h-3" />
+                  <LucideArrowDown v-else-if="sortBy === 'nama' && sortDirection === 'desc'" class="w-3 h-3" />
+                  <LucideArrowUpDown v-else class="w-3 h-3 opacity-40" />
+                </button>
+              </th>
               <th class="py-4 px-5 font-semibold">No. Registrasi</th>
+              <th class="py-4 px-5 font-semibold">No. BPJS</th>
               <th class="py-4 px-5 font-semibold text-center">Usia / JK</th>
               <th class="py-4 px-5 font-semibold">Alamat & Lokasi</th>
               <th class="py-4 px-5 font-semibold">Puskesmas</th>
               <th class="py-4 px-5 font-semibold">Status Prolanis</th>
-              <th class="py-4 px-5 font-semibold">Tingkat Risiko</th>
+              <th class="py-4 px-5 font-semibold">
+                <button type="button" @click="toggleSort('risk_level')" class="flex items-center gap-1 hover:text-primary transition-colors">
+                  Tingkat Risiko
+                  <LucideArrowUp v-if="sortBy === 'risk_level' && sortDirection === 'asc'" class="w-3 h-3" />
+                  <LucideArrowDown v-else-if="sortBy === 'risk_level' && sortDirection === 'desc'" class="w-3 h-3" />
+                  <LucideArrowUpDown v-else class="w-3 h-3 opacity-40" />
+                </button>
+              </th>
               <th class="py-4 px-5 font-semibold text-center">Status Wilayah</th>
               <th class="py-4 px-5 font-semibold text-right">Aksi</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
             <tr v-if="isLoading">
-               <td colspan="9" class="py-12 text-center text-slate-400">
+               <td colspan="10" class="py-12 text-center text-slate-400">
                   <LucideLoader2 class="w-6 h-6 mx-auto mb-2 animate-spin" />
                   Memuat data pasien...
                </td>
@@ -526,6 +586,12 @@ function closeNikNotFoundModal() {
                   </div>
                </td>
                <td class="py-4 px-5 text-sm font-medium text-slate-600">{{ patient.no_reg || '-' }}</td>
+               <td class="py-4 px-5 text-sm font-medium">
+                  <span :class="isNoBpjsSuspicious(patient) ? 'text-danger' : 'text-slate-600'">{{ patient.no_bpjs || '-' }}</span>
+                  <AppTooltip v-if="isNoBpjsSuspicious(patient)" text="No BPJS sama persis dengan No. Registrasi -- kemungkinan salah input (copas) oleh staf, bukan No BPJS asli.">
+                     <LucideAlertTriangle class="w-3.5 h-3.5 text-danger inline-block ml-1" />
+                  </AppTooltip>
+               </td>
                <td class="py-4 px-5 text-sm font-semibold text-slate-700 text-center">
                   <template v-if="calculateAge(patient.tgl_lahir)">{{ calculateAge(patient.tgl_lahir) }} thn <span class="text-slate-400 font-normal">/</span> {{ patient.gender || '-' }}</template>
                   <span v-else class="text-slate-300">-</span>
@@ -576,7 +642,7 @@ function closeNikNotFoundModal() {
                </td>
             </tr>
             <tr v-if="!isLoading && patients.length === 0">
-               <td colspan="9" class="py-12 text-center">
+               <td colspan="10" class="py-12 text-center">
                  <div class="flex flex-col items-center justify-center text-slate-400">
                     <LucideSearchX class="w-10 h-10 mb-3 text-slate-300" />
                     <p class="font-medium">Tidak ada data pasien yang ditemukan.</p>

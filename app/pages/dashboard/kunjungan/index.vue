@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, AssignmentStatus, VisitAssignment, Puskesmas } from '~/types/api'
+import type { ApiSuccessEnvelope, AssignmentStatus, VisitAssignment, Puskesmas, VisitMonitoringResponse } from '~/types/api'
 import flatpickr from 'flatpickr'
 import 'flatpickr/dist/flatpickr.css'
 import { Indonesian } from 'flatpickr/dist/l10n/id.js'
@@ -30,9 +30,33 @@ async function loadVisits() {
     isLoadingVisits.value = false
   }
 }
+// Monitoring (revisi Bu Kadis) -- summary status + breakdown per desa, endpoint TERPISAH
+// (bukan diturunkan dari visitsList di atas) karena backend menghitungnya di database (COUNT
+// per status, JOIN ke desa) -- lebih akurat & murah daripada agregasi ulang di JS dari 100 baris
+// per_page yang sudah dimuat, dan tetap benar walau visitsList nanti dipaginate beneran.
+const monitoring = ref<VisitMonitoringResponse | null>(null)
+const isLoadingMonitoring = ref(false)
+const monitoringError = ref('')
+const showMonitoringDesaTable = ref(false)
+
+async function loadMonitoring() {
+  isLoadingMonitoring.value = true
+  monitoringError.value = ''
+  try {
+    const api = useApi()
+    const res = await api('/visit-assignments/monitoring') as ApiSuccessEnvelope<VisitMonitoringResponse>
+    monitoring.value = res.data
+  } catch (e) {
+    monitoringError.value = e instanceof ApiError ? e.message : 'Gagal memuat data monitoring.'
+  } finally {
+    isLoadingMonitoring.value = false
+  }
+}
+
 onMounted(() => {
   loadVisits()
   loadPuskesmasFullList()
+  loadMonitoring()
 })
 
 const searchQuery = ref('')
@@ -468,6 +492,22 @@ const viewVisit = (visit) => {
   showViewModal.value = true
 }
 
+// Deep-link dari notifikasi bel / tombol "Lihat Kunjungan" di FCM (laporan kunjungan baru) --
+// ?assignment_id= buka langsung modal detail assignment terkait, tanpa perlu klik manual di
+// tabel. Sama pola validasinya dgn ?status= di atas (whitelist/format ketat, bukan pakai nilai
+// URL apa adanya). visitsList baru terisi setelah loadVisits() (async) selesai, jadi pakai
+// watch (bukan cek langsung) supaya tetap kebuka meski query hadir sebelum data siap.
+if (typeof route.query.assignment_id === 'string' && /^\d+$/.test(route.query.assignment_id)) {
+  const targetAssignmentId = Number(route.query.assignment_id)
+  const stopAssignmentDeepLink = watch(visitsList, (list) => {
+    const found = list.find((v) => v.id === targetAssignmentId)
+    if (found) {
+      viewVisit(found)
+      stopAssignmentDeepLink()
+    }
+  }, { immediate: true })
+}
+
 // Role gating asli -- pola sama dgn dashboard/index.vue (authStore.roles, BUKAN toggle mock).
 const authStore = useAuthStore()
 const isSuperAdmin = computed(() => (authStore.roles ?? []).includes('super_admin'))
@@ -575,6 +615,80 @@ const submitValidation = async () => {
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- Monitoring (revisi Bu Kadis) -- ringkasan status + siapa mengunjungi desa mana, endpoint
+         TERPISAH dari visitsList (GET /visit-assignments/monitoring, dihitung backend). -->
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-card p-5">
+      <div class="flex items-center gap-2 mb-4">
+        <LucideGauge class="w-4 h-4 text-primary" />
+        <h2 class="font-bold text-accent text-sm">Monitoring Kunjungan</h2>
+      </div>
+
+      <p v-if="monitoringError" class="text-xs font-semibold text-danger mb-3">{{ monitoringError }}</p>
+
+      <div v-if="isLoadingMonitoring && !monitoring" class="py-8 text-center text-slate-400 text-sm">
+        <LucideLoader2 class="w-5 h-5 mx-auto mb-2 animate-spin" />
+        Memuat monitoring...
+      </div>
+
+      <template v-else-if="monitoring">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="rounded-xl border border-slate-100 bg-slate-50 p-4">
+            <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Belum Dikunjungi</p>
+            <p class="text-2xl font-extrabold text-accent">{{ monitoring.summary.pending }}</p>
+          </div>
+          <div class="rounded-xl border border-info/20 bg-info/5 p-4">
+            <p class="text-[10px] font-bold uppercase tracking-widest text-info mb-1">Sedang Proses</p>
+            <p class="text-2xl font-extrabold text-info">{{ monitoring.summary.in_progress }}</p>
+          </div>
+          <div class="rounded-xl border border-success/20 bg-success/5 p-4">
+            <p class="text-[10px] font-bold uppercase tracking-widest text-success mb-1">Selesai</p>
+            <p class="text-2xl font-extrabold text-success">{{ monitoring.summary.completed }}</p>
+          </div>
+          <div class="rounded-xl border p-4" :class="monitoring.summary.overdue > 0 ? 'border-danger/20 bg-danger/5' : 'border-slate-100 bg-slate-50'">
+            <p class="text-[10px] font-bold uppercase tracking-widest mb-1" :class="monitoring.summary.overdue > 0 ? 'text-danger' : 'text-slate-400'">Tenggat Lewat</p>
+            <p class="text-2xl font-extrabold" :class="monitoring.summary.overdue > 0 ? 'text-danger' : 'text-accent'">{{ monitoring.summary.overdue }}</p>
+          </div>
+        </div>
+
+        <!-- Per desa -- "siapa mengunjungi desa mana" -- collapsed default (bisa cukup panjang
+             di puskesmas dgn banyak desa), toggle sama pola dgn section lain di halaman ini. -->
+        <div v-if="monitoring.per_desa.length" class="mt-4 pt-4 border-t border-slate-100">
+          <button type="button" @click="showMonitoringDesaTable = !showMonitoringDesaTable" class="flex items-center gap-1.5 text-xs font-bold text-primary hover:underline">
+            <LucideChevronDown class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-180': showMonitoringDesaTable }" />
+            {{ showMonitoringDesaTable ? 'Sembunyikan' : 'Lihat' }} Rincian per Desa ({{ monitoring.per_desa.length }} desa)
+          </button>
+
+          <div v-if="showMonitoringDesaTable" class="overflow-x-auto mt-3">
+            <table class="w-full text-left border-collapse min-w-[560px]">
+              <thead>
+                <tr class="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                  <th class="py-2.5 px-3 font-semibold">Desa</th>
+                  <th class="py-2.5 px-3 font-semibold text-center">Total</th>
+                  <th class="py-2.5 px-3 font-semibold text-center">Belum</th>
+                  <th class="py-2.5 px-3 font-semibold text-center">Proses</th>
+                  <th class="py-2.5 px-3 font-semibold text-center">Selesai</th>
+                  <th class="py-2.5 px-3 font-semibold">Petugas</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr v-for="row in monitoring.per_desa" :key="row.desa_id" class="text-sm">
+                  <td class="py-2.5 px-3 font-semibold text-slate-700">{{ row.desa_nama }}</td>
+                  <td class="py-2.5 px-3 text-center font-bold text-accent">{{ row.total }}</td>
+                  <td class="py-2.5 px-3 text-center text-slate-600">{{ row.pending }}</td>
+                  <td class="py-2.5 px-3 text-center text-info">{{ row.in_progress }}</td>
+                  <td class="py-2.5 px-3 text-center text-success">{{ row.completed }}</td>
+                  <td class="py-2.5 px-3 text-slate-500 text-xs">{{ row.petugas.join(', ') || '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p v-else class="mt-4 pt-4 border-t border-slate-100 text-xs text-slate-400 italic">
+          Belum ada kunjungan dengan desa pasien yang teridentifikasi.
+        </p>
+      </template>
     </div>
 
     <!-- Filters & Table Card -->
@@ -1002,6 +1116,17 @@ const submitValidation = async () => {
                    <p class="text-sm font-bold text-slate-800">{{ selectedVisit.scheduled_date }}</p>
                 </div>
              </div>
+
+             <!-- Detail lengkap (revisi Bu Kadis) -- halaman TERPISAH, bukan diperluas di modal
+                  ini: bukti foto, data pasien lengkap, data kader/nakes, SEMUA input form
+                  kunjungan. Modal ini tetap fokus alur kerja (terima/validasi laporan) di bawah. -->
+             <NuxtLink
+                :to="`/dashboard/kunjungan/${selectedVisit.id}`"
+                class="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-bold text-sm text-primary bg-primary/10 hover:bg-primary/20 transition-colors border border-primary/20"
+             >
+                <LucideExternalLink class="w-4 h-4" />
+                Lihat Detail Lengkap &amp; Bukti Foto
+             </NuxtLink>
 
              <div class="grid grid-cols-2 gap-4">
                 <div>

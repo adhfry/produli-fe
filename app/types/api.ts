@@ -135,6 +135,10 @@ export interface Patient {
   id: number
   external_patient_id: number
   no_reg: string | null
+  // Revisi Bu Kadis -- staf labkesda kadang copas no_reg ke kolom no_bpjs saat input manual di
+  // SiLAKES, jadi frontend perlu tandai kasus no_bpjs === no_reg (lihat isNoBpjsSuspicious()
+  // di dashboard/pasien/index.vue).
+  no_bpjs: string | null
   // Selalu sudah di-mask backend (App\Support\NikDisplay::resolve()) -- penuh kalau NIK diawali
   // kode wilayah Sumenep (3529), selain itu string literal "Tidak Diketahui". Tidak pernah null.
   nik: string
@@ -199,6 +203,13 @@ export interface RiskCriteriaSnapshotItem {
   threshold_max: number | null
   level: PatientRiskLevel
   is_direct_classifier: boolean
+  // Baris baru (integrasi presisi SiLAKES, lihat SilakesReferenceRangeService di backend) --
+  // hadir HANYA saat parameter ini diklasifikasi lewat reference_ranges_cache umur+gender,
+  // bukan RiskThreshold lama. operator/threshold_min/threshold_max tetap bentuk yang sama,
+  // jadi rendering existing (lihat OPERATOR_LABELS di app/pages/dashboard/pasien/[id].vue)
+  // tidak perlu berubah -- dua field ini opsional, cuma info tambahan.
+  source?: 'silakes_reference_ranges'
+  category_label?: string
 }
 
 // GET /patients/{id}/risk-history (revisi Bu Kadis, Fase 5) -- satu baris riwayat klasifikasi,
@@ -437,6 +448,10 @@ export interface VisitReport {
   latitude: number | null
   longitude: number | null
   face_detected: boolean | null
+  // URL sementara (15 menit, VisitReport::photoUrl() -- presigned S3/MinIO) untuk foto bukti
+  // kunjungan. null kalau belum ada foto ATAU disk driver tidak mendukung temporary URL --
+  // frontend WAJIB tangani null (jangan andalkan selalu ada), lihat dashboard/kunjungan/[id].vue.
+  photo_url: string | null
   sync_status: string
   gda: number | null
   gdp: number | null
@@ -446,7 +461,13 @@ export interface VisitReport {
   systolic: number | null
   diastolic: number | null
   keluhan: string | null
-  tindakan: TindakanKunjungan | null
+  // Bisa lebih dari satu tindakan sekaligus (Fase 2, sebelumnya enum tunggal) -- null kalau
+  // belum diisi sama sekali.
+  tindakan: TindakanKunjungan[] | null
+  // Alur rujukan (Fase 2/3) -- cara_rujukan diisi kalau tindakan mencakup 'dirujuk_puskesmas',
+  // rujukan_status diubah admin_puskesmas/pj_prolanis di /dashboard/rujukan (Fase 3).
+  cara_rujukan: CaraRujukan | null
+  rujukan_status: RujukanStatus | null
   // PMO mingguan kader (revisi Bu Kadis) -- opsional, terpisah dari pemeriksaan klinis di atas
   // yang jadi tanggung jawab tenaga_kesehatan.
   kepatuhan_obat: KepatuhanObat | null
@@ -464,6 +485,26 @@ export interface VisitReport {
   validated_by?: { id: number, name: string } | null
   validation_note: string | null
   created_at: string
+}
+
+// --- Rujukan (Fase 3, app/Http/Controllers/Api/V1/RujukanController.php) ---
+// GET /rujukan -- admin_puskesmas/pj_prolanis: rujukan dari kader/nakes DI PUSKESMASNYA sendiri
+// (RujukanService::scopedQuery, ikut puskesmas KADER/NAKES pelapor, bukan puskesmas pasien),
+// super_admin: semua. PATCH /rujukan/{id}/konfirmasi -- admin_puskesmas/pj_prolanis puskesmas
+// terkait saja (super_admin cuma bisa lihat, tidak bisa konfirmasi).
+export interface Rujukan {
+  id: number
+  assignment_id: number
+  patient: { id: number, nama: string } | null
+  petugas: { id: number, nama: string | null, tipe: 'kader' | 'tenaga_kesehatan' } | null
+  puskesmas: { id: number, nama: string } | null
+  cara_rujukan: CaraRujukan | null
+  rujukan_status: RujukanStatus | null
+  created_at: string | null
+}
+
+export interface ConfirmRujukanPayload {
+  status: 'dikonfirmasi' | 'dibatalkan'
 }
 
 // PATCH /validasi-laporan/{visitReport} (ValidateVisitReportRequest) -- super_admin saja.
@@ -485,10 +526,10 @@ export interface VisitAssignment {
   // tapi ada no. telepon — kader diarahkan hubungi lewat telepon, bukan peta).
   assignment_method: 'wilayah_resolved' | 'phone_contact'
   patient?: { id: number, nama: string, alamat: string | null, phone: string | null, latitude: number | null, longitude: number | null, geo_status: string }
-  kader?: { id: number, name: string | null } | null
+  kader?: { id: number, name: string | null, no_hp: string | null } | null
   // Petugas tenaga_kesehatan (revisi Bu Kadis, Fase 2/5) -- kader/tenaga_kesehatan saling
   // eksklusif per assignment (lihat visit_origin di backend), null kalau assignment ini kader.
-  tenaga_kesehatan?: { id: number, name: string | null } | null
+  tenaga_kesehatan?: { id: number, name: string | null, no_hp: string | null } | null
   assigned_by?: { id: number, name: string } | null
   // Snapshot puskesmas saat assignment dibuat -- relevan terutama super_admin (lintas
   // puskesmas), admin_puskesmas/pj_prolanis selalu cuma lihat puskesmasnya sendiri.
@@ -505,6 +546,35 @@ export interface VisitAssignment {
   // super_admin), bukan assignment baru -- lihat /app/tugas & dashboard/kunjungan.
   report?: VisitReport | null
   created_at: string
+}
+
+// GET /visit-assignments/monitoring (revisi Bu Kadis, dashboard/kunjungan monitoring) -- SAMA
+// scope dgn GET /visit-assignments (VisitAssignmentService::scopedQuery()). 'overdue' = jumlah
+// assignment scheduled_date SUDAH LEWAT tapi masih pending/in_progress ("tenggat lewat").
+export interface VisitMonitoringSummary {
+  pending: number
+  in_progress: number
+  completed: number
+  cancelled: number
+  overdue: number
+}
+
+// per_desa HANYA menyertakan pasien yang desa-nya sudah resolved (sama prinsip
+// DashboardKecamatanRisk/DashboardDesaRisk) -- totalnya BISA lebih kecil dari jumlah summary
+// di atas, itu bukan bug, cuma sebagian pasien belum ke-resolve ke desa mana pun.
+export interface VisitMonitoringDesaRow {
+  desa_id: number
+  desa_nama: string
+  total: number
+  pending: number
+  in_progress: number
+  completed: number
+  petugas: string[]
+}
+
+export interface VisitMonitoringResponse {
+  summary: VisitMonitoringSummary
+  per_desa: VisitMonitoringDesaRow[]
 }
 
 // POST /visit-assignments/bulk — docs/planning/02 §12/§16 (backend).
@@ -556,6 +626,22 @@ export interface DashboardDesaRisk {
   berat: number
 }
 
+// Revisi Bu Kadis -- agregat risiko per puskesmas untuk peta mode 'puskesmas' (circle marker,
+// lihat pages/dashboard/index.vue). UNSCOPED (SEMUA 31 puskesmas se-Kabupaten Sumenep, semua
+// role) -- termasuk puskesmas yang belum py pasien berisiko sama sekali (semua count 0, TETAP
+// muncul sebagai titik "belum ada data"). latitude/longitude null kalau puskesmas belum di-pin
+// koordinatnya (lihat dashboard/instansi) -- frontend skip render titik untuk baris begini.
+export interface DashboardPuskesmasRisk {
+  puskesmas_id: number
+  puskesmas_nama: string
+  latitude: number | null
+  longitude: number | null
+  tidak_berisiko: number
+  ringan: number
+  sedang: number
+  berat: number
+}
+
 // Fase 4 (revisi Bu Kadis) -- jumlah pasien yang levelnya MEMBAIK (turun keparahan) antar 2
 // klasifikasi berurutan, dikelompokkan per puskesmas tempat pasien terdaftar SAAT INI. breakdown
 // kunci dinamis berbentuk "{level_lama}_ke_{level_baru}" (mis. "berat_ke_sedang"), bukan daftar
@@ -591,6 +677,7 @@ export interface DashboardSummary {
   // dipakai untuk peta -- itu tugas risiko_per_kecamatan yang sudah scoped.
   risiko_per_kecamatan_se_kabupaten: DashboardKecamatanRisk[]
   risiko_per_desa: DashboardDesaRisk[]
+  risiko_per_puskesmas: DashboardPuskesmasRisk[]
   puskesmas_performance: DashboardPuskesmasPerformance[]
   // Caption personalisasi peta -- null kalau puskesmas tidak diketahui (super_admin tanpa
   // filter) ATAU kecamatannya cuma py 1 puskesmas (caption tidak relevan). Hanya terisi saat
@@ -629,12 +716,25 @@ export interface CreateAnnouncementPayload {
 // menambah 3 type baru: 'silakes_sync_completed' {patients_synced, lab_results_synced,
 // patients_classified}, 'patient_updated' {patient_id, patient_nama, updated_by},
 // 'care_visit_adhoc' {care_assignment_id, visit_assignment_id, patient_nama, scheduled_date}.
+// 'visit_report_submitted' (baru, notifikasi ke ATAS kader/nakes -> admin_puskesmas+pj_prolanis
+// di puskesmas PETUGAS pelapor, lihat VisitReportService::notifyReportSubmitted())
+// {assignment_id, patient_id, severity: 'danger', action_url, action_label}.
+// 'pasien_dirujuk' (Fase 2, VisitReportService::notifyPasienDirujuk() -- dipicu HANYA kalau
+// tindakan mencakup 'dirujuk_puskesmas', channel push+fcm+email, beda dari visit_report_submitted
+// yang notifikasi biasa) {assignment_id, visit_report_id, patient_id, severity: 'danger',
+// action_url, action_label}.
+// 'visit_assigned' (fix gap admin->kader/nakes yang sebelumnya cuma email/tidak ada sama sekali
+// -- lihat VisitAssignmentService::notifyAssignedKaders() & CareAssignmentService::
+// notifyVisitAssigned()) {task_count, scheduled_date, action_url, action_label}.
 export type NotificationType =
   | 'visit_reminder'
   | 'visit_report_invalidated'
   | 'silakes_sync_completed'
   | 'patient_updated'
   | 'care_visit_adhoc'
+  | 'visit_report_submitted'
+  | 'pasien_dirujuk'
+  | 'visit_assigned'
   | string
 
 export interface AppNotification {
@@ -655,6 +755,13 @@ export interface AppNotification {
 // 7-layer VisitValidationService anti-fraud).
 
 export type TindakanKunjungan = 'diberi_obat' | 'dirujuk_puskesmas' | 'tidak_ada'
+
+// Alur rujukan (Fase 2/3) -- cara_rujukan wajib diisi kader/nakes kalau tindakan mencakup
+// 'dirujuk_puskesmas' (SubmitVisitReportRequest). rujukan_status server-computed (bukan input
+// klien): 'menunggu_konfirmasi' otomatis saat submit, diubah admin_puskesmas/pj_prolanis di
+// /dashboard/rujukan (Fase 3, halaman belum dibangun).
+export type CaraRujukan = 'datang_sendiri' | 'dijemput_ambulan' | 'diantar_keluarga' | 'diantar_nakes_kader'
+export type RujukanStatus = 'menunggu_konfirmasi' | 'dikonfirmasi' | 'dibatalkan'
 
 // PMO mingguan kader (revisi Bu Kadis) -- kunjungan kader-only (assignment.kader_id, BUKAN
 // tenaga_kesehatan_id) selalu form ringkas ini, bukan pemeriksaan klinis gda/gdp/dst.
@@ -731,7 +838,8 @@ export interface VisitReportPemeriksaan {
   systolic?: number | null
   diastolic?: number | null
   keluhan?: string | null
-  tindakan?: TindakanKunjungan | null
+  tindakan?: TindakanKunjungan[] | null
+  cara_rujukan?: CaraRujukan | null
   kepatuhan_obat?: KepatuhanObat | null
   sisa_obat?: SisaObat | null
 }

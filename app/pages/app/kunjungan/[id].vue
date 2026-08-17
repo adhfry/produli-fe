@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, PatientFieldUpdates, VisitReportPemeriksaan } from '~/types/api'
-import type { VisitReportDraftPayload } from '~/composables/useOfflineQueue'
+import type { ApiSuccessEnvelope, PatientFieldUpdates, VisitReportPemeriksaan, VisitAssignment } from '~/types/api'
+import type { VisitReportDraft, VisitReportDraftPayload } from '~/composables/useOfflineQueue'
 
 definePageMeta({
   layout: "pwa",
@@ -64,6 +64,102 @@ const isKaderAssignment = computed(() => !!assignment.value?.kader);
 
 const patientAge = computed(() => null); // Tidak tersedia dari VisitAssignmentResource.patient (id/nama/alamat/phone/lat/lng/geo_status saja).
 
+// Riwayat Kunjungan Pasien (revisi Bu Kadis) -- SEMUA kunjungan pasien ini SEPANJANG WAKTU, dari
+// petugas manapun (kader ATAU nakes), BUKAN cuma milik kader/nakes yang sedang login. Kader/nakes
+// perlu tahu kondisi kunjungan sebelumnya -- apakah dilakukan dirinya sendiri atau petugas lain --
+// sebelum mengisi laporan baru. GET /patients/{id}/visit-history sudah discope PatientsCachePolicy
+// ::view() (kader/nakes cuma boleh akses pasien yang PERNAH ditugaskan ke mereka, lihat
+// ScopesByPuskesmas::canAccessPatientRecord) -- pasien di halaman ini otomatis lolos gerbang itu
+// karena assignment SAAT INI membuktikan keterkaitannya.
+const showHistoryModal = ref(false);
+const patientHistory = ref<VisitAssignment[]>([]);
+const isLoadingHistory = ref(false);
+const historyError = ref("");
+const historyLoadedFromCache = ref(false);
+const expandedHistoryId = ref<number | null>(null);
+let historyLoadedForPatientId: number | null = null;
+
+async function openHistoryModal() {
+  showHistoryModal.value = true;
+  expandedHistoryId.value = null;
+
+  const patientId = patient.value?.id;
+  if (!patientId || historyLoadedForPatientId === patientId) return;
+
+  isLoadingHistory.value = true;
+  historyError.value = "";
+  historyLoadedFromCache.value = false;
+  const cacheKey = `visit_history_${patientId}`;
+  const offlineCache = useOfflineCache();
+  try {
+    const api = useApi();
+    const res = (await api(`/patients/${patientId}/visit-history`)) as ApiSuccessEnvelope<VisitAssignment[]>;
+    patientHistory.value = res.data;
+    historyLoadedForPatientId = patientId;
+    await offlineCache.setCached(cacheKey, res.data);
+  } catch (e) {
+    // docs/planning/12: ApiError (401 dkk) = server menjawab, bukan alasan fallback ke cache
+    // basi. Cuma exception jaringan murni yang layak pakai riwayat tersimpan terakhir.
+    if (!(e instanceof ApiError)) {
+      const cached = await offlineCache.getCached<VisitAssignment[]>(cacheKey);
+      if (cached) {
+        patientHistory.value = cached.value;
+        historyLoadedForPatientId = patientId;
+        historyLoadedFromCache.value = true;
+        isLoadingHistory.value = false;
+        return;
+      }
+    }
+    historyError.value = e instanceof ApiError ? e.message : "Gagal memuat riwayat kunjungan pasien.";
+  } finally {
+    isLoadingHistory.value = false;
+  }
+}
+
+function toggleHistoryEntry(id: number) {
+  expandedHistoryId.value = expandedHistoryId.value === id ? null : id;
+}
+
+// Label SAMA PERSIS dashboard/pasien/[id].vue & dashboard/kunjungan/[id].vue -- konsisten di
+// seluruh aplikasi (admin & mobile kader/nakes).
+const HISTORY_TINDAKAN_LABELS: Record<string, string> = {
+  diberi_obat: "Diberi Obat", dirujuk_puskesmas: "Dirujuk ke Puskesmas", tidak_ada: "Tidak Ada Tindakan"
+};
+const HISTORY_CARA_RUJUKAN_LABELS: Record<string, string> = {
+  datang_sendiri: "Datang Sendiri", dijemput_ambulan: "Dijemput Ambulan",
+  diantar_keluarga: "Diantar Keluarga", diantar_nakes_kader: "Diantar Nakes/Kader"
+};
+const HISTORY_KEPATUHAN_OBAT_LABELS: Record<string, string> = {
+  patuh: "Patuh", kurang_patuh: "Kurang Patuh", tidak_patuh: "Tidak Patuh"
+};
+const HISTORY_SISA_OBAT_LABELS: Record<string, string> = {
+  cukup: "Cukup", menipis: "Menipis", habis: "Habis"
+};
+const HISTORY_STATUS_LABELS: Record<string, string> = {
+  pending: "Belum Dikunjungi", in_progress: "Sedang Proses", completed: "Selesai", cancelled: "Dibatalkan"
+};
+const HISTORY_STATUS_COLORS: Record<string, string> = {
+  pending: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+  in_progress: "bg-info/10 text-info",
+  completed: "bg-success/10 text-success",
+  cancelled: "bg-danger/10 text-danger"
+};
+
+function formatHistoryTindakan(tindakan: string[] | null): string {
+  return (tindakan ?? []).map((t) => HISTORY_TINDAKAN_LABELS[t] ?? t).join(", ");
+}
+
+// 'primary'/'companion' = viewer (kader/nakes yang sedang login) BERPERAN di kunjungan itu --
+// "Anda", null = petugas lain sama sekali. Dihitung backend (VisitAssignmentResource::
+// role_in_assignment), bukan ditebak dari nama (lebih akurat, tidak salah kalau ada nama kembar).
+function historyPetugasLabel(entry: VisitAssignment): string {
+  if (entry.role_in_assignment === "primary") return "Anda (Petugas Utama)";
+  if (entry.role_in_assignment === "companion") return "Anda (Pendamping)";
+  const nama = entry.tenaga_kesehatan?.name ?? entry.kader?.name ?? "Petugas tidak diketahui";
+  const tipe = entry.tenaga_kesehatan ? "Tenaga Kesehatan" : "Kader";
+  return `${nama} (${tipe})`;
+}
+
 // Kunjungan berombongan (docs/planning/02 §16) -- kader pendamping RENCANA saat assignment ini
 // dibuat (VisitAssignmentResource.companions). Kader primer TINGGAL konfirmasi/koreksi
 // kehadiran aktual sebelum submit, bukan input dari nol. Dikirim sebagai attendee_kader_ids --
@@ -124,7 +220,10 @@ const form = ref({
   uric_acid: "",
   cholesterol: "",
   keluhan: "",
-  tindakan: "" as "" | "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada",
+  // Bisa lebih dari satu tindakan sekaligus (Fase 2, sebelumnya select tunggal) -- lihat
+  // toggleTindakan() di bawah, pola sama dgn toggleAttendee().
+  tindakan: [] as ("diberi_obat" | "dirujuk_puskesmas" | "tidak_ada")[],
+  cara_rujukan: "" as "" | "datang_sendiri" | "dijemput_ambulan" | "diantar_keluarga" | "diantar_nakes_kader",
   kepatuhan_obat: "" as "" | "patuh" | "kurang_patuh" | "tidak_patuh",
   sisa_obat: "" as "" | "cukup" | "menipis" | "habis",
   notes: "",
@@ -135,6 +234,18 @@ const form = ref({
   gpsCapturedAt: null as string | null,
   fullAddress: "Mencari detail alamat...",
 });
+
+// Tindakan multi-select (Fase 2) -- checkbox-card, pola toggle sama dgn toggleAttendee() di
+// atas. Kader JUGA bisa mencatat tindakan (termasuk rujukan) -- BUKAN cuma nakes, jadi kartu ini
+// (lihat template) sengaja tidak lagi digerbang isNakesAssignment.
+const isTindakanChecked = (value: "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada") => form.value.tindakan.includes(value);
+const toggleTindakan = (value: "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada") => {
+  const idx = form.value.tindakan.indexOf(value);
+  if (idx === -1) form.value.tindakan.push(value);
+  else form.value.tindakan.splice(idx, 1);
+  if (!form.value.tindakan.includes("dirujuk_puskesmas")) form.value.cara_rujukan = "";
+};
+const isRujukan = computed(() => form.value.tindakan.includes("dirujuk_puskesmas"));
 
 const locationName = ref("Mencari lokasi...");
 const countryFlag = ref("");
@@ -236,6 +347,16 @@ const captureFrame = () => {
 
   form.value.photoUrl = canvas.toDataURL("image/jpeg", 0.9);
   stopCamera();
+
+  // #maplibre-mini pindah kontainer DOM begitu modal kamera fullscreen (live) ditutup dan kartu
+  // review foto (statis) muncul -- initMapLibre() yang dipanggil saat GPS lock tadi mungkin sudah
+  // menyasar kontainer LAMA (di dalam modal, sekarang sudah dilepas). Panggil ulang di sini
+  // supaya mini map tetap tampil di kartu review, bukan kosong.
+  nextTick(() => {
+    if (form.value.lat !== null && form.value.lng !== null) {
+      initMapLibre("maplibre-mini", form.value.lat, form.value.lng, true);
+    }
+  });
 };
 
 const retakePhoto = () => {
@@ -414,7 +535,8 @@ function buildDraftPayload(): VisitReportDraftPayload {
     uric_acid: form.value.uric_acid || null,
     cholesterol: form.value.cholesterol || null,
     keluhan: form.value.keluhan.trim() || null,
-    tindakan: form.value.tindakan || null,
+    tindakan: form.value.tindakan.length > 0 ? [...form.value.tindakan] : null,
+    cara_rujukan: form.value.cara_rujukan || null,
     kepatuhan_obat: form.value.kepatuhan_obat || null,
     sisa_obat: form.value.sisa_obat || null,
     attendeeKaderIds: [...attendeeKaderIds.value],
@@ -442,7 +564,8 @@ function buildOnlineFormData(payload: VisitReportDraftPayload, photo: Blob): For
     if (value !== null) fd.append(key, value);
   }
   if (payload.keluhan) fd.append("keluhan", payload.keluhan);
-  if (payload.tindakan) fd.append("tindakan", payload.tindakan);
+  payload.tindakan?.forEach((t) => fd.append("tindakan[]", t));
+  if (payload.cara_rujukan) fd.append("cara_rujukan", payload.cara_rujukan);
   if (payload.kepatuhan_obat) fd.append("kepatuhan_obat", payload.kepatuhan_obat);
   if (payload.sisa_obat) fd.append("sisa_obat", payload.sisa_obat);
 
@@ -460,6 +583,109 @@ function buildOnlineFormData(payload: VisitReportDraftPayload, photo: Blob): For
 }
 
 const offlineQueue = useOfflineQueue();
+
+// docs/planning/14: draft-in-progress -- BEDA dari draft 'pending_sync' di atas (yang tercipta
+// otomatis saat submit GAGAL). Ini SENGAJA disimpan user (manual ATAU auto-save berkala) SELAGI
+// masih mengisi, supaya kerja yang sudah diketik/difoto tidak hilang kalau tab tertutup/HP
+// restart sebelum sempat menekan "Kirim Laporan". Status 'draft' TIDAK PERNAH ikut disinkron
+// otomatis (lihat useOfflineQueue.syncAllDrafts()) -- baru jadi 'pending_sync' begitu user
+// benar-benar menekan submit (lewat submitData() di atas, jalur normal).
+const showRestoreBanner = ref(false);
+const restorableDraft = ref<VisitReportDraft | null>(null);
+const draftSaveStatus = ref<"idle" | "saving" | "saved">("idle");
+let draftSaveDebounce: ReturnType<typeof setTimeout> | null = null;
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Cuma field "isi kerja" yang dipulihkan -- BUKAN lat/lng/gpsCapturedAt (biar tetap diisi ulang
+// oleh capture GPS hidup yang sudah otomatis jalan di halaman ini, supaya validasi kesegaran GPS
+// backend -- GpsActiveCheck, Layer 1 -- tidak menolak titik lama yang sudah basi begitu draft
+// lama dipulihkan). Attendee & pengajuan perubahan data pasien belum ikut dipulihkan (di luar
+// cakupan awal fitur ini).
+function applyDraftPayloadToForm(payload: VisitReportDraftPayload) {
+  form.value.kondisi = payload.kondisi;
+  form.value.notes = payload.catatan ?? "";
+  form.value.systolic = payload.systolic ?? "";
+  form.value.diastolic = payload.diastolic ?? "";
+  form.value.gda = payload.gda ?? "";
+  form.value.gdp = payload.gdp ?? "";
+  form.value.gd2jpp = payload.gd2jpp ?? "";
+  form.value.uric_acid = payload.uric_acid ?? "";
+  form.value.cholesterol = payload.cholesterol ?? "";
+  form.value.keluhan = payload.keluhan ?? "";
+  form.value.tindakan = [...(payload.tindakan ?? [])] as typeof form.value.tindakan;
+  form.value.cara_rujukan = (payload.cara_rujukan ?? "") as typeof form.value.cara_rujukan;
+  form.value.kepatuhan_obat = (payload.kepatuhan_obat ?? "") as typeof form.value.kepatuhan_obat;
+  form.value.sisa_obat = (payload.sisa_obat ?? "") as typeof form.value.sisa_obat;
+}
+
+async function restoreDraft() {
+  const draft = restorableDraft.value;
+  if (!draft) return;
+  applyDraftPayloadToForm(draft.payload);
+  if (draft.photo) form.value.photoUrl = await blobToDataUrl(draft.photo);
+  showRestoreBanner.value = false;
+}
+
+async function discardRestorableDraft() {
+  if (restorableDraft.value) await offlineQueue.deleteDraft(restorableDraft.value.id);
+  showRestoreBanner.value = false;
+  restorableDraft.value = null;
+}
+
+async function persistDraft() {
+  if (!assignment.value) return;
+  draftSaveStatus.value = "saving";
+  try {
+    const photoBlob = form.value.photoUrl ? dataUrlToBlob(form.value.photoUrl) : null;
+    await offlineQueue.saveDraft(buildDraftPayload(), photoBlob, patient.value?.nama ?? "Pasien", "draft");
+    draftSaveStatus.value = "saved";
+  } catch {
+    draftSaveStatus.value = "idle";
+  }
+}
+
+// Auto-save cuma mulai SETELAH foto diambil -- foto biasanya langkah pertama di alur ini
+// (kamera jalan begitu halaman dibuka), jadi menunggu foto = menunggu ada progres berarti dulu,
+// bukan menyimpan form kosong berkali-kali. Tombol manual "Simpan sebagai Draf" (di bawah) TIDAK
+// menunggu ini -- user boleh simpan progres apa pun yang sudah ada, foto belakangan.
+function autoSaveDraft() {
+  if (!form.value.photoUrl) return;
+  void persistDraft();
+}
+
+// Debounce 2.5 detik -- jangan tulis IndexedDB tiap ketukan huruf, cukup begitu user berhenti
+// sejenak. deep:true karena field yang dipantau tersebar di banyak sub-properti objek form yang
+// sama (kondisi, vitals, tindakan[], dst).
+watch(
+  form,
+  () => {
+    if (draftSaveDebounce) clearTimeout(draftSaveDebounce);
+    draftSaveDebounce = setTimeout(autoSaveDraft, 2500);
+  },
+  { deep: true }
+);
+
+async function saveDraftManually() {
+  await persistDraft();
+}
+
+// assignmentId berasal dari route param, tersedia sinkron -- TIDAK menunggu assignment/patient
+// selesai dimuat (onMounted lain di atas yang urus itu, keduanya jalan independen).
+onMounted(async () => {
+  const existing = await offlineQueue.getDraftForAssignment(assignmentId.value);
+  if (existing && existing.status === "draft") {
+    restorableDraft.value = existing;
+    showRestoreBanner.value = true;
+  }
+});
 
 // POST /visit-reports (SubmitVisitReportRequest) -- 7-layer validation (VisitValidationService)
 // jalan SEPENUHNYA di backend begitu request ini diterima; frontend cuma bertanggung jawab
@@ -484,13 +710,17 @@ async function submitData() {
     submitError.value = "Isi kondisi pasien saat kunjungan terlebih dahulu.";
     return;
   }
+  if (isRujukan.value && !form.value.cara_rujukan) {
+    submitError.value = "Pilih cara rujukan pasien ke puskesmas terlebih dahulu.";
+    return;
+  }
 
   isSubmitting.value = true;
   const payload = buildDraftPayload();
   const photoBlob = dataUrlToBlob(form.value.photoUrl!);
 
   if (!navigator.onLine) {
-    await offlineQueue.addDraft(payload, photoBlob, patient.value?.nama ?? "Pasien");
+    await offlineQueue.saveDraft(payload, photoBlob, patient.value?.nama ?? "Pasien", "pending_sync");
     isSubmitting.value = false;
     alert("Anda sedang offline -- laporan disimpan sebagai draft, akan terkirim otomatis saat online kembali.");
     router.push("/app/draft");
@@ -514,7 +744,7 @@ async function submitData() {
     } else {
       // Bukan ApiError = gagal di level jaringan (offline sungguhan, timeout, dst) -- simpan
       // sebagai draft alih-alih menampilkan error yang bikin kader mengulang dari nol.
-      await offlineQueue.addDraft(payload, photoBlob, patient.value?.nama ?? "Pasien");
+      await offlineQueue.saveDraft(payload, photoBlob, patient.value?.nama ?? "Pasien", "pending_sync");
       alert("Koneksi bermasalah -- laporan disimpan sebagai draft, akan terkirim otomatis saat online kembali.");
       router.push("/app/draft");
     }
@@ -561,8 +791,11 @@ async function submitData() {
       </div>
     </div>
 
-    <!-- Sudah selesai / dibatalkan / bukan kader primer -->
-    <div v-else-if="!canSubmit" class="p-5">
+    <!-- Sudah selesai / dibatalkan / bukan kader primer -- revisi Bu Kadis: SEBELUMNYA cuma
+         pesan polos "sudah selesai" tanpa isi laporan sama sekali (kader tidak bisa lihat balik
+         laporannya sendiri yang sudah disubmit) -- sekarang tampilkan detail LENGKAP kalau
+         laporannya ada, bukan cuma status. -->
+    <div v-else-if="!canSubmit && !assignment.report" class="p-5">
       <div class="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 text-center">
         <LucideCheckCircle2 class="w-10 h-10 mx-auto mb-3 text-success" />
         <p class="font-bold text-slate-700 dark:text-slate-200 mb-1">{{ patient?.nama }}</p>
@@ -577,7 +810,114 @@ async function submitData() {
       </div>
     </div>
 
+    <!-- Laporan SUDAH ADA (completed, atau invalid lama yang masih tersimpan) -- detail lengkap
+         read-only: bukti foto, semua hasil pemeriksaan/tindakan, status validasi. Ditampilkan
+         di halaman/URL YANG SAMA (bukan halaman terpisah) supaya "Lihat Detail" dari /app/tugas
+         konsisten mengarah ke sini apa pun statusnya. -->
+    <div v-else-if="!canSubmit" class="p-5 space-y-5 pb-10">
+      <div class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800">
+        <div class="flex items-center gap-3 mb-1">
+          <div class="w-11 h-11 bg-success/10 rounded-full flex items-center justify-center shrink-0">
+            <LucideCheckCircle2 class="w-6 h-6 text-success" />
+          </div>
+          <div class="min-w-0">
+            <h2 class="font-black text-slate-800 dark:text-white text-lg leading-tight truncate">{{ patient?.nama }}</h2>
+            <p class="text-base text-slate-500 dark:text-slate-400 font-medium">{{ assignment.scheduled_date }} &bull; {{ HISTORY_STATUS_LABELS[assignment.status] ?? assignment.status }}</p>
+          </div>
+        </div>
+        <button @click="openHistoryModal" class="w-full py-2.5 mt-4 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-base uppercase tracking-wider active:bg-slate-200 dark:active:bg-slate-700 transition-colors flex items-center justify-center gap-2">
+          <LucideRotateCcwClock class="w-4 h-4" />
+          Riwayat Kunjungan Pasien
+        </button>
+      </div>
+
+      <!-- Bukti Foto -->
+      <div class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800">
+        <h2 class="font-bold text-slate-800 dark:text-slate-200 text-base mb-3">Bukti Foto Kunjungan</h2>
+        <img
+          v-if="assignment.report.photo_url"
+          :src="assignment.report.photo_url"
+          alt="Bukti foto kunjungan"
+          class="rounded-2xl border border-slate-200 dark:border-slate-700 w-full"
+        />
+        <p v-else class="text-base text-slate-400 italic">Foto tidak tersedia (tautan sementara sudah kedaluwarsa -- muat ulang halaman).</p>
+      </div>
+
+      <!-- Hasil Pemeriksaan & Tindakan -->
+      <div class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 space-y-4">
+        <h2 class="font-bold text-slate-800 dark:text-slate-200 text-base">Hasil Pemeriksaan &amp; Tindakan</h2>
+
+        <div>
+          <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-0.5">Kondisi Pasien</p>
+          <p class="text-base font-medium text-slate-700 dark:text-slate-300">{{ assignment.report.kondisi }}</p>
+        </div>
+
+        <div v-if="assignment.report.systolic || assignment.report.diastolic || assignment.report.gda || assignment.report.gdp || assignment.report.gd2jpp || assignment.report.uric_acid || assignment.report.cholesterol" class="flex flex-wrap gap-2">
+          <span v-if="assignment.report.systolic || assignment.report.diastolic" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-sm">Tensi: {{ assignment.report.systolic ?? '-' }}/{{ assignment.report.diastolic ?? '-' }}</span>
+          <span v-if="assignment.report.gda" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-sm">GDA: {{ assignment.report.gda }}</span>
+          <span v-if="assignment.report.gdp" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-sm">GDP: {{ assignment.report.gdp }}</span>
+          <span v-if="assignment.report.gd2jpp" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-sm">GD2JPP: {{ assignment.report.gd2jpp }}</span>
+          <span v-if="assignment.report.uric_acid" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-sm">Asam Urat: {{ assignment.report.uric_acid }}</span>
+          <span v-if="assignment.report.cholesterol" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-sm">Kolesterol: {{ assignment.report.cholesterol }}</span>
+        </div>
+
+        <p v-if="assignment.report.keluhan"><span class="font-bold text-slate-700 dark:text-slate-300">Keluhan:</span> <span class="text-slate-600 dark:text-slate-400">"{{ assignment.report.keluhan }}"</span></p>
+        <p v-if="assignment.report.tindakan?.length"><span class="font-bold text-slate-700 dark:text-slate-300">Tindakan:</span> <span class="text-slate-600 dark:text-slate-400">{{ formatHistoryTindakan(assignment.report.tindakan) }}</span></p>
+        <p v-if="assignment.report.cara_rujukan"><span class="font-bold text-slate-700 dark:text-slate-300">Cara Rujukan:</span> <span class="text-slate-600 dark:text-slate-400">{{ HISTORY_CARA_RUJUKAN_LABELS[assignment.report.cara_rujukan] ?? assignment.report.cara_rujukan }}</span></p>
+
+        <div v-if="assignment.report.kepatuhan_obat || assignment.report.sisa_obat" class="flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-slate-100 dark:border-slate-800">
+          <span v-if="assignment.report.kepatuhan_obat" class="text-slate-600 dark:text-slate-400">Kepatuhan Obat: <b class="text-slate-800 dark:text-slate-200">{{ HISTORY_KEPATUHAN_OBAT_LABELS[assignment.report.kepatuhan_obat] ?? assignment.report.kepatuhan_obat }}</b></span>
+          <span v-if="assignment.report.sisa_obat" class="text-slate-600 dark:text-slate-400">Sisa Obat: <b class="text-slate-800 dark:text-slate-200">{{ HISTORY_SISA_OBAT_LABELS[assignment.report.sisa_obat] ?? assignment.report.sisa_obat }}</b></span>
+        </div>
+
+        <p v-if="assignment.report.catatan" class="text-slate-600 dark:text-slate-400">"{{ assignment.report.catatan }}"</p>
+      </div>
+
+      <!-- Status Validasi -->
+      <div class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 space-y-3">
+        <h2 class="font-bold text-slate-800 dark:text-slate-200 text-base">Status Validasi Laporan</h2>
+        <div>
+          <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Diterima PJ Prolanis</p>
+          <span v-if="assignment.report.pj_reviewed_at" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider bg-success/10 text-success">
+            <LucideCircleCheck class="w-3.5 h-3.5" /> Diterima {{ assignment.report.pj_reviewed_by?.name ? `oleh ${assignment.report.pj_reviewed_by.name}` : '' }}
+          </span>
+          <span v-else class="px-2.5 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider bg-warning/10 text-warning">Menunggu Diterima PJ</span>
+        </div>
+        <div>
+          <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Validasi Final Super Admin</p>
+          <span
+            class="px-2.5 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider"
+            :class="assignment.report.validation_status === 'valid' ? 'bg-success/10 text-success' : assignment.report.validation_status === 'invalid' ? 'bg-danger/10 text-danger' : 'bg-warning/10 text-warning'"
+          >
+            {{ assignment.report.validation_status === 'valid' ? 'Tervalidasi' : assignment.report.validation_status === 'invalid' ? 'Ditolak' : 'Menunggu Validasi' }}
+          </span>
+          <p v-if="assignment.report.validation_note" class="text-base text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800 mt-2 leading-relaxed">
+            <span class="font-bold text-slate-700 dark:text-slate-300">Catatan:</span> "{{ assignment.report.validation_note }}"
+          </p>
+        </div>
+      </div>
+
+      <NuxtLink to="/app/tugas" class="w-full flex items-center justify-center gap-2 py-3.5 bg-slate-800 dark:bg-slate-700 text-white rounded-2xl font-bold active:scale-[0.98] transition-transform">
+        <LucideArrowLeft class="w-4 h-4" /> Kembali ke Tugas
+      </NuxtLink>
+    </div>
+
     <div v-else class="p-5 space-y-6">
+      <!-- docs/planning/14: draft-in-progress ditemukan (auto-save/manual sebelumnya) --
+           tawarkan pulihkan sebelum form kosong ditampilkan, supaya kerja lama tidak tertimpa
+           diam-diam begitu user mulai mengetik lagi. -->
+      <div v-if="showRestoreBanner" class="bg-info/10 border border-info/20 rounded-2xl px-4 py-3.5 flex items-start gap-3">
+        <LucideDatabaseZap class="w-5 h-5 text-info shrink-0 mt-0.5" />
+        <div class="flex-1">
+          <p class="text-base font-bold text-info">Draf tersimpan ditemukan</p>
+          <p class="text-base text-slate-600 dark:text-slate-300 font-medium leading-relaxed mt-1">Ada isian sebelumnya yang belum dikirim. Lanjutkan dari situ?</p>
+          <div class="flex gap-2 mt-3">
+            <button @click="restoreDraft" class="px-4 py-2 bg-info text-white rounded-xl font-bold text-base active:scale-[0.98] transition-transform">Pulihkan</button>
+            <button @click="discardRestorableDraft" class="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl font-bold text-base active:scale-[0.98] transition-transform">Abaikan</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Diulang: laporan sebelumnya ditolak Super Admin (docs/planning/02 §11) -- kader perlu
            tahu persis apa yang mesti diperbaiki sebelum mengulang, bukan cuma "ditolak". -->
       <div v-if="assignment.report?.validation_status === 'invalid'" class="bg-warning/10 border border-warning/20 rounded-2xl px-4 py-3.5 flex items-start gap-3">
@@ -605,6 +945,10 @@ async function submitData() {
         <button @click="showPatientModal = true" class="w-full py-2.5 bg-primary/10 text-primary rounded-xl font-bold text-base uppercase tracking-wider active:bg-primary/20 transition-colors flex items-center justify-center gap-2">
           <LucideClipboardList class="w-4 h-4" />
           Periksa Data Pasien
+        </button>
+        <button @click="openHistoryModal" class="w-full py-2.5 mt-2.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-base uppercase tracking-wider active:bg-slate-200 dark:active:bg-slate-700 transition-colors flex items-center justify-center gap-2">
+          <LucideRotateCcwClock class="w-4 h-4" />
+          Riwayat Kunjungan Pasien
         </button>
       </div>
 
@@ -727,15 +1071,40 @@ async function submitData() {
             <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Keluhan Pasien</label>
             <textarea v-model="form.keluhan" rows="2" placeholder="Keluhan yang dirasakan pasien saat kunjungan..." class="w-full bg-transparent border-2 border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-warning focus:ring-0 outline-none transition-colors resize-none"></textarea>
           </div>
-          <div>
-            <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Tindakan</label>
-            <select v-model="form.tindakan" class="w-full bg-transparent border-2 border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-warning focus:ring-0 outline-none transition-colors appearance-none">
-              <option value="">Pilih tindakan...</option>
-              <option value="diberi_obat">Diberi Obat</option>
-              <option value="dirujuk_puskesmas">Dirujuk ke Puskesmas</option>
-              <option value="tidak_ada">Tidak Ada Tindakan</option>
-            </select>
-          </div>
+        </div>
+      </div>
+
+      <!-- Tindakan (Fase 2) -- multi-select, KADER JUGA bisa mencatat (bukan cuma nakes),
+           makanya kartu ini TIDAK digerbang isNakesAssignment (beda dari "Pemeriksaan Mandiri"
+           di atas yang memang nakes-only). -->
+      <div class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+        <h2 class="font-bold text-slate-800 dark:text-slate-200 text-base mb-1">Tindakan</h2>
+        <p class="text-base text-slate-500 dark:text-slate-400 mb-4">Bisa pilih lebih dari satu kalau perlu.</p>
+        <div class="grid grid-cols-1 gap-2.5">
+          <label
+            v-for="opt in [
+              { value: 'diberi_obat', label: 'Diberi Obat' },
+              { value: 'dirujuk_puskesmas', label: 'Dirujuk ke Puskesmas' },
+              { value: 'tidak_ada', label: 'Tidak Ada Tindakan' },
+            ]"
+            :key="opt.value"
+            class="flex items-center gap-3 border-2 rounded-xl px-4 py-3 cursor-pointer transition-colors"
+            :class="isTindakanChecked(opt.value as any) ? 'border-primary bg-primary/5 dark:bg-primary/10' : 'border-slate-200 dark:border-slate-700'"
+          >
+            <input type="checkbox" :checked="isTindakanChecked(opt.value as any)" @change="toggleTindakan(opt.value as any)" class="w-5 h-5 rounded border-slate-300 text-primary focus:ring-primary/30 shrink-0" />
+            <span class="text-base font-bold text-slate-800 dark:text-white">{{ opt.label }}</span>
+          </label>
+        </div>
+
+        <div v-if="isRujukan" class="mt-4">
+          <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Cara Rujukan <span class="text-danger">*</span></label>
+          <select v-model="form.cara_rujukan" class="w-full bg-transparent border-2 border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 text-base font-medium text-slate-800 dark:text-white focus:border-danger focus:ring-0 outline-none transition-colors appearance-none">
+            <option value="">Pilih cara rujukan...</option>
+            <option value="datang_sendiri">Datang Sendiri</option>
+            <option value="dijemput_ambulan">Dijemput Ambulan</option>
+            <option value="diantar_keluarga">Diantar Keluarga</option>
+            <option value="diantar_nakes_kader">Diantar Nakes/Kader</option>
+          </select>
         </div>
       </div>
 
@@ -758,86 +1127,161 @@ async function submitData() {
         </div>
       </div>
 
-      <!-- Dokumentasi Kegiatan (Kamera Portrait) -->
+      <!-- Dokumentasi Kegiatan -- live-view kamera sendiri sekarang modal layar penuh (Teleport
+           di bawah, docs/planning/15: ukuran sebelumnya dikunci aspectRatio kartu kecil, tidak
+           menyesuaikan ukuran layar HP nyata). Kartu ini murni tempat HASIL foto ditampilkan
+           setelah diambil, bukan lagi tempat live-view. -->
       <div class="bg-white dark:bg-slate-900 rounded-3xl p-2 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
         <div class="flex items-center justify-between mb-2 pl-2">
           <h2 class="font-bold text-slate-800 dark:text-slate-200 text-base">Dokumentasi Kunjungan</h2>
         </div>
         <p class="text-base text-slate-500 dark:text-slate-400 mb-4 pl-2">Kamera otomatis menyala. Ambil foto langsung bersama pasien.</p>
 
-        <div id="capture-area" class="relative w-full rounded-2xl overflow-hidden shadow-inner bg-black flex flex-col items-center justify-center" :style="{ aspectRatio: captureAreaRatio }">
-          <video v-if="!form.photoUrl" ref="videoRef" autoplay playsinline @loadedmetadata="onVideoMetadataLoaded" class="absolute inset-0 w-full h-full object-cover"></video>
-          <canvas ref="canvasRef" class="hidden"></canvas>
+        <div v-if="!form.photoUrl" class="relative w-full aspect-[3/4] rounded-2xl overflow-hidden bg-slate-900 flex flex-col items-center justify-center gap-3 text-slate-400">
+          <LucideCamera class="w-10 h-10" />
+          <p class="text-base font-semibold">Kamera terbuka di layar penuh</p>
+        </div>
 
-          <div v-if="countdown > 0" class="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <span class="text-7xl font-black text-white drop-shadow-2xl animate-pulse">{{ countdown }}</span>
-          </div>
+        <div v-else id="capture-area" class="relative w-full rounded-2xl overflow-hidden shadow-inner bg-black flex flex-col items-center justify-center" :style="{ aspectRatio: captureAreaRatio }">
+          <img :src="form.photoUrl" class="absolute inset-0 w-full h-full object-cover" />
 
-          <img v-show="form.photoUrl" :src="form.photoUrl ?? ''" class="absolute inset-0 w-full h-full object-cover" />
-
-          <!-- Overlay info -- murni tampilan referensi untuk kader saat memotret, TIDAK ikut
-               dibakar ke file yang dikirim (lihat catatan captureFrame di atas). -->
+          <!-- Overlay info -- murni tampilan referensi, TIDAK ikut dibakar ke file yang dikirim
+               (lihat catatan captureFrame di script). -->
           <div class="absolute inset-0 flex flex-col justify-between p-3 z-10 pointer-events-none">
             <div class="flex items-center gap-2 self-start bg-white rounded-md px-2 py-1 shadow-sm">
               <img src="/logo/logo-no-text.png" class="w-4 h-4" />
               <span class="text-[9px] font-black text-primary tracking-widest uppercase">PRODULI</span>
             </div>
 
-            <div class="flex flex-col gap-1.5 w-full mt-auto">
-              <div class="w-full bg-black/40 rounded-xl overflow-hidden">
-                <div class="flex gap-3 p-2">
-                  <div id="maplibre-mini" class="w-16 h-16 bg-slate-800 rounded-lg shrink-0 overflow-hidden border border-white/20 relative"></div>
-                  <div class="flex-1 min-w-0">
-                    <div class="flex items-start justify-between gap-1">
-                      <p class="text-[13px] font-black text-white uppercase leading-tight line-clamp-1">{{ locationName }}</p>
-                      <span class="text-sm shrink-0">{{ countryFlag }}</span>
-                    </div>
-                    <p class="text-[11px] text-slate-200 leading-snug line-clamp-2 mt-0.5">{{ form.fullAddress }}</p>
-                    <p class="text-[11px] font-mono text-slate-300 mt-1">
-                      Lat {{ (form.lat || 0).toFixed(6) }}&nbsp;&nbsp;Long {{ (form.lng || 0).toFixed(6) }}
-                    </p>
+            <div class="w-full bg-black/40 rounded-xl overflow-hidden">
+              <div class="flex gap-3 p-2">
+                <div id="maplibre-mini" class="w-16 h-16 bg-slate-800 rounded-lg shrink-0 overflow-hidden border border-white/20 relative"></div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-start justify-between gap-1">
+                    <p class="text-[13px] font-black text-white uppercase leading-tight line-clamp-1">{{ locationName }}</p>
+                    <span class="text-sm shrink-0">{{ countryFlag }}</span>
                   </div>
+                  <p class="text-[11px] text-slate-200 leading-snug line-clamp-2 mt-0.5">{{ form.fullAddress }}</p>
+                  <p class="text-[11px] font-mono text-slate-300 mt-1">
+                    Lat {{ (form.lat || 0).toFixed(6) }}&nbsp;&nbsp;Long {{ (form.lng || 0).toFixed(6) }}
+                  </p>
                 </div>
+              </div>
 
-                <div class="px-2 pb-1.5 pt-1 border-t border-white/20">
-                  <p class="text-[11.5px] font-bold text-white">{{ dateNow }} &middot; {{ timeNow }} WIB</p>
-                  <p class="text-[11px] text-slate-300 mt-0.5">Pasien: {{ patient?.nama }}</p>
-                </div>
+              <div class="px-2 pb-1.5 pt-1 border-t border-white/20">
+                <p class="text-[11.5px] font-bold text-white">{{ dateNow }} &middot; {{ timeNow }} WIB</p>
+                <p class="text-[11px] text-slate-300 mt-0.5">Pasien: {{ patient?.nama }}</p>
+              </div>
 
-                <div class="flex items-center justify-between px-2 py-1.5 bg-black/30 border-t border-white/20">
-                  <span class="text-[11px] font-bold text-slate-200 flex items-center gap-1">
-                    <LucideThermometer class="w-3.5 h-3.5" />
-                    {{ weather.temp !== null ? weather.temp + "°C" : "-" }}
-                  </span>
-                  <span class="text-[11px] font-bold text-slate-200 flex items-center gap-1">
-                    <LucideWind class="w-3.5 h-3.5" />
-                    {{ weather.wind !== null ? weather.wind + " km/j" : "-" }}
-                  </span>
-                  <span class="text-[11px] font-bold text-slate-200 flex items-center gap-1">
-                    <LucideCrosshair class="w-3.5 h-3.5" /> &plusmn;{{ form.accuracy || "-" }} m
-                  </span>
-                </div>
+              <div class="flex items-center justify-between px-2 py-1.5 bg-black/30 border-t border-white/20">
+                <span class="text-[11px] font-bold text-slate-200 flex items-center gap-1">
+                  <LucideThermometer class="w-3.5 h-3.5" />
+                  {{ weather.temp !== null ? weather.temp + "°C" : "-" }}
+                </span>
+                <span class="text-[11px] font-bold text-slate-200 flex items-center gap-1">
+                  <LucideWind class="w-3.5 h-3.5" />
+                  {{ weather.wind !== null ? weather.wind + " km/j" : "-" }}
+                </span>
+                <span class="text-[11px] font-bold text-slate-200 flex items-center gap-1">
+                  <LucideCrosshair class="w-3.5 h-3.5" /> &plusmn;{{ form.accuracy || "-" }} m
+                </span>
               </div>
             </div>
           </div>
         </div>
 
-        <div class="mt-4 flex gap-3">
-          <button
-            v-if="!form.photoUrl"
-            @click="takePicture"
-            :disabled="!isCameraActive || countdown > 0"
-            class="flex-1 py-3 bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-50 disabled:active:scale-100 shadow-lg shadow-indigo-500/30"
-          >
-            <LucideCamera class="w-5 h-5" />
-            Ambil Gambar
-          </button>
-          <button v-else @click="retakePhoto" class="flex-1 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform">
+        <div v-if="form.photoUrl" class="mt-4 flex gap-3">
+          <button @click="retakePhoto" class="flex-1 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform">
             <LucideRefreshCw class="w-5 h-5" />
             Ulangi Foto
           </button>
         </div>
       </div>
+
+      <!-- Modal Kamera Layar Penuh -- Teleport ke <body> supaya position:fixed ini benar-benar
+           relatif ke viewport, bukan ke ancestor manapun yang mungkin punya transform aktif
+           (page transition out-in pageTransition di nuxt.config.ts pakai transform, itu bikin
+           fixed descendant ikut ke-transform kalau tidak di-teleport). 100dvh (bukan 100vh) --
+           menyesuaikan viewport nyata di browser mobile saat address bar menyusut/melebar,
+           itulah "tidak dinamis" yang dikeluhkan sebelumnya (aspectRatio kartu kecil, terpotong
+           address bar). -->
+      <Teleport to="body">
+        <div v-if="!form.photoUrl" class="fixed inset-0 z-[95] bg-black overflow-hidden" style="height: 100dvh">
+          <button
+            type="button"
+            @click="router.back()"
+            class="absolute left-4 z-30 w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white active:scale-95 transition-transform"
+            style="top: calc(1rem + env(safe-area-inset-top, 0px))"
+          >
+            <LucideX class="w-5 h-5" />
+          </button>
+
+          <video ref="videoRef" autoplay playsinline @loadedmetadata="onVideoMetadataLoaded" class="absolute inset-0 w-full h-full object-cover"></video>
+          <canvas ref="canvasRef" class="hidden"></canvas>
+
+          <div v-if="countdown > 0" class="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <span class="text-8xl font-black text-white drop-shadow-2xl animate-pulse">{{ countdown }}</span>
+          </div>
+
+          <!-- Overlay info -- sama isinya dengan kartu review, cuma ukuran & posisi disesuaikan
+               layar penuh. TIDAK ikut dibakar ke file yang dikirim. -->
+          <div
+            class="absolute inset-0 flex flex-col justify-between p-4 z-10 pointer-events-none"
+            style="padding-top: calc(4.5rem + env(safe-area-inset-top, 0px)); padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px))"
+          >
+            <div class="flex items-center gap-2 self-start bg-white rounded-md px-2.5 py-1.5 shadow-sm">
+              <img src="/logo/logo-no-text.png" class="w-5 h-5" />
+              <span class="text-[11px] font-black text-primary tracking-widest uppercase">PRODULI</span>
+            </div>
+
+            <div class="w-full bg-black/40 rounded-xl overflow-hidden">
+              <div class="flex gap-3 p-3">
+                <div id="maplibre-mini" class="w-20 h-20 bg-slate-800 rounded-lg shrink-0 overflow-hidden border border-white/20 relative"></div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-start justify-between gap-1">
+                    <p class="text-sm font-black text-white uppercase leading-tight line-clamp-1">{{ locationName }}</p>
+                    <span class="text-base shrink-0">{{ countryFlag }}</span>
+                  </div>
+                  <p class="text-xs text-slate-200 leading-snug line-clamp-2 mt-0.5">{{ form.fullAddress }}</p>
+                  <p class="text-xs font-mono text-slate-300 mt-1">
+                    Lat {{ (form.lat || 0).toFixed(6) }}&nbsp;&nbsp;Long {{ (form.lng || 0).toFixed(6) }}
+                  </p>
+                </div>
+              </div>
+
+              <div class="px-3 pb-2 pt-1.5 border-t border-white/20">
+                <p class="text-sm font-bold text-white">{{ dateNow }} &middot; {{ timeNow }} WIB</p>
+                <p class="text-xs text-slate-300 mt-0.5">Pasien: {{ patient?.nama }}</p>
+              </div>
+
+              <div class="flex items-center justify-between px-3 py-2 bg-black/30 border-t border-white/20">
+                <span class="text-xs font-bold text-slate-200 flex items-center gap-1">
+                  <LucideThermometer class="w-4 h-4" />
+                  {{ weather.temp !== null ? weather.temp + "°C" : "-" }}
+                </span>
+                <span class="text-xs font-bold text-slate-200 flex items-center gap-1">
+                  <LucideWind class="w-4 h-4" />
+                  {{ weather.wind !== null ? weather.wind + " km/j" : "-" }}
+                </span>
+                <span class="text-xs font-bold text-slate-200 flex items-center gap-1">
+                  <LucideCrosshair class="w-4 h-4" /> &plusmn;{{ form.accuracy || "-" }} m
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="absolute inset-x-0 bottom-0 z-20 p-5 bg-gradient-to-t from-black/80 to-transparent" style="padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px))">
+            <button
+              @click="takePicture"
+              :disabled="!isCameraActive || countdown > 0"
+              class="w-full py-4 bg-indigo-500 text-white rounded-2xl font-bold text-base flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-50 disabled:active:scale-100 shadow-lg shadow-indigo-500/30"
+            >
+              <LucideCamera class="w-5 h-5" />
+              Ambil Gambar
+            </button>
+          </div>
+        </div>
+      </Teleport>
 
       <!-- Catatan Edukasi -->
       <div class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
@@ -867,6 +1311,24 @@ async function submitData() {
           <LucideSend v-else class="w-5 h-5" />
           {{ isSubmitting ? "Mengirim..." : "Kirim Laporan Kunjungan" }}
         </button>
+
+        <!-- docs/planning/14: simpan WIP tanpa mengirim -- bekerja online maupun offline (murni
+             tulis IndexedDB lokal, tidak menyentuh jaringan sama sekali). Auto-save berkala
+             (watch form, debounce 2.5dtk) sudah jalan sendiri di latar belakang begitu foto
+             diambil -- tombol ini cuma pemicu manual + kepastian visual buat kader. -->
+        <button
+          @click="saveDraftManually"
+          type="button"
+          class="w-full py-3 mt-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-2xl font-bold text-base active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+        >
+          <LucideSave class="w-4 h-4" />
+          Simpan sebagai Draf
+        </button>
+        <p v-if="draftSaveStatus === 'saved'" class="text-sm text-center text-slate-400 font-medium mt-2 flex items-center justify-center gap-1.5">
+          <LucideCheckCircle2 class="w-3.5 h-3.5 text-success" />
+          Draf tersimpan di perangkat ini
+        </p>
+        <p v-else-if="draftSaveStatus === 'saving'" class="text-sm text-center text-slate-400 font-medium mt-2">Menyimpan draf...</p>
       </div>
     </div>
 
@@ -912,6 +1374,112 @@ async function submitData() {
               {{ hasPatientUpdate ? 'Update Tersimpan — Ubah Lagi' : 'Ajukan Update Data' }}
             </button>
           </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Modal Riwayat Kunjungan Pasien (z-[65], revisi Bu Kadis) -- SEMUA kunjungan pasien ini
+         dari petugas manapun, bukan cuma milik kader/nakes yang login. Setiap baris collapsed
+         default (tap utk expand) -- daftar bisa panjang utk pasien lama, progressive disclosure
+         supaya tidak membanjiri layar (prinsip UI lansia-friendly, lihat CLAUDE.md). -->
+    <Transition name="fade">
+      <div v-if="showHistoryModal" class="fixed inset-0 z-[65] bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center" @click="showHistoryModal = false">
+        <div class="bg-white dark:bg-slate-900 w-full sm:max-w-lg sm:rounded-3xl rounded-t-3xl p-6 shadow-2xl transition-colors duration-300 max-h-[85vh] flex flex-col" @click.stop>
+          <div class="flex items-center justify-between mb-4 shrink-0">
+            <div>
+              <h3 class="font-bold text-slate-800 dark:text-white text-lg">Riwayat Kunjungan Pasien</h3>
+              <p class="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{{ patient?.nama }}</p>
+            </div>
+            <button @click="showHistoryModal = false" class="w-8 h-8 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-500 dark:text-slate-400 active:scale-95 shrink-0">
+              <LucideX class="w-4 h-4" />
+            </button>
+          </div>
+
+          <div class="overflow-y-auto no-scrollbar flex-1 -mx-1 px-1">
+            <!-- docs/planning/12: hasil dari IndexedDB (useOfflineCache), bukan GET yang baru
+                 saja sukses -- riwayat pasien ini mungkin ketinggalan kunjungan terbaru. Di luar
+                 rantai v-if/v-else di bawah supaya tetap tampil berbarengan dengan daftarnya. -->
+            <div v-if="historyLoadedFromCache && !isLoadingHistory && !historyError" class="flex items-center gap-2 text-sm font-semibold text-info bg-info/10 border border-info/20 rounded-2xl px-4 py-2.5 mb-3">
+              <LucideDatabaseZap class="w-4 h-4 shrink-0" />
+              <span>Data tersimpan (offline) — mungkin tidak terbaru.</span>
+            </div>
+            <div v-if="isLoadingHistory" class="py-10 text-center text-slate-400">
+              <LucideLoader2 class="w-8 h-8 mx-auto mb-2 animate-spin" />
+              <p class="text-base">Memuat riwayat...</p>
+            </div>
+            <div v-else-if="historyError" class="py-10 text-center">
+              <LucideAlertCircle class="w-8 h-8 mx-auto mb-2 text-danger" />
+              <p class="text-base font-semibold text-danger">{{ historyError }}</p>
+            </div>
+            <div v-else-if="patientHistory.length === 0" class="py-10 text-center text-slate-400 text-base">
+              Belum ada riwayat kunjungan untuk pasien ini.
+            </div>
+            <div v-else class="space-y-2.5">
+              <div
+                v-for="entry in patientHistory"
+                :key="entry.id"
+                class="border border-slate-100 dark:border-slate-800 rounded-2xl overflow-hidden transition-colors"
+                :class="entry.id === assignmentId ? 'ring-2 ring-primary/30' : ''"
+              >
+                <button type="button" @click="toggleHistoryEntry(entry.id)" class="w-full flex items-center justify-between gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 text-left">
+                  <div class="min-w-0">
+                    <p class="font-bold text-slate-800 dark:text-white text-base flex items-center gap-1.5 flex-wrap">
+                      {{ entry.scheduled_date }}
+                      <span v-if="entry.id === assignmentId" class="text-[10px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-1.5 py-0.5 rounded">Kunjungan Ini</span>
+                    </p>
+                    <p class="text-sm text-slate-500 dark:text-slate-400 font-medium mt-0.5 truncate">{{ historyPetugasLabel(entry) }}</p>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <span class="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider" :class="HISTORY_STATUS_COLORS[entry.status]">
+                      {{ HISTORY_STATUS_LABELS[entry.status] ?? entry.status }}
+                    </span>
+                    <LucideChevronDown class="w-4 h-4 text-slate-400 transition-transform shrink-0" :class="{ 'rotate-180': expandedHistoryId === entry.id }" />
+                  </div>
+                </button>
+
+                <div v-if="expandedHistoryId === entry.id" class="p-4 space-y-3 text-sm border-t border-slate-100 dark:border-slate-800">
+                  <template v-if="entry.report">
+                    <div>
+                      <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-0.5">Kondisi Pasien</p>
+                      <p class="text-slate-700 dark:text-slate-300 font-medium">{{ entry.report.kondisi }}</p>
+                    </div>
+
+                    <div v-if="entry.report.systolic || entry.report.diastolic || entry.report.gda || entry.report.gdp || entry.report.gd2jpp || entry.report.uric_acid || entry.report.cholesterol" class="flex flex-wrap gap-2">
+                      <span v-if="entry.report.systolic || entry.report.diastolic" class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs">Tensi: {{ entry.report.systolic ?? '-' }}/{{ entry.report.diastolic ?? '-' }}</span>
+                      <span v-if="entry.report.gda" class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs">GDA: {{ entry.report.gda }}</span>
+                      <span v-if="entry.report.gdp" class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs">GDP: {{ entry.report.gdp }}</span>
+                      <span v-if="entry.report.gd2jpp" class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs">GD2JPP: {{ entry.report.gd2jpp }}</span>
+                      <span v-if="entry.report.uric_acid" class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs">Asam Urat: {{ entry.report.uric_acid }}</span>
+                      <span v-if="entry.report.cholesterol" class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs">Kolesterol: {{ entry.report.cholesterol }}</span>
+                    </div>
+
+                    <p v-if="entry.report.keluhan"><span class="font-bold text-slate-700 dark:text-slate-300">Keluhan:</span> <span class="text-slate-600 dark:text-slate-400">"{{ entry.report.keluhan }}"</span></p>
+                    <p v-if="entry.report.tindakan?.length"><span class="font-bold text-slate-700 dark:text-slate-300">Tindakan:</span> <span class="text-slate-600 dark:text-slate-400">{{ formatHistoryTindakan(entry.report.tindakan) }}</span></p>
+                    <p v-if="entry.report.cara_rujukan"><span class="font-bold text-slate-700 dark:text-slate-300">Cara Rujukan:</span> <span class="text-slate-600 dark:text-slate-400">{{ HISTORY_CARA_RUJUKAN_LABELS[entry.report.cara_rujukan] ?? entry.report.cara_rujukan }}</span></p>
+
+                    <div v-if="entry.report.kepatuhan_obat || entry.report.sisa_obat" class="flex flex-wrap gap-x-4 gap-y-1">
+                      <span v-if="entry.report.kepatuhan_obat" class="text-slate-600 dark:text-slate-400">Kepatuhan Obat: <b class="text-slate-800 dark:text-slate-200">{{ HISTORY_KEPATUHAN_OBAT_LABELS[entry.report.kepatuhan_obat] ?? entry.report.kepatuhan_obat }}</b></span>
+                      <span v-if="entry.report.sisa_obat" class="text-slate-600 dark:text-slate-400">Sisa Obat: <b class="text-slate-800 dark:text-slate-200">{{ HISTORY_SISA_OBAT_LABELS[entry.report.sisa_obat] ?? entry.report.sisa_obat }}</b></span>
+                    </div>
+
+                    <p v-if="entry.report.catatan" class="text-slate-600 dark:text-slate-400">"{{ entry.report.catatan }}"</p>
+
+                    <div class="pt-2 border-t border-slate-100 dark:border-slate-800">
+                      <span
+                        class="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider"
+                        :class="entry.report.validation_status === 'valid' ? 'bg-success/10 text-success' : entry.report.validation_status === 'invalid' ? 'bg-danger/10 text-danger' : 'bg-warning/10 text-warning'"
+                      >
+                        {{ entry.report.validation_status === 'valid' ? 'Tervalidasi' : entry.report.validation_status === 'invalid' ? 'Ditolak Super Admin' : 'Menunggu Validasi' }}
+                      </span>
+                    </div>
+                  </template>
+                  <p v-else class="text-slate-400 italic">Belum ada laporan untuk kunjungan ini.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button @click="showHistoryModal = false" class="w-full py-3 mt-4 bg-slate-800 dark:bg-slate-700 text-white font-bold rounded-xl active:scale-[0.98] transition-transform shrink-0">Tutup</button>
         </div>
       </div>
     </Transition>
