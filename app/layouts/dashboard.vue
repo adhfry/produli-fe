@@ -325,8 +325,8 @@ onMounted(loadSyncStatus)
     <ConfirmDialog />
 
     <!-- Sidebar -->
-    <aside 
-      class="fixed top-0 left-0 h-dvh w-64 bg-accent flex flex-col z-20 transition-transform duration-300 shadow-xl"
+    <aside
+      class="fixed inset-y-0 left-0 w-64 bg-accent flex flex-col z-20 transition-transform duration-300 shadow-xl"
       :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full'"
     >
       <!-- Logo Area -->
