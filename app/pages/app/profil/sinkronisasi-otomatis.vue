@@ -44,9 +44,17 @@ function changeInterval(minutes: number) {
   autoSyncStore.intervalMinutes = minutes
 }
 
+// "Waktunya berjalan" -- lastSyncLabel SEBELUMNYA computed() murni dari Date.now(), yang BUKAN
+// dependency reaktif, jadi labelnya BEKU di nilai saat pertama kali dihitung (cuma berubah
+// kalau lastSyncAt sendiri berubah, bukan tiap detik berlalu). `now` di sini sengaja jadi
+// dependency reaktif eksplisit yang di-tick tiap 30 detik -- cukup sering supaya "X menit lalu"
+// terasa hidup, tidak perlu granularitas per detik untuk label sekasar ini.
+const now = ref(Date.now())
+useIntervalFn(() => { now.value = Date.now() }, 30_000)
+
 const lastSyncLabel = computed(() => {
   if (!autoSyncStore.lastSyncAt) return 'Belum pernah'
-  const diffMs = Date.now() - new Date(autoSyncStore.lastSyncAt).getTime()
+  const diffMs = now.value - new Date(autoSyncStore.lastSyncAt).getTime()
   const diffMin = Math.floor(diffMs / 60000)
   if (diffMin < 1) return 'Baru saja'
   if (diffMin < 60) return `${diffMin} menit lalu`

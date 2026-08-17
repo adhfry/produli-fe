@@ -208,10 +208,12 @@ const {
   notifIcon,
   markAllRead,
   openNotification,
-  isDangerNotif
+  isDangerNotif,
+  startPolling
 } = useNotifications()
 
 onMounted(loadNotifications)
+onMounted(startPolling)
 
 // Push notification (FCM) -- daftarkan token sekali per sesi dashboard, no-op kalau config
 // Firebase belum lengkap atau user belum kasih izin notifikasi browser (lihat useFcm.ts).
