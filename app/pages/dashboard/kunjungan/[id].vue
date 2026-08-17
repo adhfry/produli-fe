@@ -104,6 +104,47 @@ const isNoBpjsSuspicious = computed(() => !!patient.value?.no_bpjs && patient.va
 const petugasLabel = computed(() => (assignment.value?.tenaga_kesehatan ? 'Tenaga Kesehatan' : 'Kader'))
 const petugasName = computed(() => assignment.value?.tenaga_kesehatan?.name ?? assignment.value?.kader?.name ?? '-')
 const petugasPhone = computed(() => assignment.value?.tenaga_kesehatan?.no_hp ?? assignment.value?.kader?.no_hp ?? null)
+
+// --- Batalkan Penugasan (keputusan Kepala Dinas) -- PATCH /visit-assignments/{id}/cancel,
+// VisitAssignmentPolicy::cancel(): admin_puskesmas/pj_prolanis sepuskesmas boleh LANGSUNG,
+// TANPA approval super_admin -- modal konfirmasi di sini SATU-SATUNYA safety net-nya. Kader/
+// nakes yang ditugaskan otomatis dinotif backend (push+fcm), tidak perlu ditangani di sini. ---
+const authStore = useAuthStore()
+const canCancelAssignment = computed(() => {
+  const roles = authStore.roles ?? []
+  return roles.includes('admin_puskesmas') || roles.includes('pj_prolanis')
+})
+const canCancelNow = computed(() => canCancelAssignment.value && !!assignment.value && ['pending', 'in_progress'].includes(assignment.value.status))
+
+const showCancelConfirm = ref(false)
+const cancelReason = ref('')
+const isCancelling = ref(false)
+const cancelError = ref('')
+
+function requestCancel() {
+  cancelReason.value = ''
+  cancelError.value = ''
+  showCancelConfirm.value = true
+}
+
+async function confirmCancel() {
+  if (!assignment.value) return
+  isCancelling.value = true
+  cancelError.value = ''
+  try {
+    const api = useApi()
+    const res = await api(`/visit-assignments/${assignment.value.id}/cancel`, {
+      method: 'PATCH',
+      body: cancelReason.value.trim() ? { reason: cancelReason.value.trim() } : {},
+    }) as ApiSuccessEnvelope<VisitAssignment>
+    assignment.value = res.data
+    showCancelConfirm.value = false
+  } catch (e) {
+    cancelError.value = e instanceof ApiError ? e.message : 'Gagal membatalkan penugasan.'
+  } finally {
+    isCancelling.value = false
+  }
+}
 </script>
 
 <template>
@@ -142,6 +183,14 @@ const petugasPhone = computed(() => assignment.value?.tenaga_kesehatan?.no_hp ??
           <span class="px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider" :class="PRIORITY_COLORS[assignment.priority]">
             Risiko {{ PRIORITY_LABELS[assignment.priority] ?? assignment.priority }}
           </span>
+          <button
+            v-if="canCancelNow"
+            @click="requestCancel"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-danger/30 text-danger hover:bg-danger/10 transition-colors"
+          >
+            <LucideCircleX class="w-3.5 h-3.5" />
+            Batalkan Penugasan
+          </button>
         </div>
       </div>
 
@@ -353,5 +402,56 @@ const petugasPhone = computed(() => assignment.value?.tenaga_kesehatan?.no_hp ??
         Belum ada laporan kunjungan untuk kunjungan ini.
       </div>
     </template>
+
+    <!-- Konfirmasi Batalkan Penugasan -- satu-satunya safety net (backend sengaja tidak butuh
+         approval super_admin, keputusan Kepala Dinas). Kader/nakes bersangkutan otomatis
+         dinotif begitu dikonfirmasi. -->
+    <div
+      v-if="showCancelConfirm && assignment"
+      class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
+    >
+      <div class="bg-white rounded-3xl shadow-xl w-full max-w-sm max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+        <div class="p-6 overflow-y-auto">
+          <div class="w-14 h-14 rounded-2xl bg-danger/10 text-danger flex items-center justify-center mb-4">
+            <LucideCircleX class="w-7 h-7" />
+          </div>
+          <h3 class="font-bold text-accent text-lg mb-1">Batalkan Penugasan Ini?</h3>
+          <p class="text-sm text-slate-500 leading-relaxed mb-4">
+            <span class="font-bold text-slate-700">{{ petugasName }}</span> ({{ petugasLabel }})
+            akan diberi tahu bahwa penugasan kunjungan ke
+            <span class="font-bold text-slate-700">{{ assignment.patient?.nama }}</span>
+            tanggal {{ assignment.scheduled_date }} dibatalkan. Tindakan ini tidak bisa
+            dibatalkan (undo) -- kalau salah batal, buat penugasan baru dari awal.
+          </p>
+          <label class="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-1.5">Alasan (opsional, disertakan di notifikasi)</label>
+          <textarea
+            v-model="cancelReason"
+            rows="3"
+            maxlength="500"
+            placeholder="Mis. salah pilih kader, typo data pasien..."
+            class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-danger focus:ring-1 focus:ring-danger/30 outline-none resize-none"
+          />
+          <p v-if="cancelError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2 mt-4">
+            {{ cancelError }}
+          </p>
+        </div>
+        <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
+          <button
+            @click="showCancelConfirm = false"
+            class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors"
+          >
+            Batal
+          </button>
+          <button
+            @click="confirmCancel"
+            :disabled="isCancelling"
+            class="py-2.5 px-6 rounded-xl font-bold text-white bg-danger hover:bg-danger/90 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <LucideLoader2 v-if="isCancelling" class="w-4 h-4 animate-spin" />
+            Ya, Batalkan Penugasan
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
