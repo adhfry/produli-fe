@@ -738,6 +738,8 @@ export type NotificationType =
   | 'visit_report_submitted'
   | 'pasien_dirujuk'
   | 'visit_assigned'
+  | 'visit_assignment_cancelled'
+  | 'rujukan_dikonfirmasi'
   | string
 
 export interface AppNotification {
