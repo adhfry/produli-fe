@@ -404,6 +404,9 @@ export interface Staff {
   no_hp: string
   roles: Role[]
   puskesmas: { id: number, nama: string } | null
+  // StaffService::setActive() -- nonaktifkan (bukan hapus permanen) supaya riwayat assigned_by
+  // di visit_assignments tetap ada, dipakai staf yang keluar/pindah tapi sudah punya riwayat.
+  status_aktif: boolean
   is_activated: boolean
   must_change_password: boolean
   created_at: string
@@ -735,6 +738,8 @@ export type NotificationType =
   | 'visit_report_submitted'
   | 'pasien_dirujuk'
   | 'visit_assigned'
+  | 'visit_assignment_cancelled'
+  | 'rujukan_dikonfirmasi'
   | string
 
 export interface AppNotification {

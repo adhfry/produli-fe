@@ -310,6 +310,42 @@ async function confirmDelete() {
   }
 }
 
+// --- Aktifkan/Nonaktifkan — PATCH /api/v1/staff/{id}/status (StaffService::setActive(), keputusan
+// Kepala Dinas: nonaktifkan bukan hapus permanen, supaya riwayat assigned_by tetap ada) ---
+const showStatusConfirm = ref(false);
+const staffToToggle = ref<Staff | null>(null);
+const isTogglingStatus = ref(false);
+const toggleStatusError = ref("");
+
+function requestToggleStatus(staff: Staff) {
+  staffToToggle.value = staff;
+  toggleStatusError.value = "";
+  showStatusConfirm.value = true;
+}
+
+async function confirmToggleStatus() {
+  if (!staffToToggle.value) return;
+  const nextStatus = !staffToToggle.value.status_aktif;
+  isTogglingStatus.value = true;
+  toggleStatusError.value = "";
+  try {
+    const api = useApi();
+    await api(`/staff/${staffToToggle.value.id}/status`, {
+      method: "PATCH",
+      body: { status_aktif: nextStatus },
+    });
+    const idx = staffList.value.findIndex((s) => s.id === staffToToggle.value!.id);
+    if (idx !== -1) staffList.value[idx]!.status_aktif = nextStatus;
+    showStatusConfirm.value = false;
+    staffToToggle.value = null;
+  } catch (e) {
+    toggleStatusError.value =
+      e instanceof ApiError ? e.message : "Gagal mengubah status staf.";
+  } finally {
+    isTogglingStatus.value = false;
+  }
+}
+
 // --- Reset Password — POST /api/v1/staff/{id}/reset-password (super_admin saja) -- password
 // baru otomatis di-generate sistem dan dikirim ke email staf, TIDAK pernah ditampilkan di UI. ---
 const showResetPasswordConfirm = ref(false);
@@ -480,6 +516,7 @@ async function confirmResetPassword() {
               v-for="staff in filteredStaff"
               :key="staff.id"
               class="hover:bg-slate-50/80 transition-colors group"
+              :class="{ 'opacity-60': !staff.status_aktif }"
             >
               <td class="py-4 px-5">
                 <div class="flex items-center gap-3">
@@ -521,20 +558,31 @@ async function confirmResetPassword() {
                 </p>
               </td>
               <td class="py-4 px-5 text-center">
-                <span
-                  v-if="staff.is_activated"
-                  class="inline-flex items-center gap-1.5 text-xs font-bold text-success bg-success/10 px-2.5 py-1 rounded-full border border-success/20"
-                >
-                  <span class="w-1.5 h-1.5 rounded-full bg-success"></span>
-                  Sudah Aktivasi
-                </span>
-                <span
-                  v-else
-                  class="inline-flex items-center gap-1.5 text-xs font-bold text-warning bg-warning/10 px-2.5 py-1 rounded-full border border-warning/20"
-                >
-                  <span class="w-1.5 h-1.5 rounded-full bg-warning"></span>
-                  Menunggu Aktivasi
-                </span>
+                <div class="flex flex-col items-center gap-1">
+                  <span
+                    v-if="staff.is_activated"
+                    class="inline-flex items-center gap-1.5 text-xs font-bold text-success bg-success/10 px-2.5 py-1 rounded-full border border-success/20"
+                  >
+                    <span class="w-1.5 h-1.5 rounded-full bg-success"></span>
+                    Sudah Aktivasi
+                  </span>
+                  <span
+                    v-else
+                    class="inline-flex items-center gap-1.5 text-xs font-bold text-warning bg-warning/10 px-2.5 py-1 rounded-full border border-warning/20"
+                  >
+                    <span class="w-1.5 h-1.5 rounded-full bg-warning"></span>
+                    Menunggu Aktivasi
+                  </span>
+                  <!-- StaffService::setActive() -- BEDA dari is_activated (sudah set password
+                       atau belum). Nonaktif = tidak bisa login lagi, tapi riwayat tetap ada. -->
+                  <span
+                    v-if="!staff.status_aktif"
+                    class="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200"
+                  >
+                    <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                    Nonaktif
+                  </span>
+                </div>
               </td>
               <td v-if="canManageStaff" class="py-4 px-5">
                 <div
@@ -558,8 +606,17 @@ async function confirmResetPassword() {
                   </button>
                   <button
                     v-if="staff.id !== authStore.user?.id"
+                    @click="requestToggleStatus(staff)"
+                    :title="staff.status_aktif ? 'Nonaktifkan staf' : 'Aktifkan staf'"
+                    class="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 text-slate-500 hover:bg-warning/5 hover:text-warning hover:border-warning/30 transition-colors"
+                  >
+                    <LucideUserX v-if="staff.status_aktif" class="w-3.5 h-3.5" />
+                    <LucideUserCheck v-else class="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    v-if="staff.id !== authStore.user?.id"
                     @click="requestDelete(staff)"
-                    title="Hapus staf"
+                    title="Hapus permanen (tidak bisa kalau sudah punya riwayat penugasan -- nonaktifkan saja)"
                     class="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 text-slate-500 hover:bg-danger/5 hover:text-danger hover:border-danger/30 transition-colors"
                   >
                     <LucideTrash2 class="w-3.5 h-3.5" />
@@ -901,6 +958,68 @@ async function confirmResetPassword() {
           >
             <LucideLoader2 v-if="isDeleting" class="w-4 h-4 animate-spin" />
             Ya, Hapus Staf
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Konfirmasi Aktifkan/Nonaktifkan Staf -->
+    <div
+      v-if="showStatusConfirm && staffToToggle"
+      class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
+    >
+      <div
+        class="bg-white rounded-3xl shadow-xl w-full max-w-sm max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200"
+      >
+        <div class="p-6 overflow-y-auto">
+          <div
+            class="w-14 h-14 rounded-2xl bg-warning/10 text-warning flex items-center justify-center mb-4"
+          >
+            <LucideUserX v-if="staffToToggle.status_aktif" class="w-7 h-7" />
+            <LucideUserCheck v-else class="w-7 h-7" />
+          </div>
+          <h3 class="font-bold text-accent text-lg mb-1">
+            {{ staffToToggle.status_aktif ? "Nonaktifkan" : "Aktifkan" }} Staf?
+          </h3>
+          <p class="text-sm text-slate-500 leading-relaxed mb-1">
+            <span class="font-bold text-slate-700">{{
+              staffToToggle.name
+            }}</span>
+            <template v-if="staffToToggle.status_aktif">
+              tidak akan bisa login lagi, tapi seluruh riwayat penugasan yang
+              pernah dia buat tetap tersimpan (beda dari hapus permanen).
+              Bisa diaktifkan kembali kapan pun.
+            </template>
+            <template v-else>
+              akan bisa login dan bertugas kembali seperti biasa.
+            </template>
+          </p>
+          <p
+            v-if="toggleStatusError"
+            class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2 mt-4"
+          >
+            {{ toggleStatusError }}
+          </p>
+        </div>
+        <div
+          class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0"
+        >
+          <button
+            @click="
+              showStatusConfirm = false;
+              staffToToggle = null;
+            "
+            class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors"
+          >
+            Batal
+          </button>
+          <button
+            @click="confirmToggleStatus"
+            :disabled="isTogglingStatus"
+            class="py-2.5 px-6 rounded-xl font-bold text-white bg-warning hover:bg-warning/90 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <LucideLoader2 v-if="isTogglingStatus" class="w-4 h-4 animate-spin" />
+            {{ staffToToggle.status_aktif ? "Ya, Nonaktifkan" : "Ya, Aktifkan" }}
           </button>
         </div>
       </div>

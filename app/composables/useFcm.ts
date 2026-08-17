@@ -64,10 +64,16 @@ export function useFcm() {
           useNotificationSound().playFcm();
           const actionUrl = payload.data?.action_url;
           const isDanger = payload.data?.severity === "danger";
+          const image = payload.notification?.image;
           toast.add({
             title: payload.notification?.title ?? "Notifikasi Baru",
             description: payload.notification?.body,
-            icon: isDanger ? "i-lucide-alert-triangle" : "i-lucide-bell",
+            // Preview foto bukti lapangan (permintaan eksplisit user) -- cuma ada kalau backend
+            // mengisi NotificationPayload::imageUrl (lihat VisitReportService::notifyReportSubmitted).
+            // `icon` dan `avatar` di UToast saling eksklusif secara visual, jadi icon di-skip
+            // begitu ada foto supaya tidak tabrakan.
+            icon: !image ? (isDanger ? "i-lucide-alert-triangle" : "i-lucide-bell") : undefined,
+            avatar: image ? { src: image } : undefined,
             color: isDanger ? "error" : undefined,
             actions: actionUrl
               ? [

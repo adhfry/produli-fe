@@ -22,10 +22,12 @@ const {
   notifIcon,
   markAllRead,
   openNotification,
-  isDangerNotif
+  isDangerNotif,
+  startPolling
 } = useNotifications()
 
 onMounted(loadNotifications)
+onMounted(startPolling)
 onMounted(() => {
   useFcm().registerAndSendToken()
 })

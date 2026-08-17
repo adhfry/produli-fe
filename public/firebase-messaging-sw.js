@@ -27,9 +27,15 @@ const messaging = firebase.messaging();
 // Dipanggil browser saat push masuk TAPI app tidak sedang dibuka/fokus (kalau app terbuka,
 // foreground handler di useFcm.ts yang jalan, bukan ini). Menampilkan notifikasi SENDIRI lewat
 // showNotification (bukan andalkan auto-display SDK) -- satu-satunya cara nambah tombol aksi
-// "Lihat Kunjungan" (action_url/action_label dikirim backend, lihat
+// "Lihat Laporan"/"Lihat Kunjungan" (action_url/action_label dikirim backend, lihat
 // VisitReportService::notifyReportSubmitted) dan requireInteraction untuk notifikasi danger
 // (severity dari data payload) supaya tidak otomatis hilang sebelum admin/PJ sempat lihat.
+//
+// `image` (permintaan eksplisit user, preview foto bukti lapangan laporan kunjungan) --
+// FcmNotification::create() backend sudah mengisi notification.image dari VisitReport::photoUrl()
+// kalau laporannya punya foto; null/undefined kalau tidak (mis. notifikasi jenis lain yang
+// memang tidak pernah punya foto) -- Notification API mengabaikan opsi `image` begitu saja kalau
+// undefined, jadi aman diteruskan apa adanya tanpa fallback.
 messaging.onBackgroundMessage((payload) => {
   console.log("[firebase-messaging-sw.js] Pesan background diterima:", payload);
 
@@ -42,6 +48,7 @@ messaging.onBackgroundMessage((payload) => {
     body: payload.notification?.body,
     icon: "/pwa-192x192.png",
     badge: "/pwa-192x192.png",
+    image: payload.notification?.image,
     requireInteraction: isDanger,
     data: { url: actionUrl },
     actions: actionUrl !== "/" ? [{ action: "open_action_url", title: actionLabel }] : [],

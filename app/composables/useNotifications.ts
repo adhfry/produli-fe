@@ -6,9 +6,20 @@ import {
   LucideStethoscope,
   LucideClipboardList,
   LucideSiren,
-  LucideCalendarPlus
+  LucideCalendarPlus,
+  LucideCalendarX,
+  LucideCircleCheck
 } from '#components'
 import type { ApiSuccessEnvelope, AppNotification, PaginatedData } from '~/types/api'
+
+// Interval polling bel notifikasi -- keluhan nyata user: sebelum ini loadNotifications() cuma
+// dipanggil sekali saat layout mount, jadi notifikasi baru (termasuk suaranya, lihat
+// playNormal() di bawah) baru muncul kalau user manual refresh/navigasi ulang. 45 detik dipilih
+// sebagai titik tengah "aman" -- cukup sering supaya terasa real-time buat staf yang sedang
+// standby, tapi tidak membebani server dengan polling per beberapa detik (bandingkan dengan
+// auto-sync SiLAKES yang siklusnya per HARI, ini beda kelas kebutuhan -- notifikasi harus terasa
+// langsung, sync data tidak).
+const NOTIF_POLL_INTERVAL_MS = 45_000
 
 // Diekstrak dari layouts/dashboard.vue supaya bisa dipakai BERSAMA oleh layouts/pwa.vue (kader/
 // nakes) -- sebelumnya PWA sama sekali tidak punya bel notifikasi maupun registrasi FCM. State
@@ -103,6 +114,21 @@ export function useNotifications() {
           : `Kunjungan baru dijadwalkan ${n.data.scheduled_date ?? '-'}.`
       }
     }
+    if (n.type === 'visit_assignment_cancelled') {
+      return {
+        title: 'Penugasan Dibatalkan',
+        desc: n.data.reason ? `Dibatalkan: ${n.data.reason}` : 'Salah satu penugasan kunjunganmu dibatalkan.'
+      }
+    }
+    if (n.type === 'rujukan_dikonfirmasi') {
+      const dikonfirmasi = n.data.rujukan_status === 'dikonfirmasi'
+      return {
+        title: dikonfirmasi ? 'Rujukan Dikonfirmasi' : 'Rujukan Dibatalkan',
+        desc: dikonfirmasi
+          ? `Rujukan pasien ${n.data.patient_nama ?? '-'} sudah dikonfirmasi puskesmas.`
+          : `Rujukan pasien ${n.data.patient_nama ?? '-'} dibatalkan puskesmas.`
+      }
+    }
     return { title: n.type ?? 'Notifikasi', desc: '' }
   }
 
@@ -121,6 +147,8 @@ export function useNotifications() {
     if (type === 'visit_report_submitted') return LucideClipboardList
     if (type === 'pasien_dirujuk') return LucideSiren
     if (type === 'visit_assigned') return LucideCalendarPlus
+    if (type === 'visit_assignment_cancelled') return LucideCalendarX
+    if (type === 'rujukan_dikonfirmasi') return LucideCircleCheck
     return LucideCalendarClock
   }
 
@@ -154,6 +182,15 @@ export function useNotifications() {
     await Promise.all(unread.map((n) => markRead(n)))
   }
 
+  // Polling bel notifikasi -- dipanggil eksplisit dari layout (bukan auto-start di dalam
+  // composable ini) supaya halaman lain yang cuma butuh formatNotification()/notifIcon() tidak
+  // ikut memicu timer latar belakang yang tidak perlu. useIntervalFn (VueUse) otomatis berhenti
+  // sendiri saat komponen pemanggil unmount (tryOnScopeDispose) -- tidak perlu cleanup manual di
+  // layout, tapi stopPolling tetap diekspor untuk kasus butuh berhenti lebih awal (mis. logout).
+  const { pause: stopPolling, resume: startPolling } = useIntervalFn(loadNotifications, NOTIF_POLL_INTERVAL_MS, {
+    immediate: false
+  })
+
   return {
     headerNotifications,
     unreadCount,
@@ -165,6 +202,8 @@ export function useNotifications() {
     markRead,
     markAllRead,
     openNotification,
-    isDangerNotif
+    isDangerNotif,
+    startPolling,
+    stopPolling
   }
 }
