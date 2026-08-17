@@ -50,6 +50,20 @@ export function useNotifications() {
 
       if (!isFirstLoad && latestId !== null && latestId !== lastSeenLatestId.value) {
         useNotificationSound().playNormal()
+
+        // "Ada X pesan baru" -- X dihitung dari posisi ID terakhir yang sudah diketahui di
+        // daftar BARU ini (bukan cuma 1), supaya kalau beberapa notifikasi masuk sekaligus
+        // dalam satu siklus poll (mis. user idle lama), toast-nya akurat, bukan selalu "1
+        // pesan baru". Kalau ID lama itu sudah tidak ada di halaman pertama (per_page=20 --
+        // lebih dari 20 notifikasi baru masuk sekaligus), anggap semua di halaman ini baru.
+        const previousLatestIndex = items.findIndex((n) => n.id === lastSeenLatestId.value)
+        const newCount = previousLatestIndex === -1 ? items.length : previousLatestIndex
+
+        useToast().add({
+          title: newCount > 1 ? `Ada ${newCount} pesan baru` : 'Ada pesan baru',
+          description: `Ada ${unreadCount.value} pesan belum dibaca`,
+          color: 'info'
+        })
       }
       lastSeenLatestId.value = latestId
     } catch (e) {

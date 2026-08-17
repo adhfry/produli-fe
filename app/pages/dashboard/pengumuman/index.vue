@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import * as icons from '#components'
 import {
   LucideMegaphone, LucideSend, LucideTrash2, LucideLoader2, LucideImage,
   LucideLink, LucideSquareMousePointer, LucideUsers, LucideEye, LucideSearch,
   LucideCheck
 } from '#components'
+import { ANNOUNCEMENT_ICON_CHOICES, resolveAnnouncementIcon } from '~/utils/announcement-icons'
 import type { Announcement, AnnouncementColor, AnnouncementUrgency, ApiSuccessEnvelope, CreateAnnouncementPayload, PaginatedData, Role } from '~/types/api'
 
 definePageMeta({ layout: 'dashboard', middleware: 'auth' })
@@ -18,27 +18,19 @@ onMounted(() => {
   if (!isSuperAdmin.value) navigateTo('/dashboard')
 })
 
-// --- Daftar ikon kurasi -- "daftar icon" yang diminta user, BUKAN pencarian atas SELURUH
-// ikon Lucide yang ter-auto-import (~1500 ikon, tidak praktis dienumerasi runtime) -- kurasi
-// yang relevan konteks pengumuman Dinkes/Puskesmas (info umum, kesehatan, acara, teknis). ---
-const ICON_CHOICES = [
-  'LucideMegaphone', 'LucideInfo', 'LucideAlertTriangle', 'LucideSiren', 'LucideBell',
-  'LucideCalendar', 'LucideCalendarClock', 'LucideWrench', 'LucidePartyPopper', 'LucideGift',
-  'LucideHeart', 'LucideStar', 'LucideRocket', 'LucideShield', 'LucideShieldCheck',
-  'LucideCircleCheck', 'LucideCircleX', 'LucideClock', 'LucideZap', 'LucideTrendingUp',
-  'LucideUsers', 'LucideFileText', 'LucideStethoscope', 'LucideSyringe', 'LucidePill',
-  'LucideHospital', 'LucideSparkles', 'LucideAward', 'LucideFlag', 'LucideLightbulb',
-  'LucideSun', 'LucideCloudRain', 'LucideMapPin', 'LucidePhone', 'LucideMail',
-  'LucideLock', 'LucideTrophy', 'LucideTarget', 'LucideRss', 'LucideBookOpen'
-]
+// Daftar ikon kurasi -- "daftar icon" yang diminta user, BUKAN pencarian atas SELURUH ikon
+// Lucide yang ter-auto-import (~1500 ikon, tidak praktis dienumerasi runtime). Sumber kebenaran
+// sekarang ~/utils/announcement-icons.ts (dipakai bersama AnnouncementInboxModal.vue) -- lihat
+// docblock di sana untuk kenapa resolusi ikon HARUS lewat import eksplisit '@lucide/vue', bukan
+// wildcard '#components' (bug 500 "icons is not defined" di build produksi).
 const iconSearch = ref('')
 const filteredIcons = computed(() => {
-  if (!iconSearch.value.trim()) return ICON_CHOICES
+  if (!iconSearch.value.trim()) return ANNOUNCEMENT_ICON_CHOICES
   const q = iconSearch.value.trim().toLowerCase()
-  return ICON_CHOICES.filter((i) => i.replace('Lucide', '').toLowerCase().includes(q))
+  return ANNOUNCEMENT_ICON_CHOICES.filter((i) => i.replace('Lucide', '').toLowerCase().includes(q))
 })
 function iconComponent(name: string) {
-  return (icons as Record<string, unknown>)[name] ?? LucideMegaphone
+  return resolveAnnouncementIcon(name)
 }
 
 const COLOR_CHOICES: AnnouncementColor[] = ['primary', 'secondary', 'success', 'warning', 'danger', 'info', 'accent']
@@ -150,14 +142,25 @@ async function loadList() {
 
 const deletingId = ref<number | null>(null)
 async function deleteAnnouncement(a: Announcement) {
-  if (!confirm(`Hapus pengumuman "${a.title}"? Tindakan ini tidak bisa dibatalkan.`)) return
+  const confirmed = await useConfirm().confirm({
+    title: 'Hapus Pengumuman?',
+    description: `Pengumuman "${a.title}" akan dihapus permanen dan tidak dapat dipulihkan.`,
+    confirmLabel: 'Ya, Hapus'
+  })
+  if (!confirmed) return
+
   deletingId.value = a.id
   try {
     const api = useApi()
     await api(`/announcements/${a.id}`, { method: 'DELETE' })
     list.value = list.value.filter((x) => x.id !== a.id)
+    useToast().add({ title: 'Pengumuman dihapus', color: 'success' })
   } catch (e) {
-    alert(e instanceof ApiError ? e.message : 'Gagal menghapus pengumuman.')
+    useToast().add({
+      title: 'Gagal menghapus pengumuman',
+      description: e instanceof ApiError ? e.message : 'Terjadi kesalahan tidak terduga.',
+      color: 'error'
+    })
   } finally {
     deletingId.value = null
   }
@@ -172,8 +175,8 @@ onMounted(loadList)
 </script>
 
 <template>
-  <div class="max-w-6xl mx-auto px-4 md:px-6 py-8">
-    <div class="flex items-center gap-3 mb-8">
+  <div class="space-y-6">
+    <div class="flex items-center gap-3">
       <div class="w-11 h-11 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
         <LucideMegaphone class="w-5.5 h-5.5" />
       </div>
@@ -370,7 +373,7 @@ onMounted(loadList)
     </div>
 
     <!-- ===== Riwayat pengumuman (stack tree) ===== -->
-    <div class="mt-10">
+    <div>
       <h2 class="text-sm font-bold uppercase tracking-widest text-slate-400 mb-3">Riwayat Pengumuman</h2>
       <p v-if="listError" class="text-xs font-semibold text-danger mb-3">{{ listError }}</p>
       <div v-if="isLoadingList" class="flex justify-center py-8">

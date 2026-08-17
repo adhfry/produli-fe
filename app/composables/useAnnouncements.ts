@@ -4,9 +4,9 @@ import type { Announcement, AnnouncementColor, AnnouncementUrgency, ApiSuccessEn
 // /dashboard/pengumuman) tidak pilih eksplisit, DAN dipakai modal inbox/kartu feed untuk
 // styling konsisten (badge, border, ikon) berdasar urgency, terlepas dari color/icon custom.
 export const URGENCY_META: Record<AnnouncementUrgency, { label: string, color: AnnouncementColor, icon: string, description: string }> = {
-  info: { label: 'Info', color: 'info', icon: 'LucideInfo', description: 'Pengumuman rutin, bisa ditutup kapan saja.' },
-  penting: { label: 'Penting', color: 'warning', icon: 'LucideAlertTriangle', description: 'Perlu perhatian, tapi tidak darurat.' },
-  darurat: { label: 'Darurat', color: 'danger', icon: 'LucideSiren', description: 'Kritis -- user WAJIB klik "Saya Mengerti", modal tidak bisa ditutup lewat klik-luar.' }
+  info: { label: 'Info', color: 'info', icon: 'LucideInfo', description: 'Pengumuman rutin yang dapat ditutup kapan saja.' },
+  penting: { label: 'Penting', color: 'warning', icon: 'LucideAlertTriangle', description: 'Memerlukan perhatian, namun tidak bersifat darurat.' },
+  darurat: { label: 'Darurat', color: 'danger', icon: 'LucideSiren', description: 'Bersifat kritis. Pengguna wajib mengklik "Saya Mengerti", dan jendela tidak dapat ditutup dengan mengklik di luar area.' }
 }
 
 export const ANNOUNCEMENT_COLOR_CLASSES: Record<AnnouncementColor, { bg: string, text: string, border: string, solidBg: string }> = {

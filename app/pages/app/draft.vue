@@ -62,9 +62,16 @@ async function startSync() {
 }
 
 async function removeDraft(id: string) {
-  if (!confirm('Hapus draft ini? Data yang sudah diisi akan hilang dan kunjungan perlu diulang dari awal.')) return
+  const confirmed = await useConfirm().confirm({
+    title: 'Hapus Draf Ini?',
+    description: 'Data yang sudah diisi akan hilang dan kunjungan perlu diulang dari awal.',
+    confirmLabel: 'Ya, Hapus'
+  })
+  if (!confirmed) return
+
   await queue.deleteDraft(id)
   await reload()
+  useToast().add({ title: 'Draf dihapus', color: 'success' })
 }
 
 // Draft WIP ('draft') belum pernah dicoba kirim -- "kirim sekarang" berarti buka lagi halaman

@@ -722,7 +722,11 @@ async function submitData() {
   if (!navigator.onLine) {
     await offlineQueue.saveDraft(payload, photoBlob, patient.value?.nama ?? "Pasien", "pending_sync");
     isSubmitting.value = false;
-    alert("Anda sedang offline -- laporan disimpan sebagai draft, akan terkirim otomatis saat online kembali.");
+    useToast().add({
+      title: "Tersimpan sebagai draf",
+      description: "Anda sedang offline. Laporan akan terkirim otomatis begitu koneksi kembali tersambung.",
+      color: "warning"
+    });
     router.push("/app/draft");
     return;
   }
@@ -733,7 +737,7 @@ async function submitData() {
     await api("/visit-reports", { method: "POST", body: fd });
 
     assignmentStore.markCompleted(assignment.value.id);
-    alert("Laporan berhasil dikirim dan tersimpan dengan aman!");
+    useToast().add({ title: "Laporan berhasil dikirim dan tersimpan dengan aman", color: "success" });
     router.push("/app/tugas");
   } catch (err) {
     if (err instanceof ApiError) {
@@ -745,7 +749,11 @@ async function submitData() {
       // Bukan ApiError = gagal di level jaringan (offline sungguhan, timeout, dst) -- simpan
       // sebagai draft alih-alih menampilkan error yang bikin kader mengulang dari nol.
       await offlineQueue.saveDraft(payload, photoBlob, patient.value?.nama ?? "Pasien", "pending_sync");
-      alert("Koneksi bermasalah -- laporan disimpan sebagai draft, akan terkirim otomatis saat online kembali.");
+      useToast().add({
+        title: "Tersimpan sebagai draf",
+        description: "Koneksi sedang bermasalah. Laporan akan terkirim otomatis begitu koneksi kembali tersambung.",
+        color: "warning"
+      });
       router.push("/app/draft");
     }
   } finally {
