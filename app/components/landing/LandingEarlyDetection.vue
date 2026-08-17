@@ -72,7 +72,7 @@ const simFlagged = computed(() => simProximity.value >= PROXIMITY_THRESHOLD);
 // Simulasi Margin Kombinasi -- 3 parameter wajib (Gula Darah Puasa, LDL, Trigliserida), persis
 // combo_required_parameters bawaan. Margin = (nilai - ambang) / ambang * 100, SELURUH parameter
 // yang diikutkan harus >= ambang margin, bukan cuma rata-ratanya (lihat evaluateComboMargin()).
-const comboGdp = ref({ value: 180, ambang: 120 }); // Gula Darah Puasa mg/dL
+const comboGdp = ref({ value: 180, ambang: 130 }); // Gula Darah Puasa mg/dL
 const comboLdl = ref({ value: 195, ambang: 130 }); // LDL mg/dL
 const comboTrigliserida = ref({ value: 225, ambang: 150 }); // Trigliserida mg/dL
 
@@ -90,7 +90,7 @@ const simComboFlagged = computed(() => simMarginMin.value >= COMBO_MARGIN_THRESH
 function openModal() {
   simMode.value = "creatinine";
   simCreatinine.value = 1.89;
-  comboGdp.value = { value: 180, ambang: 120 };
+  comboGdp.value = { value: 180, ambang: 130 };
   comboLdl.value = { value: 195, ambang: 130 };
   comboTrigliserida.value = { value: 225, ambang: 150 };
   showModal.value = true;
@@ -343,13 +343,13 @@ function openModal() {
                 <input
                   v-model.number="comboGdp.value"
                   type="range"
-                  min="120"
+                  min="130"
                   max="300"
                   step="5"
                   class="w-full accent-primary"
                 />
                 <div class="mt-1 flex justify-between text-[10px] text-neutral-400">
-                  <span>120 (ambang rujukan)</span>
+                  <span>130 (ambang rujukan)</span>
                   <span>300</span>
                 </div>
               </div>

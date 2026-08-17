@@ -92,9 +92,12 @@ const riskLevels = [
 
 // Pemeriksaan & nilai rujukan -- sisi kanan tabel, bersumber dari RiskThresholdSeeder
 // (nilai klinis resmi, bukan tebakan). Creatinine bertingkat (dua baris) karena dia
-// "direct classifier", bukan satu ambang tunggal seperti 5 parameter lainnya.
+// "direct classifier", bukan satu ambang tunggal seperti 5 parameter lainnya. GDP
+// SENGAJA pakai operator inklusif "≥" (bukan "> " seperti 4 parameter lain) -- ambang
+// 130 dan operator '>=' disamakan persis dengan RiskThresholdSeeder & SiLAKES (lihat
+// riwayat percakapan), bukan salah ketik.
 const examinations = [
-  { parameter: "Gula Darah Puasa (GDP)", rujukan: "> 120 mg/dL", tag: null },
+  { parameter: "Gula Darah Puasa (GDP)", rujukan: "≥ 130 mg/dL", tag: null },
   { parameter: "Cholesterol Total", rujukan: "> 200 mg/dL", tag: null },
   { parameter: "Trigliserida", rujukan: "> 140 mg/dL", tag: null },
   { parameter: "LDL", rujukan: "> 130 mg/dL", tag: null },
