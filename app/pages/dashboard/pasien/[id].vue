@@ -185,6 +185,11 @@ const trendChartData = computed(() => {
   // riskHistory terurut TERBARU DULU dari backend -- dibalik jadi kronologis (lama -> baru)
   // supaya sumbu waktu chart terbaca dari kiri ke kanan seperti biasa.
   const rows = [...riskHistory.value].reverse()
+  // Titik dengan early_detection_flag=true (RiskClassificationService::evaluateEarlyDetection())
+  // TIDAK mengubah tinggi garis (level tetap 'sedang', sumbu Y sama) -- tanpa penanda terpisah,
+  // titik "kondisi memburuk terdeteksi dini" ini tenggelam begitu saja di antara titik 'sedang'
+  // biasa. Dibedakan lewat cincin merah tebal + radius lebih besar, BUKAN warna isi (yang tetap
+  // ikut level seperti biasa), supaya tetap jelas beda dari titik 'berat' sungguhan.
   return {
     labels: rows.map((r) => formatCriteriaDate(r.computed_at)),
     datasets: [{
@@ -193,10 +198,10 @@ const trendChartData = computed(() => {
       borderColor: '#0d9488',
       backgroundColor: '#0d9488',
       pointBackgroundColor: rows.map((r) => SEVERITY_POINT_COLOR[r.level] ?? '#94a3b8'),
-      pointBorderColor: '#ffffff',
-      pointBorderWidth: 1.5,
-      pointRadius: 5,
-      pointHoverRadius: 7,
+      pointBorderColor: rows.map((r) => r.early_detection_flag ? '#dc2626' : '#ffffff'),
+      pointBorderWidth: rows.map((r) => r.early_detection_flag ? 3 : 1.5),
+      pointRadius: rows.map((r) => r.early_detection_flag ? 8 : 5),
+      pointHoverRadius: rows.map((r) => r.early_detection_flag ? 10 : 7),
       tension: 0.15,
       fill: false
     }]
@@ -210,7 +215,16 @@ const trendChartOptions = {
     legend: { display: false },
     tooltip: {
       callbacks: {
-        label: (ctx: { parsed: { y: number } }) => RISK_LABEL_SHORT[SEVERITY_ORDER[ctx.parsed.y]] ?? '-'
+        label: (ctx: { parsed: { y: number } }) => RISK_LABEL_SHORT[SEVERITY_ORDER[ctx.parsed.y]] ?? '-',
+        // Baris tambahan KHUSUS titik early_detection_flag=true (lihat pointRadius/
+        // pointBorderColor di trendChartData) -- dataIndex konsisten dengan urutan kronologis
+        // yang sama dipakai trendChartData (riskHistory dibalik jadi lama -> baru).
+        afterLabel: (ctx: { dataIndex: number }) => {
+          const row = [...riskHistory.value].reverse()[ctx.dataIndex]
+          if (!row?.early_detection_flag) return undefined
+          const reasons = row.early_detection_reason?.map((r) => r.message).join('\n') ?? ''
+          return `⚠ Terdeteksi berpotensi memburuk:\n${reasons}`
+        }
       }
     }
   },
