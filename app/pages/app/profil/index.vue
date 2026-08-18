@@ -79,12 +79,21 @@ async function linkGoogle() {
   <div class="p-5">
      <!-- Profile Header -->
      <div class="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 mb-6 flex flex-col items-center text-center transition-colors duration-300">
-        <div class="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center border-4 border-primary/20 shadow-sm mb-4 transition-colors relative overflow-hidden">
-           <img v-if="authStore.user?.avatar_url" :src="authStore.user.avatar_url" alt="Foto profil" class="w-full h-full object-cover" />
-           <span v-else class="text-primary font-black text-3xl">{{ initials }}</span>
-           <div v-if="!isGoogleConnected" class="absolute bottom-0 right-0 w-6 h-6 bg-warning rounded-full border-2 border-white dark:border-slate-800 flex items-center justify-center transition-colors">
-              <LucideAlertCircle class="w-3.5 h-3.5 text-white" />
+        <!-- BUG SEBELUMNYA: badge peringatan ditaruh DI DALAM lingkaran ber-overflow-hidden --
+             potongan lingkaran (rounded-full + overflow-hidden) ikut memotong badge yang
+             posisinya di tepi (bottom-0 right-0), terlihat "tenggelam" separuh (temuan
+             lapangan). Sekarang badge jadi SIBLING di wrapper terpisah yang TIDAK overflow-
+             hidden, cuma lingkaran foto di dalamnya yang tetap overflow-hidden. -->
+        <div class="relative w-24 h-24 mb-4">
+           <div class="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center border-4 border-primary/20 shadow-sm transition-colors overflow-hidden">
+              <img v-if="authStore.user?.avatar_url" :src="authStore.user.avatar_url" alt="Foto profil" class="w-full h-full object-cover" />
+              <span v-else class="text-primary font-black text-3xl">{{ initials }}</span>
            </div>
+           <AppTooltip v-if="!isGoogleConnected" text="Akun Google Anda belum tertaut. Tautkan supaya bisa masuk tanpa kata sandi dan akun lebih aman.">
+              <button type="button" class="absolute bottom-0 right-0 w-6 h-6 bg-warning rounded-full border-2 border-white dark:border-slate-800 flex items-center justify-center transition-colors active:scale-95">
+                 <LucideAlertCircle class="w-3.5 h-3.5 text-white" />
+              </button>
+           </AppTooltip>
         </div>
         <h2 class="text-xl font-black text-slate-800 dark:text-white mb-1 transition-colors">{{ authStore.user?.name ?? '...' }}</h2>
         <p class="text-base text-slate-500 dark:text-slate-400 font-medium transition-colors">{{ roleLabel }}<template v-if="puskesmasName"> &bull; {{ puskesmasName }}</template></p>
@@ -143,6 +152,15 @@ async function linkGoogle() {
                  <LucideRefreshCw class="w-5 h-5" />
               </div>
               <span class="font-bold text-slate-700 dark:text-slate-200 transition-colors">Sinkronisasi Otomatis</span>
+           </div>
+           <LucideChevronRight class="w-5 h-5 text-slate-300 dark:text-slate-600 transition-colors" />
+        </NuxtLink>
+        <NuxtLink to="/app/riwayat" class="w-full flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-700 active:bg-slate-50 dark:active:bg-slate-700 transition-colors">
+           <div class="flex items-center gap-3">
+              <div class="w-10 h-10 bg-primary/10 text-primary rounded-xl flex items-center justify-center">
+                 <LucideCamera class="w-5 h-5" />
+              </div>
+              <span class="font-bold text-slate-700 dark:text-slate-200 transition-colors">Riwayat Kunjungan Saya</span>
            </div>
            <LucideChevronRight class="w-5 h-5 text-slate-300 dark:text-slate-600 transition-colors" />
         </NuxtLink>

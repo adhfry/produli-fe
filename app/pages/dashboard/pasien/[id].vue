@@ -347,8 +347,16 @@ const canProposeUpdate = computed(() => {
 })
 
 // --- Tugaskan Tenaga Kesehatan (POST /care-assignments, revisi Bu Kadis) ---
-// Gerbang SAMA dengan canProposeUpdate (CareAssignmentPolicy::create sama-sama
-// super_admin/admin_puskesmas/pj_prolanis) -- reuse computed yang sama, bukan duplikat logic.
+// CareAssignmentPolicy::create() MEMANG mengizinkan super_admin (gerbang otorisasi sama dengan
+// canProposeUpdate), TAPI dropdown pilihan tenaga_kesehatan di bawah (GET /tenaga-kesehatan)
+// scoped ke puskesmas user login (TenagaKesehatanService::scopedQuery) -- untuk super_admin
+// (DataScope::isFullAccess) itu artinya SEMUA tenaga_kesehatan se-kabupaten tanpa filter
+// puskesmas pasien sama sekali, bukan cuma yang relevan untuk pasien ini. Fitur ini secara
+// praktis tidak pernah benar-benar berguna untuk super_admin (temuan lapangan, revisi Bu
+// Kadis) -- disembunyikan total dari pandangan mereka, computed TERPISAH dari canProposeUpdate
+// (fitur "Ajukan Update Data" di sebelahnya TETAP tampil untuk super_admin, itu tidak
+// bermasalah sama sekali).
+const canAssignTenagaKesehatan = computed(() => canProposeUpdate.value && !(authStore.roles ?? []).includes('super_admin'))
 const showAssignTkModal = ref(false)
 const tkOptions = ref<TenagaKesehatan[]>([])
 const isLoadingTkOptions = ref(false)
@@ -655,7 +663,7 @@ async function triggerSyncFromHistory() {
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <button
-            v-if="canProposeUpdate"
+            v-if="canAssignTenagaKesehatan"
             @click="openAssignTkModal"
             class="inline-flex items-center gap-2 py-2.5 px-4 rounded-xl font-bold text-sm text-secondary bg-secondary/10 hover:bg-secondary/20 transition-colors border border-secondary/20"
           >

@@ -204,6 +204,20 @@ const showAddModal = ref(false)
 // --- Buat Penugasan (bulk) — docs/planning/02 §12, POST /api/v1/visit-assignments/bulk ---
 const candidatePatients = ref([])
 const assignedPatientIds = ref(new Set())
+// patient_id -> { at: ISO string, by: nama petugas } -- kunjungan TERAKHIR pasien itu, dihitung
+// dari assignments yang sudah di-fetch di loadCandidates(). Map (bukan object) supaya key
+// numerik tidak perlu di-string-kan.
+const patientLastVisit = ref(new Map())
+function lastVisitLabel(patientId) {
+  const v = patientLastVisit.value.get(patientId)
+  if (!v) return null
+  const d = new Date(v.at)
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `Terakhir dikunjungi ${dd} ${mm} ${d.getFullYear()} ${hh}:${min} oleh ${v.by}`
+}
 const isLoadingCandidates = ref(false)
 const candidatesError = ref('')
 
@@ -288,6 +302,22 @@ async function loadCandidates() {
         .map((a) => a.patient?.id)
         .filter((id) => id != null)
     )
+
+    // "Terakhir dikunjungi" (temuan lapangan, revisi Bu Kadis) -- admin_puskesmas/pj_prolanis
+    // perlu tahu riwayat kunjungan SEBELUM memilih pasien buat ditugaskan lagi, supaya tidak
+    // menugaskan ulang pasien yang baru saja dikunjungi tanpa sadar. Dihitung dari `assignments`
+    // yang SUDAH di-fetch penuh di atas (bukan fetch tambahan) -- ambil laporan TERBARU per
+    // pasien (report.created_at = waktu submit sesungguhnya, BUKAN scheduled_date yang cuma
+    // tanggal tanpa jam).
+    const lastVisitMap = new Map()
+    for (const a of assignments) {
+      if (!a.report?.created_at || !a.patient?.id) continue
+      const existing = lastVisitMap.get(a.patient.id)
+      if (!existing || new Date(a.report.created_at) > new Date(existing.at)) {
+        lastVisitMap.set(a.patient.id, { at: a.report.created_at, by: petugasName(a) })
+      }
+    }
+    patientLastVisit.value = lastVisitMap
   } catch (e) {
     candidatesError.value = e instanceof ApiError ? e.message : 'Gagal memuat daftar pasien kandidat.'
   } finally {
@@ -633,6 +663,122 @@ const submitValidation = async () => {
   }
 }
 
+// --- "..." dropdown per baris (menggantikan tombol centang/x begitu laporan SUDAH divalidasi,
+// temuan lapangan: centang/x yang tetap tampil setelah divalidasi membingungkan -- terlihat
+// seperti belum diputuskan). Satu ref untuk baris mana yang dropdown-nya terbuka (bukan per-
+// baris ref terpisah), ditutup otomatis saat klik di luar. ---
+// Dropdown per-baris di dalam v-for -- SATU ref target tunggal (pola onClickOutside biasa)
+// tidak cocok karena elemennya berpindah-pindah baris. Pakai listener klik global + cek
+// closest() ke class marker (.visit-actions-dropdown) -- jauh lebih sederhana & tetap benar
+// untuk berapa pun baris tabel-nya.
+const openActionsForVisitId = ref<number | null>(null)
+useEventListener(document, 'click', (e) => {
+  if (openActionsForVisitId.value === null) return
+  if (!(e.target as HTMLElement)?.closest?.('.visit-actions-dropdown')) {
+    openActionsForVisitId.value = null
+  }
+})
+
+const isRevertingValidation = ref(false)
+async function revertValidation(visit) {
+  if (!visit.report) return
+  isRevertingValidation.value = true
+  openActionsForVisitId.value = null
+  try {
+    const api = useApi()
+    const res = await api(`/validasi-laporan/${visit.report.id}/batalkan`, { method: 'PATCH' })
+    visit.report = res.data
+    if (visit.report.validation_status === 'pending') {
+      // revertValidation() backend bisa mengembalikan assignment ke 'completed' kalau
+      // sebelumnya invalid (lihat VisitReportReviewService::revertValidation()) -- refresh
+      // silent supaya baris ini langsung mencerminkan status assignment terbaru dari server,
+      // bukan menebak transisinya di frontend.
+      await loadVisits(currentPage.value)
+    }
+    useToast().add({ title: 'Validasi dibatalkan, laporan kembali menunggu validasi', color: 'warning' })
+  } catch (e) {
+    useToast().add({ title: e instanceof ApiError ? e.message : 'Gagal membatalkan validasi.', color: 'error' })
+  } finally {
+    isRevertingValidation.value = false
+  }
+}
+
+// --- Validasi massal (temuan lapangan, UX super_admin) -- pilih beberapa laporan PENDING
+// sekaligus lewat checkbox, satu keputusan untuk semuanya. Cuma laporan validation_status=
+// 'pending' yang bisa dipilih (yang sudah diputuskan pakai "..." > Batalkan Validasi dulu kalau
+// mau diubah, bukan ikut tercentang di sini). ---
+const selectedReportIds = ref<number[]>([])
+function isSelectableForBulk(visit) {
+  return isSuperAdmin.value && visit.report && visit.report.validation_status === 'pending'
+}
+function isReportSelected(visit) {
+  return !!visit.report && selectedReportIds.value.includes(visit.report.id)
+}
+function toggleSelectReport(visit) {
+  if (!visit.report) return
+  const id = visit.report.id
+  const idx = selectedReportIds.value.indexOf(id)
+  if (idx === -1) selectedReportIds.value.push(id)
+  else selectedReportIds.value.splice(idx, 1)
+}
+const selectablePendingOnPage = computed(() => visitsList.value.filter((v) => isSelectableForBulk(v)))
+const allPendingOnPageSelected = computed(() =>
+  selectablePendingOnPage.value.length > 0 &&
+  selectablePendingOnPage.value.every((v) => selectedReportIds.value.includes(v.report.id))
+)
+function toggleSelectAllPendingOnPage() {
+  if (allPendingOnPageSelected.value) {
+    const idsOnPage = selectablePendingOnPage.value.map((v) => v.report.id)
+    selectedReportIds.value = selectedReportIds.value.filter((id) => !idsOnPage.includes(id))
+  } else {
+    const idsOnPage = selectablePendingOnPage.value.map((v) => v.report.id)
+    selectedReportIds.value = [...new Set([...selectedReportIds.value, ...idsOnPage])]
+  }
+}
+// Baris terpilih (utk daftar nama + preview di modal konfirmasi) -- dicari dari visitsList
+// halaman yang sedang tampil, cukup karena seleksi memang cuma dibuat dari baris yang terlihat.
+const selectedVisitsPreview = computed(() =>
+  visitsList.value.filter((v) => v.report && selectedReportIds.value.includes(v.report.id))
+)
+
+const showBulkValidateModal = ref(false)
+const bulkValidateForm = ref({ is_valid: true, note: '' })
+const isBulkValidating = ref(false)
+const bulkValidateError = ref('')
+function openBulkValidateModal() {
+  if (selectedReportIds.value.length === 0) return
+  bulkValidateForm.value = { is_valid: true, note: '' }
+  bulkValidateError.value = ''
+  showBulkValidateModal.value = true
+}
+async function submitBulkValidate() {
+  if (selectedReportIds.value.length === 0) return
+  isBulkValidating.value = true
+  bulkValidateError.value = ''
+  try {
+    const api = useApi()
+    await api('/validasi-laporan-bulk', {
+      method: 'PATCH',
+      body: {
+        report_ids: selectedReportIds.value,
+        is_valid: bulkValidateForm.value.is_valid,
+        note: bulkValidateForm.value.note || null
+      }
+    })
+    showBulkValidateModal.value = false
+    useToast().add({
+      title: `${selectedReportIds.value.length} laporan berhasil divalidasi`,
+      color: bulkValidateForm.value.is_valid ? 'success' : 'warning'
+    })
+    selectedReportIds.value = []
+    await loadVisits(currentPage.value)
+  } catch (e) {
+    bulkValidateError.value = e instanceof ApiError ? e.message : 'Gagal menyimpan validasi massal.'
+  } finally {
+    isBulkValidating.value = false
+  }
+}
+
 // --- Batalkan Penugasan (keputusan Kepala Dinas) -- PATCH /visit-assignments/{id}/cancel,
 // VisitAssignmentPolicy::cancel(): admin_puskesmas/pj_prolanis sepuskesmas boleh LANGSUNG, TANPA
 // approval super_admin. Replikasi dari dashboard/kunjungan/[id].vue (halaman detail) supaya aksi
@@ -674,6 +820,77 @@ async function confirmCancel() {
     cancelError.value = e instanceof ApiError ? e.message : 'Gagal membatalkan penugasan.'
   } finally {
     isCancelling.value = false
+  }
+}
+
+// --- Tugaskan Ulang Kunjungan Ini (temuan lapangan, revisi Bu Kadis) -- KHUSUS admin_puskesmas/
+// pj_prolanis (VisitAssignmentPolicy::create() menolak super_admin untuk jalur kader; super_admin
+// TIDAK diberi tombol ini sama sekali, bukan cuma disembunyikan setengah). Petugas (kader ATAU
+// tenaga_kesehatan) & prioritas dipakai APA ADANYA dari kunjungan lama -- cuma tanggal baru yang
+// perlu diisi ulang, supaya admin tidak perlu memilih petugas dari daftar lagi.
+//
+// SENGAJA cuma untuk status 'cancelled' -- BUKAN untuk 'diulang'/invalid: assignment yang
+// ditolak validasi SUDAH otomatis dibuka lagi ke status 'pending' oleh backend
+// (VisitReportReviewService::validateReport()), kader/nakes-nya sudah melihatnya lagi di
+// daftar tugas sendiri. VisitAssignmentService::assign()/CareAssignmentService tidak punya
+// guard anti-duplikat sama sekali -- membuat penugasan BARU untuk kasus yang sudah otomatis
+// terbuka lagi akan menghasilkan 2 tugas untuk pasien yang sama, membingungkan kader di lapangan.
+function canReassignVisit(visit) {
+  return canCancelAssignment.value && displayStatus(visit) === 'cancelled'
+}
+
+const visitToReassign = ref(null)
+const showReassignModal = ref(false)
+const reassignDate = ref('')
+const isReassigning = ref(false)
+const reassignError = ref('')
+
+function requestReassign(visit) {
+  visitToReassign.value = visit
+  reassignDate.value = ''
+  reassignError.value = ''
+  showReassignModal.value = true
+  openActionsForVisitId.value = null
+}
+
+async function confirmReassign() {
+  const visit = visitToReassign.value
+  if (!visit || !reassignDate.value) return
+  isReassigning.value = true
+  reassignError.value = ''
+  try {
+    const api = useApi()
+    if (visit.kader) {
+      await api('/visit-assignments', {
+        method: 'POST',
+        body: {
+          patient_id: visit.patient.id,
+          kader_id: visit.kader.id,
+          scheduled_date: reassignDate.value,
+          priority: visit.priority
+        }
+      })
+    } else if (visit.tenaga_kesehatan) {
+      await api('/care-assignments', {
+        method: 'POST',
+        body: {
+          patient_id: visit.patient.id,
+          tenaga_kesehatan_id: visit.tenaga_kesehatan.id,
+          scheduled_date: reassignDate.value,
+          kader_id: null
+        }
+      })
+    } else {
+      reassignError.value = 'Kunjungan ini tidak punya petugas kader/tenaga kesehatan yang jelas, tidak bisa ditugaskan ulang otomatis.'
+      return
+    }
+    showReassignModal.value = false
+    useToast().add({ title: 'Kunjungan berhasil ditugaskan ulang', color: 'success' })
+    await loadVisits(currentPage.value)
+  } catch (e) {
+    reassignError.value = e instanceof ApiError ? e.message : 'Gagal menugaskan ulang kunjungan.'
+  } finally {
+    isReassigning.value = false
   }
 }
 </script>
@@ -777,9 +994,36 @@ async function confirmCancel() {
       </template>
     </div>
 
+    <!-- Bar aksi validasi massal -- KHUSUS super_admin, muncul begitu ada laporan pending yang
+         dicentang (temuan lapangan, UX validasi banyak laporan sekaligus tanpa buka satu-satu). -->
+    <Transition
+      enter-active-class="transition duration-200 ease-out"
+      enter-from-class="opacity-0 -translate-y-2"
+      enter-to-class="opacity-100 translate-y-0"
+      leave-active-class="transition duration-150 ease-in"
+      leave-from-class="opacity-100 translate-y-0"
+      leave-to-class="opacity-0 -translate-y-2"
+    >
+      <div v-if="isSuperAdmin && selectedReportIds.length > 0" class="bg-primary/5 border border-primary/20 rounded-2xl p-4 flex items-center justify-between gap-4 flex-wrap">
+        <span class="text-sm font-bold text-primary flex items-center gap-2">
+          <LucideSquareCheck class="w-4 h-4" />
+          {{ selectedReportIds.length }} laporan dipilih
+        </span>
+        <div class="flex items-center gap-2">
+          <button @click="selectedReportIds = []" class="px-4 py-2 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors">
+            Batal Pilih
+          </button>
+          <button @click="openBulkValidateModal" class="px-4 py-2 rounded-xl text-sm font-bold text-white bg-primary hover:bg-primary-600 transition-colors shadow-sm flex items-center gap-2">
+            <LucideCheckCheck class="w-4 h-4" />
+            Validasi Terpilih
+          </button>
+        </div>
+      </div>
+    </Transition>
+
     <!-- Filters & Table Card -->
     <div class="bg-white rounded-2xl border border-slate-100 shadow-card flex flex-col overflow-hidden">
-      
+
       <!-- Toolbar -->
       <div class="p-5 border-b border-slate-100 flex flex-col md:flex-row gap-4 items-center justify-between bg-slate-50/50">
         <div class="relative w-full md:w-80">
@@ -818,6 +1062,20 @@ async function confirmCancel() {
         <table class="w-full text-left border-collapse min-w-[950px]">
           <thead>
             <tr class="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+              <!-- Checkbox validasi massal -- KHUSUS super_admin (temuan lapangan, UX validasi
+                   banyak laporan sekaligus). "Pilih semua" cuma memilih baris PENDING di halaman
+                   yang sedang tampil (server-side pagination -- tidak ada cara pilih "semua data"
+                   tanpa menariknya semua ke client, sengaja tidak dilakukan). -->
+              <th v-if="isSuperAdmin" class="py-4 px-3 font-semibold w-10">
+                <input
+                  type="checkbox"
+                  :checked="allPendingOnPageSelected"
+                  :disabled="selectablePendingOnPage.length === 0"
+                  @change="toggleSelectAllPendingOnPage"
+                  class="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary/30 disabled:opacity-30"
+                  title="Pilih semua laporan menunggu validasi di halaman ini"
+                />
+              </th>
               <th class="py-4 px-5 font-semibold">Pasien Prolanis</th>
               <th class="py-4 px-5 font-semibold">Petugas</th>
               <th class="py-4 px-5 font-semibold">Tenggat Waktu</th>
@@ -831,15 +1089,24 @@ async function confirmCancel() {
                  setelah aksi berhasil/ganti halaman-filter) SENGAJA tidak mengosongkan tabel --
                  baris lama tetap tampil sampai data baru datang, tidak terasa "reload dari nol". -->
             <tr v-if="isInitialLoading">
-              <td colspan="6" class="py-12 text-center text-slate-400">
+              <td :colspan="isSuperAdmin ? 7 : 6" class="py-12 text-center text-slate-400">
                 <LucideLoader2 class="w-6 h-6 mx-auto mb-2 animate-spin" />
                 Memuat data kunjungan...
               </td>
             </tr>
             <tr v-else-if="visitsError">
-              <td colspan="6" class="py-8 text-center text-sm font-semibold text-danger">{{ visitsError }}</td>
+              <td :colspan="isSuperAdmin ? 7 : 6" class="py-8 text-center text-sm font-semibold text-danger">{{ visitsError }}</td>
             </tr>
             <tr v-for="visit in visitsList" v-else :key="visit.id" class="hover:bg-slate-50/80 transition-colors group">
+               <td v-if="isSuperAdmin" class="py-4 px-3">
+                  <input
+                    v-if="isSelectableForBulk(visit)"
+                    type="checkbox"
+                    :checked="isReportSelected(visit)"
+                    @change="toggleSelectReport(visit)"
+                    class="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary/30"
+                  />
+               </td>
                <td class="py-4 px-5">
                   <div class="flex items-center gap-3">
                      <div class="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shadow-sm shrink-0 border" :class="getRiskColor(visit.priority) + ' border-current/20'">
@@ -867,6 +1134,20 @@ async function confirmCancel() {
                   <span class="px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider" :class="getStatusColor(visit)">
                      {{ getStatusLabel(visit) }}
                   </span>
+                  <!-- Status validasi super_admin -- TERPISAH dari status assignment di atas
+                       (temuan lapangan: sebelumnya tidak tampil sama sekali di tabel, harus
+                       buka detail dulu buat tahu sudah/belum divalidasi). -->
+                  <span
+                    v-if="visit.report"
+                    class="block max-w-min mx-auto mt-1.5 px-2.5 py-1 rounded-md text-[9px] font-bold uppercase tracking-wider whitespace-nowrap"
+                    :class="{
+                      'bg-warning/10 text-warning-700 border border-warning/20': visit.report.validation_status === 'pending',
+                      'bg-success/10 text-success border border-success/20': visit.report.validation_status === 'valid',
+                      'bg-danger/10 text-danger border border-danger/20': visit.report.validation_status === 'invalid'
+                    }"
+                  >
+                     {{ visit.report.validation_status === 'pending' ? 'Menunggu Validasi Admin' : visit.report.validation_status === 'valid' ? 'Divalidasi Admin' : 'Ditolak Admin' }}
+                  </span>
                </td>
                <td class="py-4 px-5">
                   <div v-if="visit.report?.systolic" class="flex gap-2">
@@ -883,15 +1164,44 @@ async function confirmCancel() {
                </td>
                <td class="py-4 px-5 text-right whitespace-nowrap">
                   <!-- Aksi cepat validasi -- KHUSUS super_admin (VisitReportPolicy::validateReport),
-                       cuma muncul kalau sudah ada laporan utk divalidasi. Buka modal dengan
-                       keputusan sudah terpilih, bukan langsung submit tanpa konfirmasi. -->
+                       cuma muncul kalau sudah ada laporan utk divalidasi & MASIH pending. Buka
+                       modal dengan keputusan sudah terpilih, bukan langsung submit tanpa
+                       konfirmasi. Begitu SUDAH divalidasi (valid/invalid), tombol centang/x
+                       diganti "..." (temuan lapangan: centang/x yang tetap ada setelah
+                       divalidasi terlihat seperti belum ada keputusan). -->
                   <template v-if="isSuperAdmin && visit.report">
-                     <button @click="quickValidate(visit, true)" title="Tandai Valid" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-success hover:border-success transition-colors p-2 rounded-xl shadow-sm mr-2">
-                        <LucideCheck class="w-4 h-4" />
-                     </button>
-                     <button @click="quickValidate(visit, false)" title="Tandai Tidak Valid" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-danger hover:border-danger transition-colors p-2 rounded-xl shadow-sm mr-2">
-                        <LucideX class="w-4 h-4" />
-                     </button>
+                     <template v-if="visit.report.validation_status === 'pending'">
+                        <button @click="quickValidate(visit, true)" title="Tandai Valid" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-success hover:border-success transition-colors p-2 rounded-xl shadow-sm mr-2">
+                           <LucideCheck class="w-4 h-4" />
+                        </button>
+                        <button @click="quickValidate(visit, false)" title="Tandai Tidak Valid" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-danger hover:border-danger transition-colors p-2 rounded-xl shadow-sm mr-2">
+                           <LucideX class="w-4 h-4" />
+                        </button>
+                     </template>
+                     <div v-else class="visit-actions-dropdown relative inline-block mr-2">
+                        <button @click="openActionsForVisitId = openActionsForVisitId === visit.id ? null : visit.id" title="Aksi Validasi" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-primary hover:border-primary transition-colors p-2 rounded-xl shadow-sm">
+                           <LucideEllipsis class="w-4 h-4" />
+                        </button>
+                        <Transition
+                          enter-active-class="transition duration-150 ease-out"
+                          enter-from-class="transform scale-95 opacity-0"
+                          enter-to-class="transform scale-100 opacity-100"
+                          leave-active-class="transition duration-100 ease-in"
+                          leave-from-class="transform scale-100 opacity-100"
+                          leave-to-class="transform scale-95 opacity-0"
+                        >
+                           <div v-if="openActionsForVisitId === visit.id" class="absolute right-0 mt-1 w-52 bg-white rounded-xl shadow-lg border border-slate-100 z-20 overflow-hidden text-left">
+                              <button
+                                :disabled="isRevertingValidation"
+                                @click="revertValidation(visit)"
+                                class="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-warning-700 hover:bg-warning/10 transition-colors disabled:opacity-50"
+                              >
+                                 <LucideRotateCcw class="w-4 h-4" />
+                                 Batalkan Validasi
+                              </button>
+                           </div>
+                        </Transition>
+                     </div>
                   </template>
                   <button @click="viewVisit(visit)" title="Lihat Detail" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-primary hover:border-primary transition-colors p-2 rounded-xl shadow-sm mr-2">
                      <LucideEye class="w-4 h-4" />
@@ -902,10 +1212,16 @@ async function confirmCancel() {
                   <button v-if="canCancelVisitNow(visit)" @click="requestCancel(visit)" title="Batalkan Penugasan" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-danger hover:border-danger transition-colors p-2 rounded-xl shadow-sm">
                      <LucideCircleX class="w-4 h-4" />
                   </button>
+                  <!-- Tugaskan Ulang -- KHUSUS admin_puskesmas/pj_prolanis, cuma untuk kunjungan
+                       yang DIBATALKAN (lihat catatan canReassignVisit() di script kenapa 'diulang'
+                       sengaja tidak diikutkan). -->
+                  <button v-if="canReassignVisit(visit)" @click="requestReassign(visit)" title="Tugaskan Ulang Kunjungan Ini" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-primary hover:border-primary transition-colors p-2 rounded-xl shadow-sm ml-2">
+                     <LucideRefreshCw class="w-4 h-4" />
+                  </button>
                </td>
             </tr>
             <tr v-if="!isInitialLoading && !visitsError && visitsList.length === 0">
-               <td colspan="6" class="py-12 text-center">
+               <td :colspan="isSuperAdmin ? 7 : 6" class="py-12 text-center">
                  <div class="flex flex-col items-center justify-center text-slate-400">
                     <LucideCalendarX class="w-10 h-10 mb-3 text-slate-300" />
                     <p class="font-medium">Tidak ada data penugasan kunjungan.</p>
@@ -1026,6 +1342,11 @@ async function confirmCancel() {
                             <span class="text-sm font-semibold text-slate-800 block truncate">{{ p.nama }}</span>
                          </AppTooltip>
                          <span class="text-[11px] text-slate-500">{{ p.kel_desa_raw || '—' }}, {{ p.kecamatan_raw || '—' }}</span>
+                         <!-- Terakhir dikunjungi (temuan lapangan) -- supaya admin_puskesmas/
+                              pj_prolanis tidak menugaskan ulang pasien yang baru saja
+                              dikunjungi tanpa sadar. Kosong (tidak tampil) kalau belum pernah
+                              ada laporan kunjungan sama sekali untuk pasien ini. -->
+                         <span v-if="lastVisitLabel(p.id)" class="text-[11px] text-slate-400 italic block truncate">{{ lastVisitLabel(p.id) }}</span>
                       </div>
                       <span
                          class="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md shrink-0"
@@ -1337,6 +1658,77 @@ async function confirmCancel() {
        </div>
     </div>
 
+    <!-- Modal Validasi Massal -- KHUSUS super_admin (temuan lapangan, UX validasi banyak laporan
+         sekaligus). Daftar nama + preview kecil per pasien terpilih supaya super_admin yakin
+         betul siapa saja yang akan ikut divalidasi sebelum konfirmasi. -->
+    <div v-if="showBulkValidateModal" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+       <div class="bg-white rounded-3xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+          <div class="border-b border-slate-100 px-6 py-4 flex items-center justify-between shrink-0">
+             <h3 class="font-bold text-accent text-lg flex items-center gap-2">
+               <LucideCheckCheck class="w-5 h-5 text-primary" />
+               Validasi {{ selectedReportIds.length }} Laporan Sekaligus
+             </h3>
+             <button @click="showBulkValidateModal = false" class="text-slate-400 hover:text-slate-600 p-1">
+                <LucideX class="w-5 h-5" />
+             </button>
+          </div>
+
+          <div class="p-6 space-y-5 overflow-y-auto">
+             <p v-if="bulkValidateError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ bulkValidateError }}</p>
+
+             <div>
+                <label class="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">Laporan yang akan divalidasi</label>
+                <div class="border border-slate-100 rounded-xl divide-y divide-slate-100 max-h-56 overflow-y-auto">
+                   <div v-for="visit in selectedVisitsPreview" :key="visit.id" class="flex items-center gap-3 p-3">
+                      <img v-if="visit.report?.photo_url" :src="visit.report.photo_url" class="w-10 h-10 rounded-lg object-cover shrink-0 border border-slate-100" />
+                      <div v-else class="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 text-slate-300">
+                         <LucideImageOff class="w-4 h-4" />
+                      </div>
+                      <div class="min-w-0">
+                         <p class="text-sm font-bold text-slate-800 truncate">{{ visit.patient?.nama ?? 'Pasien tidak diketahui' }}</p>
+                         <p class="text-[11px] text-slate-500">{{ petugasLabel(visit) }} {{ petugasName(visit) }} &bull; {{ visit.scheduled_date }}</p>
+                      </div>
+                   </div>
+                </div>
+             </div>
+
+             <div>
+                <label class="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">Keputusan Validasi (berlaku untuk semua)</label>
+                <div class="flex gap-4">
+                  <label class="flex-1 cursor-pointer">
+                    <input type="radio" v-model="bulkValidateForm.is_valid" :value="true" class="peer sr-only" />
+                    <div class="w-full py-3 px-4 rounded-xl border-2 border-slate-200 text-center text-sm font-bold text-slate-500 peer-checked:border-success peer-checked:bg-success/10 peer-checked:text-success transition-all flex items-center justify-center gap-2 shadow-sm">
+                      <LucideCheckCircle class="w-5 h-5" />
+                      Valid
+                    </div>
+                  </label>
+                  <label class="flex-1 cursor-pointer">
+                    <input type="radio" v-model="bulkValidateForm.is_valid" :value="false" class="peer sr-only" />
+                    <div class="w-full py-3 px-4 rounded-xl border-2 border-slate-200 text-center text-sm font-bold text-slate-500 peer-checked:border-danger peer-checked:bg-danger/10 peer-checked:text-danger transition-all flex items-center justify-center gap-2 shadow-sm">
+                      <LucideXCircle class="w-5 h-5" />
+                      Tidak Valid
+                    </div>
+                  </label>
+                </div>
+             </div>
+
+             <div>
+                <label class="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">Catatan (Opsional, berlaku untuk semua)</label>
+                <textarea v-model="bulkValidateForm.note" rows="3" placeholder="Tambahkan alasan mengapa tidak valid, atau catatan lainnya..." class="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-none bg-slate-50 hover:bg-white transition-colors"></textarea>
+             </div>
+          </div>
+
+          <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
+             <button @click="showBulkValidateModal = false" class="py-2.5 px-5 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors">Batal</button>
+             <button @click="submitBulkValidate" class="py-2.5 px-6 rounded-xl font-bold text-white bg-primary hover:bg-primary-600 transition-all flex items-center gap-2 shadow-sm disabled:opacity-50 active:scale-[0.98]" :disabled="isBulkValidating">
+                <LucideLoader2 v-if="isBulkValidating" class="w-5 h-5 animate-spin" />
+                <LucideSave v-else class="w-5 h-5" />
+                {{ isBulkValidating ? 'Menyimpan...' : `Validasi ${selectedReportIds.length} Laporan` }}
+             </button>
+          </div>
+       </div>
+    </div>
+
     <!-- Validation Modal untuk Super Admin -->
     <div v-if="showValidationModal && selectedVisit" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
        <div class="bg-white rounded-3xl shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
@@ -1438,6 +1830,55 @@ async function confirmCancel() {
           >
             <LucideLoader2 v-if="isCancelling" class="w-4 h-4 animate-spin" />
             Ya, Batalkan Penugasan
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tugaskan Ulang Kunjungan -- KHUSUS admin_puskesmas/pj_prolanis, untuk kunjungan yang
+         SUDAH DIBATALKAN (lihat catatan canReassignVisit() di script). Petugas & prioritas
+         dipakai apa adanya dari kunjungan lama, cuma tanggal baru yang diminta. -->
+    <div
+      v-if="showReassignModal && visitToReassign"
+      class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
+    >
+      <div class="bg-white rounded-3xl shadow-xl w-full max-w-sm max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+        <div class="p-6 overflow-y-auto">
+          <div class="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-4">
+            <LucideRefreshCw class="w-7 h-7" />
+          </div>
+          <h3 class="font-bold text-accent text-lg mb-1">Tugaskan Ulang Kunjungan?</h3>
+          <p class="text-sm text-slate-500 leading-relaxed mb-4">
+            Penugasan baru untuk <span class="font-bold text-slate-700">{{ visitToReassign.patient?.nama }}</span>
+            akan dibuat dengan petugas yang sama,
+            <span class="font-bold text-slate-700">{{ petugasName(visitToReassign) }}</span> ({{ petugasLabel(visitToReassign) }}),
+            di tanggal baru yang Anda pilih di bawah.
+          </p>
+          <label class="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-1.5">Tanggal Kunjungan Baru</label>
+          <input
+            v-model="reassignDate"
+            type="date"
+            :min="new Date().toISOString().slice(0, 10)"
+            class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none"
+          />
+          <p v-if="reassignError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2 mt-4">
+            {{ reassignError }}
+          </p>
+        </div>
+        <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
+          <button
+            @click="showReassignModal = false"
+            class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors"
+          >
+            Batal
+          </button>
+          <button
+            @click="confirmReassign"
+            :disabled="isReassigning || !reassignDate"
+            class="py-2.5 px-6 rounded-xl font-bold text-white bg-primary hover:bg-primary-600 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <LucideLoader2 v-if="isReassigning" class="w-4 h-4 animate-spin" />
+            Ya, Tugaskan Ulang
           </button>
         </div>
       </div>

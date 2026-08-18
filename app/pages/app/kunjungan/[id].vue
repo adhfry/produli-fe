@@ -342,6 +342,24 @@ let stream: MediaStream | null = null;
 const nativeVideoWidth = ref(0);
 const nativeVideoHeight = ref(0);
 
+// Preload logo sekali di awal (bukan per-jepret) -- canvas drawImage butuh <img> yang statusnya
+// SUDAH loaded, kalau baru mulai load saat jepret pertama, resiko race (gambar belum siap) atau
+// harus bikin downloadCapturedPhoto() jadi async penuh. Nama pasien awalan sudah dikonfirmasi
+// petugas login lewat authStore, jadi tidak perlu fetch tambahan.
+const authStore = useAuthStore();
+const logoImg = ref<HTMLImageElement | null>(null);
+onMounted(() => {
+  const img = new Image();
+  img.onload = () => { logoImg.value = img; };
+  img.src = "/logo/logo-no-text.png";
+});
+
+// Gambar statis hasil komposit watermark, ditampilkan di kartu review sesudah capture --
+// menggantikan overlay HTML/CSS live (jam berdetik, map interaktif) yang sebelumnya dipasang
+// di atas <img> foto polos (temuan lapangan: "bukan UI lagi tapi gambar"). null selama kamera
+// masih live (modal fullscreen yang tampil, bukan kartu review).
+const reviewImageUrl = ref<string | null>(null);
+
 const captureAreaRatio = computed(() =>
   nativeVideoWidth.value && nativeVideoHeight.value
     ? `${nativeVideoWidth.value} / ${nativeVideoHeight.value}`
@@ -360,12 +378,13 @@ const startCamera = async () => {
     // width+aspectRatio (BUKAN width+height sama-sama ideal 1920) -- constraint lama memaksa
     // browser memilih resolusi sensor mendekati PERSEGI (1920x1920), padahal tampilan di layar
     // (object-cover, container fixed inset-0) terlihat potret proporsional cuma karena di-crop
-    // CSS. captureFrame() sendiri jujur (tidak resize/crop apapun) meng-copy buffer native itu
-    // apa adanya -- jadi foto tersimpan ikut jadi kotak walau yang terlihat di modal live potret.
-    // aspectRatio 9/16 secara eksplisit minta framing potret yang jujur, mengikuti orientasi
-    // layar HP sungguhan.
+    // CSS. aspectRatio ideal 3/4 (BUKAN 9/16 lagi -- temuan lapangan "ngezoom banget": 9/16
+    // terlalu ekstrem dibanding rasio native sensor kebanyakan HP, walau ideal cuma hint/tidak
+    // selalu dihormati device, hint yang lebih dekat rasio wajar tetap membantu). captureFrame()
+    // TETAP jujur -- tidak resize sembarangan, cuma crop WYSIWYG mengikuti kotak video 3:4 yang
+    // benar-benar dirender (lihat komentar di template modal kamera).
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment", width: { ideal: 1080 }, aspectRatio: { ideal: 9 / 16 } },
+      video: { facingMode: "environment", width: { ideal: 1080 }, aspectRatio: { ideal: 3 / 4 } },
       audio: false,
     });
     if (videoRef.value) {
@@ -396,11 +415,213 @@ const takePicture = () => {
   }, 1000);
 };
 
-// Foto YANG DISUBMIT adalah frame mentah dari kamera, BUKAN hasil komposit html2canvas
-// (kartu lokasi/cuaca/peta di layar cuma overlay CSS, tidak pernah dibakar ke pixel foto) --
-// backend sudah punya watermark resminya sendiri (WatermarkGenerator, Layer 4: nama kader +
-// timestamp + koordinat dibakar server-side sebelum foto disimpan ke S3/MinIO). Kalau overlay
-// di sini ikut dibakar juga, hasilnya watermark dobel.
+// Alamat lengkap ditampilkan APA ADANYA (bukan dipotong "…" lagi, temuan lapangan) -- bungkus
+// per kata ke baris baru selama masih muat lebar kolom teks, canvas tidak punya word-wrap
+// bawaan seperti CSS.
+function wrapCanvasText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [""];
+  const lines: string[] = [];
+  let current = words[0]!;
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i]!;
+    const candidate = `${current} ${word}`;
+    if (ctx.measureText(candidate).width > maxWidth) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  lines.push(current);
+  return lines;
+}
+
+function roundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Komposit watermark dipakai BERSAMA untuk 2 tujuan (dibangun sekali per jepretan, bukan
+// dobel): (1) kartu review di halaman (reviewImageUrl) -- gambar statis beku persis momen
+// jepretan, BUKAN overlay HTML/CSS live yang jamnya terus berdetik seperti sebelumnya
+// (temuan lapangan: "bukan UI lagi tapi gambar"); (2) auto-download (bonus verifikasi).
+// TIDAK PERNAH dipakai untuk form.value.photoUrl (file yang disubmit ke backend) -- itu tetap
+// frame mentah polos, watermark resmi dibakar server-side (WatermarkGenerator), supaya tidak
+// dobel watermark.
+function buildWatermarkComposite(sourceCanvas: HTMLCanvasElement): HTMLCanvasElement {
+  const out = document.createElement("canvas");
+  out.width = sourceCanvas.width;
+  out.height = sourceCanvas.height;
+  const ctx = out.getContext("2d")!;
+  ctx.drawImage(sourceCanvas, 0, 0);
+
+  const p = patient.value;
+  const pad = Math.round(out.width * 0.035);
+  const radius = Math.round(out.width * 0.025);
+
+  // Badge logo+"PRODULI" pojok kiri atas -- sama seperti overlay live, sekarang pakai logo
+  // ASLI (bukan cuma teks) yang di-preload onMounted.
+  const badgeFont = Math.max(11, Math.round(out.width / 42));
+  const badgeIconSize = badgeFont * 1.6;
+  ctx.font = `bold ${badgeFont}px sans-serif`;
+  const badgeText = "PRODULI";
+  const badgeTextWidth = ctx.measureText(badgeText).width;
+  const badgePadX = badgeFont * 0.7;
+  const hasLogo = !!logoImg.value;
+  const badgeW = badgePadX + (hasLogo ? badgeIconSize + badgePadX * 0.6 : 0) + badgeTextWidth + badgePadX;
+  const badgeH = badgeFont * 2.2;
+  ctx.fillStyle = "#ffffff";
+  roundedRectPath(ctx, pad, pad, badgeW, badgeH, radius * 0.5);
+  ctx.fill();
+  let badgeCursorX = pad + badgePadX;
+  if (hasLogo && logoImg.value) {
+    ctx.drawImage(logoImg.value, badgeCursorX, pad + (badgeH - badgeIconSize) / 2, badgeIconSize, badgeIconSize);
+    badgeCursorX += badgeIconSize + badgePadX * 0.6;
+  }
+  ctx.fillStyle = "#0d9488";
+  ctx.textBaseline = "middle";
+  ctx.fillText(badgeText, badgeCursorX, pad + badgeH / 2);
+
+  // Kumpulkan baris info dulu (jumlahnya variabel -- pendamping cuma muncul kalau ada yang
+  // dicentang hadir di checklist, attendeeKaderIds) supaya tinggi kartu bisa dihitung pas.
+  const namaPetugas = authStore.user?.name || "-";
+  const namaPendamping = plannedCompanions.value
+    .filter((c) => isAttendeeChecked(c.kader_id))
+    .map((c) => c.nama)
+    .join(", ");
+
+  const bodyLines: { text: string; bold?: boolean; muted?: boolean }[] = [
+    { text: `${dateNow.value} · ${timeNow.value} WIB`, bold: true },
+    { text: `Petugas: ${namaPetugas}` },
+  ];
+  if (namaPendamping) bodyLines.push({ text: `Pendamping: ${namaPendamping}` });
+  bodyLines.push({ text: `Pasien: ${p?.nama ?? "-"}` });
+  if (weather.value.temp !== null || weather.value.wind !== null) {
+    bodyLines.push({
+      text: `${weather.value.temp !== null ? weather.value.temp + "°C" : "-"}   ${weather.value.wind !== null ? weather.value.wind + " km/j" : "-"}`,
+      muted: true,
+    });
+  }
+
+  const titleSize = Math.max(13, Math.round(out.width / 30));
+  const bodySize = Math.round(titleSize * 0.78);
+  const lineH = bodySize * 1.45;
+  const thumbSize = Math.round(out.width * 0.18);
+  const cardMargin = Math.round(out.width * 0.025);
+  const innerPad = Math.round(out.width * 0.03);
+  const gapAfterThumb = innerPad * 0.9; // gap antara peta & blok teks alamat -- temuan lapangan
+  const gapBetweenSections = innerPad * 1.1; // gap antara baris peta & baris info bawah -- idem
+  const cardW = out.width - cardMargin * 2;
+  const cardX = cardMargin;
+
+  // Alamat lengkap ditampilkan APA ADANYA (bukan dipotong "…" lagi, temuan lapangan) -- dibungkus
+  // ke berapapun baris yang dibutuhkan. Tinggi baris peta (headRowHeight) jadi mengikuti YANG
+  // LEBIH TINGGI antara thumbnail peta dan blok teks lokasi/alamat/koordinat (bisa saja alamat
+  // panjang butuh 3-4 baris, lebih tinggi dari thumbnail 18% lebar itu sendiri).
+  ctx.font = `${bodySize}px sans-serif`;
+  const textX = cardX + innerPad + thumbSize + gapAfterThumb;
+  const textAreaW = cardX + cardW - innerPad - textX;
+  const addressLines = wrapCanvasText(ctx, form.value.fullAddress || "-", textAreaW);
+  const headTextHeight = titleSize * 1.35 + addressLines.length * (bodySize * 1.4) + bodySize * 1.4;
+  const headRowHeight = Math.max(thumbSize, headTextHeight);
+
+  const cardH = Math.round(innerPad * 1.3 + headRowHeight + gapBetweenSections + lineH * bodyLines.length + innerPad * 0.5);
+  const cardY = out.height - cardH - cardMargin;
+
+  ctx.fillStyle = "rgba(15, 23, 42, 0.68)";
+  roundedRectPath(ctx, cardX, cardY, cardW, cardH, radius);
+  ctx.fill();
+
+  // Thumbnail peta, sudut membulat -- diambil langsung dari canvas WebGL MapLibre
+  // (#maplibre-mini) yang MASIH hidup di modal kamera saat fungsi ini dipanggil (captureFrame()
+  // manggil sebelum stopCamera()/unmount, Vue baru bongkar DOM-nya di microtask berikutnya).
+  // Marker MapLibre TIDAK ikut ter-drawImage (itu elemen DOM overlay terpisah, bukan bagian
+  // raster canvas) -- makanya titik lokasi digambar manual di tengah thumbnail (peta selalu
+  // di-center ke koordinat user, jadi tengah = posisi user, persis).
+  const thumbX = cardX + innerPad;
+  const thumbY = cardY + innerPad * 0.7;
+  const mapCanvas = document.querySelector<HTMLCanvasElement>("#maplibre-mini canvas");
+  ctx.save();
+  roundedRectPath(ctx, thumbX, thumbY, thumbSize, thumbSize, radius * 0.7);
+  ctx.clip();
+  ctx.fillStyle = "#1e293b";
+  ctx.fillRect(thumbX, thumbY, thumbSize, thumbSize);
+  if (mapCanvas && mapCanvas.width > 0 && mapCanvas.height > 0) {
+    try {
+      ctx.drawImage(mapCanvas, thumbX, thumbY, thumbSize, thumbSize);
+    } catch {
+      // biarkan fallback warna solid di atas -- jangan sampai seluruh watermark gagal
+    }
+  }
+  ctx.restore();
+  // Pin lokasi (biru, sama seperti .pin-core CSS marker live) -- selalu di tengah thumbnail.
+  const pinX = thumbX + thumbSize / 2;
+  const pinY = thumbY + thumbSize / 2;
+  ctx.beginPath();
+  ctx.arc(pinX, pinY, thumbSize * 0.16, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(14, 165, 233, 0.3)";
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(pinX, pinY, thumbSize * 0.08, 0, Math.PI * 2);
+  ctx.fillStyle = "#0ea5e9";
+  ctx.fill();
+  ctx.lineWidth = Math.max(1.5, thumbSize * 0.02);
+  ctx.strokeStyle = "#ffffff";
+  ctx.stroke();
+
+  let y = thumbY;
+  ctx.textBaseline = "top";
+
+  ctx.font = `bold ${titleSize}px sans-serif`;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(locationName.value || "-", textX, y);
+  y += titleSize * 1.35;
+
+  ctx.font = `${bodySize}px sans-serif`;
+  ctx.fillStyle = "#e2e8f0";
+  for (const line of addressLines) {
+    ctx.fillText(line, textX, y);
+    y += bodySize * 1.4;
+  }
+
+  ctx.fillText(`Lat ${(form.value.lat ?? 0).toFixed(6)}  Long ${(form.value.lng ?? 0).toFixed(6)}  ±${form.value.accuracy ?? "-"}m`, textX, y);
+
+  // Baris info bawah (waktu/petugas/pendamping/pasien/cuaca) -- diberi jarak tegas dari baris
+  // peta/alamat di atasnya (gapBetweenSections), sebelumnya terlalu mepet ke peta (temuan
+  // lapangan). Pakai headRowHeight (bukan thumbSize polos) supaya tetap benar walau alamat
+  // panjang butuh lebih banyak baris daripada tinggi thumbnail peta.
+  y = thumbY + headRowHeight + gapBetweenSections;
+  for (const line of bodyLines) {
+    ctx.font = line.bold ? `bold ${bodySize}px sans-serif` : `${bodySize}px sans-serif`;
+    ctx.fillStyle = line.muted ? "#cbd5e1" : "#ffffff";
+    ctx.fillText(line.text, cardX + innerPad, y);
+    y += lineH;
+  }
+
+  return out;
+}
+
+function triggerImageDownload(dataUrl: string, patientName: string) {
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const safeName = (patientName || "pasien").replace(/\s+/g, "_").toLowerCase();
+  a.href = dataUrl;
+  a.download = `produli-kunjungan-${safeName}-${stamp}.jpg`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// Foto YANG DISUBMIT adalah frame mentah dari kamera (crop WYSIWYG, lihat di bawah), BUKAN
+// hasil komposit -- backend sudah punya watermark resminya sendiri (WatermarkGenerator, Layer
+// 4: nama kader + timestamp + koordinat dibakar server-side sebelum foto disimpan ke S3/MinIO).
+// Kalau komposit di sini ikut dibakar ke file yang disubmit, hasilnya watermark dobel.
 const captureFrame = () => {
   const video = videoRef.value;
   const canvas = canvasRef.value;
@@ -408,18 +629,66 @@ const captureFrame = () => {
   const vw = video.videoWidth;
   const vh = video.videoHeight;
 
-  canvas.width = vw;
-  canvas.height = vh;
+  // Crop WYSIWYG -- SEBELUMNYA canvas dipaksa ukuran vw x vh utuh (buffer mentah kamera) tanpa
+  // crop, padahal tampilan live di layar sudah di-crop CSS object-cover ke rasio viewport.
+  // Banyak device Android tidak menghormati constraint aspectRatio ideal di getUserMedia
+  // (startCamera di atas), jadi vw/vh sering kali balik jadi landscape walau layar HP potret --
+  // hasilnya foto tersimpan jadi persegi panjang landscape yang beda total dari yang terlihat
+  // kader saat menjepret ("kepotong jadi landscape" -- temuan lapangan). Replikasi PERSIS
+  // matematika object-cover di sini (crop tengah ke rasio kotak video yang benar-benar
+  // dirender di layar) supaya file yang tersimpan selalu match dengan yang terlihat kader.
+  const rect = video.getBoundingClientRect();
+  const targetRatio = rect.width / rect.height;
+  const sourceRatio = vw / vh;
+  let sx = 0, sy = 0, sw = vw, sh = vh;
+  if (sourceRatio > targetRatio) {
+    sw = vh * targetRatio;
+    sx = (vw - sw) / 2;
+  } else {
+    sh = vw / targetRatio;
+    sy = (vh - sh) / 2;
+  }
+
+  canvas.width = sw;
+  canvas.height = sh;
   const ctx = canvas.getContext("2d");
-  ctx?.drawImage(video, 0, 0, vw, vh);
+  ctx?.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+
+  // captureAreaRatio (kartu review sesudah kamera ditutup) harus ikut rasio HASIL CROP, bukan
+  // rasio buffer mentah lagi -- kalau tidak, kartu review jadi salah proporsi dibanding foto
+  // yang sesungguhnya tersimpan di form.value.photoUrl.
+  nativeVideoWidth.value = sw;
+  nativeVideoHeight.value = sh;
 
   form.value.photoUrl = canvas.toDataURL("image/jpeg", 0.9);
-  stopCamera();
 
-  // #maplibre-mini pindah kontainer DOM begitu modal kamera fullscreen (live) ditutup dan kartu
-  // review foto (statis) muncul -- initMapLibre() yang dipanggil saat GPS lock tadi mungkin sudah
-  // menyasar kontainer LAMA (di dalam modal, sekarang sudah dilepas). Panggil ulang di sini
-  // supaya mini map tetap tampil di kartu review, bukan kosong.
+  // Komposit watermark (peta #maplibre-mini HARUS diambil di sini, SEBELUM stopCamera()/unmount
+  // modal live) -- dipakai untuk kartu review (gambar statis beku, bukan overlay live lagi) dan
+  // auto-download. Best-effort: kalau gagal (mis. canvas MapLibre tainted karena tile server
+  // tidak kirim header CORS), JANGAN sampai menghentikan captureFrame() -- stopCamera() & kartu
+  // review tetap harus jalan, fallback ke foto polos tanpa watermark.
+  try {
+    const composite = buildWatermarkComposite(canvas);
+    const compositeUrl = composite.toDataURL("image/jpeg", 0.92);
+    reviewImageUrl.value = compositeUrl;
+    triggerImageDownload(compositeUrl, patient.value?.nama ?? "pasien");
+  } catch (e) {
+    console.error("Gagal membuat komposit watermark (tidak fatal, lanjut submit seperti biasa):", e);
+    reviewImageUrl.value = form.value.photoUrl;
+  }
+  stopCamera();
+};
+
+const retakePhoto = () => {
+  form.value.photoUrl = null;
+  reviewImageUrl.value = null;
+  startCamera();
+
+  // BUG SEBELUMNYA: initMapLibre('maplibre-mini', ...) di startGpsWatch() cuma jalan SEKALI
+  // (guard hasResolvedLocationDetailOnce), jadi begitu retake membuka ulang modal live -- Vue
+  // bikin container #maplibre-mini BARU -- tidak ada apapun yang menginisialisasi peta di
+  // situ, tampil blank. Panggil langsung di sini pakai koordinat yang sudah ada (tidak perlu
+  // tunggu fix GPS baru), setelah container barunya benar-benar ter-render (nextTick).
   nextTick(() => {
     if (form.value.lat !== null && form.value.lng !== null) {
       initMapLibre("maplibre-mini", form.value.lat, form.value.lng, true);
@@ -427,10 +696,14 @@ const captureFrame = () => {
   });
 };
 
-const retakePhoto = () => {
-  form.value.photoUrl = null;
-  startCamera();
-};
+// Instance PERSISTEN per slot (mini/main) -- container #maplibre-mini dibongkar-pasang Vue
+// v-if BERKALI-KALI (modal live <-> kartu review <-> modal live lagi saat retake), tiap kali
+// container lama lenyap instance MapLibre lama JADI DANGLING (masih hidup di memori, WebGL
+// context masih dipegang) kalau tidak di-remove() eksplisit -- browser punya batas jumlah
+// WebGL context bersamaan, retake berkali-kali tanpa cleanup ini bisa bikin context baru gagal
+// dibuat sama sekali (peta blank kosong, persis temuan lapangan).
+let miniMapInstance: any = null;
+let mainMapInstance: any = null;
 
 const initMapLibre = (containerId: string, lat: number, lng: number, isMini = false) => {
   const w = window as any;
@@ -451,7 +724,10 @@ const initMapLibre = (containerId: string, lat: number, lng: number, isMini = fa
     // blank. Zoom awal (14/16) sudah jauh di atasnya, tapi minZoom mengunci batas ini juga untuk
     // interactive zoom-out (scroll/pinch), sama seperti dashboard/index.vue.
     minZoom: 9,
-    interactive: !isMini,
+    // Non-interaktif untuk KEDUA slot (main & mini) -- kader/nakes cuma perlu MELIHAT titik
+    // penetapan lokasi, bukan menggeser/zoom peta (temuan lapangan: risiko tergeser tanpa
+    // sadar, koordinat yang disubmit tetap dari GPS device, bukan dari interaksi peta).
+    interactive: false,
   });
 
   const el = document.createElement("div");
@@ -459,6 +735,14 @@ const initMapLibre = (containerId: string, lat: number, lng: number, isMini = fa
   el.innerHTML = `<div class="pulse-ring"></div><div class="pin-core"></div>`;
 
   new w.maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
+
+  if (isMini) {
+    miniMapInstance?.remove();
+    miniMapInstance = map;
+  } else {
+    mainMapInstance?.remove();
+    mainMapInstance = map;
+  }
 
   return map;
 };
@@ -1088,7 +1372,7 @@ async function submitData() {
       <div class="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 transition-colors overflow-hidden">
         <div class="p-3 border-b border-slate-100 dark:border-slate-700">
           <h2 class="font-bold text-slate-800 dark:text-slate-200 text-base mb-1">Penetapan Lokasi Kunjungan</h2>
-          <p class="text-base text-slate-500 dark:text-slate-400">Peta interaktif titik koordinat Anda saat ini (beserta radius akurasi).</p>
+          <p class="text-base text-slate-500 dark:text-slate-400">Titik koordinat Anda saat ini (beserta radius akurasi).</p>
         </div>
 
         <div id="maplibre-main" class="relative w-full h-80 bg-slate-100 dark:bg-slate-800 overflow-hidden z-10">
@@ -1274,52 +1558,14 @@ async function submitData() {
           <p class="text-base font-semibold">Kamera terbuka di layar penuh</p>
         </div>
 
-        <div v-else id="capture-area" class="relative w-full rounded-2xl overflow-hidden shadow-inner bg-black flex flex-col items-center justify-center" :style="{ aspectRatio: captureAreaRatio }">
-          <img :src="form.photoUrl" class="absolute inset-0 w-full h-full object-cover" />
-
-          <!-- Overlay info -- murni tampilan referensi, TIDAK ikut dibakar ke file yang dikirim
-               (lihat catatan captureFrame di script). -->
-          <div class="absolute inset-0 flex flex-col justify-between p-3 z-10 pointer-events-none">
-            <div class="flex items-center gap-2 self-start bg-white rounded-md px-2 py-1 shadow-sm">
-              <img src="/logo/logo-no-text.png" class="w-4 h-4" />
-              <span class="text-[9px] font-black text-primary tracking-widest uppercase">PRODULI</span>
-            </div>
-
-            <div class="w-full bg-black/40 rounded-xl overflow-hidden">
-              <div class="flex gap-3 p-2">
-                <div id="maplibre-mini" class="w-16 h-16 bg-slate-800 rounded-lg shrink-0 overflow-hidden border border-white/20 relative"></div>
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-start justify-between gap-1">
-                    <p class="text-[13px] font-black text-white uppercase leading-tight line-clamp-1">{{ locationName }}</p>
-                    <span class="text-sm shrink-0">{{ countryFlag }}</span>
-                  </div>
-                  <p class="text-[11px] text-slate-200 leading-snug line-clamp-2 mt-0.5">{{ form.fullAddress }}</p>
-                  <p class="text-[11px] font-mono text-slate-300 mt-1">
-                    Lat {{ (form.lat || 0).toFixed(6) }}&nbsp;&nbsp;Long {{ (form.lng || 0).toFixed(6) }}
-                  </p>
-                </div>
-              </div>
-
-              <div class="px-2 pb-1.5 pt-1 border-t border-white/20">
-                <p class="text-[11.5px] font-bold text-white">{{ dateNow }} &middot; {{ timeNow }} WIB</p>
-                <p class="text-[11px] text-slate-300 mt-0.5">Pasien: {{ patient?.nama }}</p>
-              </div>
-
-              <div class="flex items-center justify-between px-2 py-1.5 bg-black/30 border-t border-white/20">
-                <span class="text-[11px] font-bold text-slate-200 flex items-center gap-1">
-                  <LucideThermometer class="w-3.5 h-3.5" />
-                  {{ weather.temp !== null ? weather.temp + "°C" : "-" }}
-                </span>
-                <span class="text-[11px] font-bold text-slate-200 flex items-center gap-1">
-                  <LucideWind class="w-3.5 h-3.5" />
-                  {{ weather.wind !== null ? weather.wind + " km/j" : "-" }}
-                </span>
-                <span class="text-[11px] font-bold text-slate-200 flex items-center gap-1">
-                  <LucideCrosshair class="w-3.5 h-3.5" /> &plusmn;{{ form.accuracy || "-" }} m
-                </span>
-              </div>
-            </div>
-          </div>
+        <!-- SEBELUMNYA: <img> foto polos + overlay HTML/CSS "live" di atasnya (jam terus
+             berdetik lewat dateNow/timeNow, #maplibre-mini map interaktif) -- terlihat seperti
+             "UI", bukan hasil jepretan sungguhan, temuan lapangan. Sekarang: satu gambar statis
+             hasil komposit (reviewImageUrl, dibakar sekali di captureFrame() lewat
+             buildWatermarkComposite()) -- persis representasi visual dari yang sudah tersimpan/
+             ter-download, benar-benar beku di momen jepretan, bukan re-render terus-menerus. -->
+        <div v-else id="capture-area" class="relative w-full rounded-2xl overflow-hidden shadow-inner bg-black" :style="{ aspectRatio: captureAreaRatio }">
+          <img :src="reviewImageUrl || form.photoUrl" class="absolute inset-0 w-full h-full object-cover" />
         </div>
 
         <div v-if="form.photoUrl" class="mt-4 flex gap-3">
@@ -1348,7 +1594,19 @@ async function submitData() {
             <LucideX class="w-5 h-5" />
           </button>
 
-          <video ref="videoRef" autoplay playsinline @loadedmetadata="onVideoMetadataLoaded" class="absolute inset-0 w-full h-full object-cover"></video>
+          <!-- Video dibatasi rasio potret standar 3:4 (BUKAN lagi bleed penuh layar 9:19.5+ di
+               HP modern) -- itu akar masalah "ngezoom banget": buffer kamera biasanya native
+               4:3/16:9 (landscape-ish), memaksa object-cover meng-crop ke kotak SETINGGI layar
+               penuh butuh crop ekstrem (cuma strip tengah sempit dari buffer), terasa seperti
+               zoom tele. 3:4 jauh lebih dekat rasio native sensor, crop yang dibutuhkan jauh
+               lebih ringan -- letterbox (bilah hitam) atas-bawah menggantikan crop berlebihan.
+               captureFrame() otomatis ikut rasio kotak video yang SESUNGGUHNYA dirender
+               (getBoundingClientRect()), jadi WYSIWYG tetap terjaga tanpa ubah logic crop. -->
+          <div class="absolute inset-0 flex items-center justify-center">
+            <div class="relative w-full" style="aspect-ratio: 3 / 4">
+              <video ref="videoRef" autoplay playsinline @loadedmetadata="onVideoMetadataLoaded" class="absolute inset-0 w-full h-full object-cover"></video>
+            </div>
+          </div>
           <canvas ref="canvasRef" class="hidden"></canvas>
 
           <div v-if="countdown > 0" class="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-sm">

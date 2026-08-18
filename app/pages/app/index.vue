@@ -136,9 +136,14 @@ const activeTasksCount = computed(() =>
   assignmentStore.assignments.filter((a) => ['pending', 'in_progress'].includes(a.status)).length
 )
 
+// "cancelled" TIDAK dihitung sama sekali (bukan cuma di luar "selesai") -- indikator ini
+// mengukur kinerja atas tugas yang benar-benar ditugaskan (termasuk yang sudah lewat tenggat/
+// terlambat, statusnya tetap 'pending'), bukan penugasan yang batal sebelum sempat dikerjakan
+// (temuan lapangan).
 const monthlyAssignments = computed(() => {
   const now = new Date()
   return assignmentStore.assignments.filter((a) => {
+    if (a.status === 'cancelled') return false
     const d = new Date(a.scheduled_date)
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
   })
@@ -207,19 +212,19 @@ onMounted(async () => {
 <template>
   <div>
     <!-- Header Section with dark mode toggle and scroll shrink effect -->
-    <div 
-      class="bg-white dark:bg-slate-900 shadow-sm transition-all duration-500 ease-in-out sticky top-0 z-40 origin-top"
+    <div
+      class="bg-white dark:bg-slate-900 shadow-sm transition-all duration-300 ease-in-out sticky top-0 z-40 origin-top [transform:translateZ(0)] [backface-visibility:hidden]"
       :class="isScrolled ? 'rounded-b-3xl px-5 pt-4 pb-4 mb-4' : 'rounded-b-[2.5rem] px-5 pt-8 pb-6 mb-6'"
     >
-      <div class="flex items-center justify-between transition-all duration-500 ease-in-out" :class="isScrolled ? 'mb-4' : 'mb-8'">
+      <div class="flex items-center justify-between transition-all duration-300 ease-in-out" :class="isScrolled ? 'mb-4' : 'mb-8'">
         <div>
-          <p class="font-medium text-slate-500 dark:text-slate-400 transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-[10px] mb-0 opacity-80' : 'text-sm mb-1'">{{ greeting }}</p>
-          <h1 class="font-extrabold text-accent dark:text-white transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-lg' : 'text-2xl'">{{ kaderName }}</h1>
+          <p class="font-medium text-slate-500 dark:text-slate-400 transition-all duration-300 ease-in-out" :class="isScrolled ? 'text-[10px] mb-0 opacity-80' : 'text-sm mb-1'">{{ greeting }}</p>
+          <h1 class="font-extrabold text-accent dark:text-white transition-all duration-300 ease-in-out" :class="isScrolled ? 'text-lg' : 'text-2xl'">{{ kaderName }}</h1>
         </div>
         
         <div class="flex items-center gap-3">
           <!-- Dark Mode Toggle (Disappears smoothly when scrolled) -->
-          <div class="overflow-hidden transition-all duration-500 ease-in-out" :class="isScrolled ? 'w-0 opacity-0 scale-50' : 'w-10 opacity-100 scale-100'">
+          <div class="overflow-hidden transition-all duration-300 ease-in-out" :class="isScrolled ? 'w-0 opacity-0 scale-50' : 'w-10 opacity-100 scale-100'">
              <button @click="toggleDark" class="w-10 h-10 rounded-full flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300 transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 shadow-inner">
                <Transition name="swap" mode="out-in">
                  <LucideSun v-if="colorMode.value === 'dark'" class="w-5 h-5 text-warning" />
@@ -228,57 +233,57 @@ onMounted(async () => {
              </button>
           </div>
           
-          <div class="bg-primary/10 rounded-full flex items-center justify-center border-2 border-primary/20 shadow-sm relative shrink-0 overflow-hidden transition-all duration-500 ease-in-out" :class="isScrolled ? 'w-10 h-10' : 'w-14 h-14'">
+          <div class="bg-primary/10 rounded-full flex items-center justify-center border-2 border-primary/20 shadow-sm relative shrink-0 overflow-hidden transition-all duration-300 ease-in-out" :class="isScrolled ? 'w-10 h-10' : 'w-14 h-14'">
             <img v-if="authStore.user?.avatar_url" :src="authStore.user.avatar_url" alt="Foto profil" class="w-full h-full object-cover" />
-            <span v-else class="text-primary font-black transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-sm' : 'text-xl'">{{ kaderInitials }}</span>
-            <div class="absolute bg-success rounded-full border-2 border-white dark:border-slate-900 transition-all duration-500 ease-in-out" :class="isScrolled ? 'w-2.5 h-2.5 -top-0.5 -right-0.5' : 'w-3.5 h-3.5 top-0 right-0'"></div>
+            <span v-else class="text-primary font-black transition-all duration-300 ease-in-out" :class="isScrolled ? 'text-sm' : 'text-xl'">{{ kaderInitials }}</span>
+            <div class="absolute bg-success rounded-full border-2 border-white dark:border-slate-900 transition-all duration-300 ease-in-out" :class="isScrolled ? 'w-2.5 h-2.5 -top-0.5 -right-0.5' : 'w-3.5 h-3.5 top-0 right-0'"></div>
           </div>
         </div>
       </div>
       
       <!-- Date & Location -->
-      <div class="flex items-center justify-between px-1 transition-all duration-500 ease-in-out" :class="isScrolled ? 'mb-3' : 'mb-6'">
+      <div class="flex items-center justify-between px-1 transition-all duration-300 ease-in-out" :class="isScrolled ? 'mb-3' : 'mb-6'">
         <div class="flex items-center gap-2">
-          <LucideClock class="text-primary transition-all duration-500 ease-in-out" :class="isScrolled ? 'w-3 h-3' : 'w-4 h-4'" />
+          <LucideClock class="text-primary transition-all duration-300 ease-in-out" :class="isScrolled ? 'w-3 h-3' : 'w-4 h-4'" />
           <div>
-            <p class="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-[8px] leading-tight' : 'text-[10px]'">Waktu Aktif</p>
-            <p class="font-bold text-slate-700 dark:text-slate-200 transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-[10px] leading-tight' : 'text-xs'">{{ currentTime }} <span class="font-medium text-slate-500 dark:text-slate-400">WIB</span></p>
+            <p class="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider transition-all duration-300 ease-in-out" :class="isScrolled ? 'text-[8px] leading-tight' : 'text-[10px]'">Waktu Aktif</p>
+            <p class="font-bold text-slate-700 dark:text-slate-200 transition-all duration-300 ease-in-out" :class="isScrolled ? 'text-[10px] leading-tight' : 'text-xs'">{{ currentTime }} <span class="font-medium text-slate-500 dark:text-slate-400">WIB</span></p>
           </div>
         </div>
-        <div class="w-px bg-slate-200 dark:bg-slate-700 transition-all duration-500 ease-in-out" :class="isScrolled ? 'h-5' : 'h-8'"></div>
+        <div class="w-px bg-slate-200 dark:bg-slate-700 transition-all duration-300 ease-in-out" :class="isScrolled ? 'h-5' : 'h-8'"></div>
         <div class="flex items-center gap-2">
-          <LucideMapPin class="text-primary transition-all duration-500 ease-in-out" :class="isScrolled ? 'w-3 h-3' : 'w-4 h-4'" />
+          <LucideMapPin class="text-primary transition-all duration-300 ease-in-out" :class="isScrolled ? 'w-3 h-3' : 'w-4 h-4'" />
           <div>
-            <p class="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-[8px] leading-tight' : 'text-[10px]'">Lokasi Aktif</p>
-            <p class="font-bold text-slate-700 dark:text-slate-200 transition-all duration-500 ease-in-out line-clamp-1" :class="isScrolled ? 'text-[10px] leading-tight max-w-[120px]' : 'text-xs max-w-[160px]'">{{ activeLocation }}</p>
+            <p class="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider transition-all duration-300 ease-in-out" :class="isScrolled ? 'text-[8px] leading-tight' : 'text-[10px]'">Lokasi Aktif</p>
+            <p class="font-bold text-slate-700 dark:text-slate-200 transition-all duration-300 ease-in-out line-clamp-1" :class="isScrolled ? 'text-[10px] leading-tight max-w-[120px]' : 'text-xs max-w-[160px]'">{{ activeLocation }}</p>
           </div>
         </div>
       </div>
       
       <!-- Hero / Alert Card -->
-      <div class="bg-gradient-to-br from-primary to-primary-600 text-white relative overflow-hidden transition-all duration-500 ease-in-out transform origin-top shadow-primary/30"
+      <div class="bg-gradient-to-br from-primary to-primary-600 text-white relative overflow-hidden transition-all duration-300 ease-in-out transform origin-top shadow-primary/30"
            :class="isScrolled ? 'rounded-[1rem] p-3 shadow-md' : 'rounded-3xl p-6 shadow-lg'">
         <!-- Decorative circles -->
         <div class="absolute -right-6 -top-6 w-24 h-24 bg-white/10 rounded-full blur-xl"></div>
         <div class="absolute -left-6 -bottom-6 w-32 h-32 bg-black/10 rounded-full blur-2xl"></div>
         
-        <div class="relative z-10 flex transition-all duration-500 ease-in-out" :class="isScrolled ? 'items-center justify-between' : 'flex-col'">
-          <div class="flex items-center gap-3 transition-all duration-500 ease-in-out" :class="isScrolled ? 'mb-0' : 'mb-4 items-start'">
-            <div class="bg-white/20 flex items-center justify-center shrink-0 backdrop-blur-sm transition-all duration-500 ease-in-out" :class="isScrolled ? 'w-8 h-8 rounded-xl' : 'w-12 h-12 rounded-2xl animate-pulse'">
-              <LucideBell class="text-white transition-all duration-500 ease-in-out" :class="isScrolled ? 'w-4 h-4' : 'w-6 h-6'" />
+        <div class="relative z-10 flex transition-all duration-300 ease-in-out" :class="isScrolled ? 'items-center justify-between' : 'flex-col'">
+          <div class="flex items-center gap-3 transition-all duration-300 ease-in-out" :class="isScrolled ? 'mb-0' : 'mb-4 items-start'">
+            <div class="bg-white/20 flex items-center justify-center shrink-0 backdrop-blur-sm transition-all duration-300 ease-in-out" :class="isScrolled ? 'w-8 h-8 rounded-xl' : 'w-12 h-12 rounded-2xl animate-pulse'">
+              <LucideBell class="text-white transition-all duration-300 ease-in-out" :class="isScrolled ? 'w-4 h-4' : 'w-6 h-6'" />
             </div>
             <div>
-              <h2 class="font-bold leading-tight transition-all duration-500 ease-in-out" :class="isScrolled ? 'text-sm' : 'text-lg mb-1'">
+              <h2 class="font-bold leading-tight transition-all duration-300 ease-in-out" :class="isScrolled ? 'text-sm' : 'text-lg mb-1'">
                 {{ activeTasksCount > 0 ? `Ada ${activeTasksCount} Tugas Aktif!` : 'Semua Tugas Selesai' }}
               </h2>
-              <div class="transition-all duration-500 ease-in-out overflow-hidden" :class="isScrolled ? 'max-h-0 opacity-0' : 'max-h-20 opacity-100'">
+              <div class="transition-all duration-300 ease-in-out overflow-hidden" :class="isScrolled ? 'max-h-0 opacity-0' : 'max-h-20 opacity-100'">
                  <p class="text-sm text-primary-100 opacity-90 leading-tight">
                    {{ activeTasksCount > 0 ? 'Kunjungan pasien Prolanis belum diselesaikan.' : 'Tidak ada kunjungan yang tertunda saat ini.' }}
                  </p>
               </div>
             </div>
           </div>
-          <NuxtLink to="/app/tugas" class="bg-white text-primary text-center font-extrabold shadow-sm active:scale-[0.98] transition-all duration-500 ease-in-out shrink-0"
+          <NuxtLink to="/app/tugas" class="bg-white text-primary text-center font-extrabold shadow-sm active:scale-[0.98] transition-all duration-300 ease-in-out shrink-0"
                     :class="isScrolled ? 'py-1.5 px-4 rounded-lg text-xs' : 'block w-full py-3 rounded-xl text-base'">
             <span v-if="isScrolled">Lihat{{ activeTasksCount > 0 ? ` (${activeTasksCount})` : '' }}</span>
             <span v-else>Lihat Tugas Sekarang</span>

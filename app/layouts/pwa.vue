@@ -12,6 +12,12 @@ useHead({
 // puskesmas tidak pernah bisa menotif kader/nakes lewat push). Reuse composable yang sama
 // dengan layouts/dashboard.vue (useNotifications.ts) supaya logic tidak dobel.
 const isNotifOpen = ref(false)
+const notifRoot = ref(null)
+const notifButton = ref(null)
+// Backdrop manual sebelumnya z-40 di bawah bottom nav (z-50) -- tap bottom nav saat dropdown
+// terbuka tidak pernah menutupnya (backdrop tidak pernah menerima klik). onClickOutside
+// mendengar di document level, tidak bergantung urutan stacking context sama sekali.
+onClickOutside(notifRoot, () => { isNotifOpen.value = false }, { ignore: [notifButton] })
 const {
   headerNotifications,
   unreadCount,
@@ -31,6 +37,12 @@ onMounted(startPolling)
 onMounted(() => {
   useFcm().registerAndSendToken()
 })
+
+// Badge merah di ikon Tugas (bottom nav) butuh data assignment tersedia di SEMUA halaman /app,
+// bukan cuma saat kader membuka /app/tugas -- layout ini mount sekali per sesi (tidak remount
+// antar-navigasi internal), jadi fetch di sini cukup.
+const assignmentStore = useAssignmentStore()
+onMounted(() => assignmentStore.fetchAll())
 </script>
 
 <template>
@@ -42,13 +54,16 @@ onMounted(() => {
       <AnnouncementInboxModal />
       <ConfirmDialog />
 
-      <!-- Top bar: cuma bel notifikasi (layout ini mobile-first, tidak ada header lengkap
-           seperti dashboard desktop) -->
-      <header class="sticky top-0 z-[45] flex items-center justify-end px-4 py-2.5 bg-slate-50/90 dark:bg-slate-900/90 backdrop-blur border-b border-slate-100 dark:border-slate-800">
-        <div class="relative">
-          <div v-if="isNotifOpen" @click="isNotifOpen = false" class="fixed inset-0 z-40 cursor-default"></div>
+      <!-- Top bar: logo+judul di kiri (sebelumnya cuma bel sendirian mengambang kanan, terlihat
+           tidak pas) + bel notifikasi di kanan, layout ini mobile-first. -->
+      <header class="sticky top-0 z-[45] flex items-center justify-between px-4 py-2.5 bg-slate-50/90 dark:bg-slate-900/90 backdrop-blur border-b border-slate-100 dark:border-slate-800">
+        <div class="flex items-center gap-2">
+          <img src="/logo/logo-no-text.png" alt="Logo PRODULI" class="w-6 h-6 object-contain" />
+          <span class="font-extrabold text-accent dark:text-white text-sm tracking-tight">PRODULI</span>
+        </div>
 
-          <button @click="isNotifOpen = !isNotifOpen" class="relative z-50 text-slate-500 hover:text-primary transition-colors w-9 h-9 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center">
+        <div ref="notifRoot" class="relative">
+          <button ref="notifButton" @click="isNotifOpen = !isNotifOpen" class="relative z-50 text-slate-500 hover:text-primary transition-colors w-9 h-9 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center">
             <LucideBell class="w-5 h-5" />
             <template v-if="unreadCount > 0">
               <span class="absolute top-2 right-2 w-2 h-2 bg-danger rounded-full animate-ping opacity-75"></span>
@@ -93,7 +108,8 @@ onMounted(() => {
                         @click.stop="openNotification(n)"
                         class="mt-2 inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"
                       >
-                        {{ n.data?.action_label || 'Lihat Detail' }} ->
+                        {{ n.data?.action_label || 'Lihat Detail' }}
+                        <LucideArrowRight class="w-3 h-3" />
                       </button>
                     </div>
                   </div>
@@ -116,7 +132,7 @@ onMounted(() => {
           <span class="text-base font-bold text-slate-400 dark:text-slate-500 group-[.text-primary]:text-primary dark:group-[.text-primary]:text-primary transition-colors">Beranda</span>
         </NuxtLink>
         <NuxtLink to="/app/tugas" class="flex flex-col items-center gap-1.5 transition-colors group relative" active-class="text-primary">
-          <div class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-danger rounded-full ring-2 ring-white dark:ring-slate-900 animate-pulse transition-colors"></div>
+          <div v-if="assignmentStore.hasUrgentTasks" class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-danger rounded-full ring-2 ring-white dark:ring-slate-900 animate-pulse transition-colors"></div>
           <LucideClipboardList class="w-6 h-6 text-slate-400 dark:text-slate-500 group-[.text-primary]:text-primary dark:group-[.text-primary]:text-primary group-[.text-primary]:fill-primary/10 transition-colors" />
           <span class="text-base font-bold text-slate-400 dark:text-slate-500 group-[.text-primary]:text-primary dark:group-[.text-primary]:text-primary transition-colors">Tugas</span>
         </NuxtLink>

@@ -15,8 +15,11 @@ export const useAssignmentStore = defineStore('assignment', () => {
   // /app/tugas & /app/kunjungan/[id].vue buat tampilkan penanda "data tersimpan (offline)".
   const loadedFromCache = ref(false)
 
-  async function fetchAll() {
-    isLoading.value = true
+  // silent=true (dipakai auto-refresh polling /app/tugas) -- tidak toggle isLoading, supaya
+  // skeleton loading tidak berkedip ulang tiap refresh berkala, daftar lama tetap tampil
+  // sampai data baru datang menimpanya.
+  async function fetchAll(silent = false) {
+    if (!silent) isLoading.value = true
     loadError.value = ''
     try {
       const api = useApi()
@@ -48,6 +51,15 @@ export const useAssignmentStore = defineStore('assignment', () => {
     return assignments.value.find((a) => a.id === id) ?? null
   }
 
+  // Dipakai bottom nav (layouts/pwa.vue) buat badge merah di ikon Tugas -- SEBELUMNYA badge itu
+  // hardcoded selalu tampil tanpa syarat apapun (bukan cuma soal tugas dibatalkan). Sekarang
+  // benar-benar mencerminkan "ada tugas hari ini yang belum dikunjungi", sama seperti definisi
+  // todayCount di /app/tugas.vue.
+  const hasUrgentTasks = computed(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    return assignments.value.some((a) => a.scheduled_date === today && ['pending', 'in_progress'].includes(a.status))
+  })
+
   // Dipanggil setelah POST /visit-reports berhasil -- assignment berubah status jadi 'completed'
   // di backend, sinkronkan cache lokal supaya /app/tugas tidak perlu refetch penuh.
   function markCompleted(id: number) {
@@ -57,5 +69,5 @@ export const useAssignmentStore = defineStore('assignment', () => {
     }
   }
 
-  return { assignments, isLoading, loadError, loadedFromCache, fetchAll, getById, markCompleted }
+  return { assignments, isLoading, loadError, loadedFromCache, fetchAll, getById, markCompleted, hasUrgentTasks }
 })
