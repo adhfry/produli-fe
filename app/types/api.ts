@@ -653,15 +653,24 @@ export interface DashboardPuskesmasRisk {
   berat: number
 }
 
-// Fase 4 (revisi Bu Kadis) -- jumlah pasien yang levelnya MEMBAIK (turun keparahan) antar 2
-// klasifikasi berurutan, dikelompokkan per puskesmas tempat pasien terdaftar SAAT INI. breakdown
-// kunci dinamis berbentuk "{level_lama}_ke_{level_baru}" (mis. "berat_ke_sedang"), bukan daftar
-// tetap -- backend menghasilkan kunci apa pun kombinasi transisi yang benar-benar terjadi.
+// Sistem scoring kinerja puskesmas (Top 5) -- App\Services\Performance\
+// PuskesmasPerformanceScoringService di backend. Skor gabungan (final_score, 0-100) dari
+// improvement_rate (50%) + risk_reduction_score (30%) + stability_rate (20%), HANYA dari
+// transisi risiko yang punya kunjungan TERVALIDASI (validation_status='valid') sebagai bukti
+// intervensi program -- bukan jumlah kunjungan mentah, bukan pasien yang kebetulan membaik.
+// Puskesmas tanpa transisi eligible sama sekali di periode filter TIDAK muncul di array ini.
 export interface DashboardPuskesmasPerformance {
+  rank: number
   puskesmas_id: number
   puskesmas_nama: string
-  total_membaik: number
-  breakdown: Record<string, number>
+  final_score: number
+  improvement_rate: number
+  risk_reduction_score: number
+  stability_rate: number
+  eligible_patients: number
+  improved_patients: number
+  validated_visits: number
+  total_improvement_points: number
 }
 
 export interface DashboardSummary {
