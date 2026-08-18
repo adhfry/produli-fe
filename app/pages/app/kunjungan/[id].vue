@@ -357,8 +357,15 @@ const onVideoMetadataLoaded = () => {
 
 const startCamera = async () => {
   try {
+    // width+aspectRatio (BUKAN width+height sama-sama ideal 1920) -- constraint lama memaksa
+    // browser memilih resolusi sensor mendekati PERSEGI (1920x1920), padahal tampilan di layar
+    // (object-cover, container fixed inset-0) terlihat potret proporsional cuma karena di-crop
+    // CSS. captureFrame() sendiri jujur (tidak resize/crop apapun) meng-copy buffer native itu
+    // apa adanya -- jadi foto tersimpan ikut jadi kotak walau yang terlihat di modal live potret.
+    // aspectRatio 9/16 secara eksplisit minta framing potret yang jujur, mengikuti orientasi
+    // layar HP sungguhan.
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1920 } },
+      video: { facingMode: "environment", width: { ideal: 1080 }, aspectRatio: { ideal: 9 / 16 } },
       audio: false,
     });
     if (videoRef.value) {
@@ -462,6 +469,93 @@ const handleOrientationChange = () => {
   orientationTimeout = setTimeout(onVideoMetadataLoaded, 300);
 };
 
+// GPS kontinu (watchPosition), BUKAN one-shot getCurrentPosition -- root cause bug "Titik GPS
+// Sudah Terlalu Lama": SEBELUMNYA GPS cuma di-fix SEKALI saat halaman dibuka lalu tidak pernah
+// direfresh sampai submit, padahal kader butuh waktu (kadang bermenit-menit) mengisi form
+// pemeriksaan klinis lengkap setelah foto diambil -- gpsCapturedAt jadi selalu basi di mata
+// GpsActiveCheck backend. form.value.lat/lng/accuracy/gpsCapturedAt sekarang terus diperbarui
+// tiap ada fix baru selama modal kamera aktif, jadi PERSIS SAAT captureFrame() dieksekusi
+// (setelah countdown), nilai yang ikut tersimpan adalah fix GPS TERSEGAR yang tersedia --
+// foto+lokasi+waktu jadi satu momen atomik (bukan lagi fix basi dari momen halaman dibuka).
+// Draft/offline (buildDraftPayload() baca form.value yang sama) otomatis ikut benar tanpa kode
+// tambahan.
+let gpsWatchId: number | null = null;
+let hasResolvedLocationDetailOnce = false;
+
+function startGpsWatch() {
+  if (!navigator.geolocation) return;
+
+  gpsWatchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      form.value.lat = lat;
+      form.value.lng = lng;
+      form.value.accuracy = Math.round(pos.coords.accuracy);
+      // pos.timestamp = waktu FIX GPS sesungguhnya (bukan Date.now() saat callback ini jalan).
+      form.value.gpsCapturedAt = new Date(pos.timestamp).toISOString();
+      isGpsValid.value = true;
+      gpsStatus.value = "Lokasi Terkunci (Radius Akurat)";
+
+      // Peta mini/utama & reverse-geocode/cuaca (Nominatim/Open-Meteo, API pihak ketiga dgn
+      // rate limit) SENGAJA cuma sekali di fix PERTAMA -- bukan tiap watchPosition tick (bisa
+      // beberapa kali per menit), supaya tidak membombardir API eksternal maupun bikin instance
+      // maplibre baru berulang kali.
+      if (hasResolvedLocationDetailOnce) return;
+      hasResolvedLocationDetailOnce = true;
+
+      setTimeout(() => {
+        initMapLibre("maplibre-main", lat, lng);
+        initMapLibre("maplibre-mini", lat, lng, true);
+      }, 300);
+
+      resolveAddressAndWeather(lat, lng);
+    },
+    () => {
+      gpsStatus.value = "Akses Lokasi Ditolak";
+      form.value.fullAddress = "Harap izinkan akses lokasi (GPS).";
+    },
+    { enableHighAccuracy: true },
+  );
+}
+
+function stopGpsWatch() {
+  if (gpsWatchId !== null && navigator.geolocation) {
+    navigator.geolocation.clearWatch(gpsWatchId);
+    gpsWatchId = null;
+  }
+}
+
+async function resolveAddressAndWeather(lat: number, lng: number) {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
+    );
+    const data = await res.json();
+    form.value.fullAddress = data.display_name || "Gagal memuat nama jalan";
+
+    const addr = data.address || {};
+    countryFlag.value = getFlagEmoji(addr.country_code);
+    locationName.value =
+      [addr.village || addr.suburb || addr.city_district || addr.town, addr.city || addr.county]
+        .filter(Boolean)
+        .join(", ") || (data.display_name?.split(",")[0] ?? "-");
+  } catch (e) {
+    form.value.fullAddress = "Alamat tidak dapat diurai";
+  }
+
+  try {
+    const wRes = await fetch(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true`,
+    );
+    const wData = await wRes.json();
+    weather.value.temp = Math.round(wData.current_weather.temperature);
+    weather.value.wind = Math.round(wData.current_weather.windspeed);
+  } catch (e) {
+    // Diamkan saja -- kartu tetap tampil, cuma baris cuaca jadi "-".
+  }
+}
+
 // Kamera & GPS BUKAN onMounted polos lagi -- keduanya menyentuh elemen (#videoRef, #maplibre-main)
 // yang cuma ada di cabang v-else (canSubmit) template, sementara assignment (dari
 // assignmentStore.fetchAll(), fetch async terpisah) belum tentu selesai di mount pertama.
@@ -485,62 +579,7 @@ watch(canSubmit, async (value) => {
   }, 1000);
 
   setTimeout(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
-          form.value.lat = lat;
-          form.value.lng = lng;
-          form.value.accuracy = Math.round(pos.coords.accuracy);
-          // pos.timestamp = waktu FIX GPS sesungguhnya (bukan Date.now() saat kode ini jalan) --
-          // GpsActiveCheck (Layer 1) menolak titik yang sudah "basi" (docs/planning/02 §3),
-          // jadi timestamp ini harus jujur mencerminkan kapan device dapat fix, bukan kapan
-          // form ini dirender.
-          form.value.gpsCapturedAt = new Date(pos.timestamp).toISOString();
-          isGpsValid.value = true;
-          gpsStatus.value = "Lokasi Terkunci (Radius Akurat)";
-
-          setTimeout(() => {
-            initMapLibre("maplibre-main", lat, lng);
-            initMapLibre("maplibre-mini", lat, lng, true);
-          }, 300);
-
-          try {
-            const res = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
-            );
-            const data = await res.json();
-            form.value.fullAddress = data.display_name || "Gagal memuat nama jalan";
-
-            const addr = data.address || {};
-            countryFlag.value = getFlagEmoji(addr.country_code);
-            locationName.value =
-              [addr.village || addr.suburb || addr.city_district || addr.town, addr.city || addr.county]
-                .filter(Boolean)
-                .join(", ") || (data.display_name?.split(",")[0] ?? "-");
-          } catch (e) {
-            form.value.fullAddress = "Alamat tidak dapat diurai";
-          }
-
-          try {
-            const wRes = await fetch(
-              `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true`,
-            );
-            const wData = await wRes.json();
-            weather.value.temp = Math.round(wData.current_weather.temperature);
-            weather.value.wind = Math.round(wData.current_weather.windspeed);
-          } catch (e) {
-            // Diamkan saja -- kartu tetap tampil, cuma baris cuaca jadi "-".
-          }
-        },
-        () => {
-          gpsStatus.value = "Akses Lokasi Ditolak";
-          form.value.fullAddress = "Harap izinkan akses lokasi (GPS).";
-        },
-        { enableHighAccuracy: true },
-      );
-    }
+    startGpsWatch();
   }, 500);
 }, { immediate: true });
 
@@ -548,6 +587,7 @@ onUnmounted(() => {
   window.removeEventListener("resize", handleOrientationChange);
   if (timer) clearInterval(timer);
   stopCamera();
+  stopGpsWatch();
 });
 
 function dataUrlToBlob(dataUrl: string): Blob {
