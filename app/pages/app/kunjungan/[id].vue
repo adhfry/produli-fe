@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, PatientFieldUpdates, VisitReportPemeriksaan, VisitAssignment } from '~/types/api'
+import type { ApiSuccessEnvelope, Desa, Kecamatan, PatientFieldUpdates, VisitReportPemeriksaan, VisitAssignment } from '~/types/api'
 import type { VisitReportDraft, VisitReportDraftPayload } from '~/composables/useOfflineQueue'
 
 definePageMeta({
@@ -194,11 +194,72 @@ const updateForm = ref<PatientFieldUpdates>({});
 // untuk kasih tahu field ini akan ikut disertakan saat laporan dikirim.
 const hasPatientUpdate = ref(false);
 
-const openUpdateModal = () => {
+// Typeahead Kel/Desa & Kecamatan (bukan input teks bebas) -- nilai yang diajukan HARUS persis
+// sama (huruf besar/kecil) dengan tabel kecamatan/desa kanonik, supaya WilayahResolver di
+// backend tidak perlu fuzzy-match teks bebas untuk usulan dari kader/nakes lewat laporan ini.
+const kecamatanList = ref<Kecamatan[]>([]);
+const desaList = ref<Desa[]>([]);
+const selectedKecamatanId = ref<number | null>(null);
+const isLoadingDesa = ref(false);
+
+async function loadKecamatanList() {
+  try {
+    const api = useApi();
+    const res = (await api("/kecamatan")) as ApiSuccessEnvelope<Kecamatan[]>;
+    kecamatanList.value = res.data;
+  } catch {
+    // Non-fatal -- dropdown kecamatan cuma kosong, field lain tetap bisa diisi.
+  }
+}
+onMounted(loadKecamatanList);
+
+async function loadDesaList(kecamatanId: number) {
+  isLoadingDesa.value = true;
+  try {
+    const api = useApi();
+    const res = (await api("/desa", { query: { kecamatan_id: kecamatanId } })) as ApiSuccessEnvelope<Desa[]>;
+    desaList.value = res.data;
+  } catch {
+    desaList.value = [];
+  } finally {
+    isLoadingDesa.value = false;
+  }
+}
+
+// Dipicu HANYA saat user benar-benar mengganti kecamatan lewat dropdown (bukan pre-select
+// terprogram di openUpdateModal) -- kel_desa lama dikosongkan karena sudah tidak relevan
+// dengan kecamatan baru.
+function onKecamatanChange(event: Event) {
+  const kecamatanId = Number((event.target as HTMLSelectElement).value) || null;
+  selectedKecamatanId.value = kecamatanId;
+  const kecamatan = kecamatanList.value.find((k) => k.id === kecamatanId);
+  updateForm.value.kecamatan = kecamatan?.nama ?? "";
+  updateForm.value.kel_desa = "";
+  desaList.value = [];
+  if (kecamatanId !== null) loadDesaList(kecamatanId);
+}
+
+const openUpdateModal = async () => {
   updateForm.value = {
     alamat: patient.value?.alamat ?? "",
     phone: patient.value?.phone ?? "",
   };
+  // Coba pre-select kecamatan & kel/desa kalau nilai existing (teks bebas dari SiLAKES)
+  // kebetulan cocok dengan nama kanonik -- kalau tidak cocok, biarkan kosong (kader pilih
+  // ulang lewat dropdown, otomatis jadi kanonik).
+  const matchedKecamatan = kecamatanList.value.find(
+    (k) => k.nama.toLowerCase() === (patient.value?.kecamatan_raw ?? "").trim().toLowerCase()
+  );
+  selectedKecamatanId.value = matchedKecamatan?.id ?? null;
+  updateForm.value.kecamatan = matchedKecamatan?.nama ?? "";
+  desaList.value = [];
+  if (matchedKecamatan) {
+    await loadDesaList(matchedKecamatan.id);
+    const matchedDesa = desaList.value.find(
+      (d) => d.nama.toLowerCase() === (patient.value?.kel_desa_raw ?? "").trim().toLowerCase()
+    );
+    updateForm.value.kel_desa = matchedDesa?.nama ?? "";
+  }
   showUpdateModal.value = true;
 };
 
@@ -1518,12 +1579,18 @@ async function submitData() {
                 <input type="text" v-model="updateForm.rt_rw" placeholder="002/003" class="w-full bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none" />
               </div>
               <div>
-                <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Kel/Desa</label>
-                <input type="text" v-model="updateForm.kel_desa" placeholder="Pamolokan" class="w-full bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none" />
+                <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Kecamatan</label>
+                <select :value="selectedKecamatanId ?? ''" @change="onKecamatanChange" class="w-full bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none appearance-none">
+                  <option value="">Pilih kecamatan...</option>
+                  <option v-for="k in kecamatanList" :key="k.id" :value="k.id">{{ k.nama }}</option>
+                </select>
               </div>
               <div>
-                <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Kecamatan</label>
-                <input type="text" v-model="updateForm.kecamatan" placeholder="Kota Sumenep" class="w-full bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none" />
+                <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Kel/Desa</label>
+                <select v-model="updateForm.kel_desa" :disabled="!selectedKecamatanId" class="w-full bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none appearance-none disabled:opacity-50">
+                  <option value="">{{ selectedKecamatanId ? (isLoadingDesa ? 'Memuat...' : 'Pilih kel/desa...') : 'Pilih kecamatan dulu' }}</option>
+                  <option v-for="d in desaList" :key="d.id" :value="d.nama">{{ d.nama }}</option>
+                </select>
               </div>
             </div>
             <div>

@@ -131,6 +131,13 @@ export interface Kecamatan {
   kode_kemendagri: string | null
 }
 
+export interface Desa {
+  id: number
+  kecamatan_id: number
+  nama: string
+  kode_kemendagri: string | null
+}
+
 export interface Patient {
   id: number
   external_patient_id: number
@@ -219,6 +226,7 @@ export interface RiskClassificationHistory {
   level: PatientRiskLevel
   criteria_snapshot: RiskCriteriaSnapshotItem[]
   computed_at: string | null
+  assessment_date: string | null
   is_latest: boolean
   early_detection_flag: boolean
   early_detection_reason: EarlyDetectionReason[] | null
