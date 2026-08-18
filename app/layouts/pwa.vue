@@ -44,7 +44,7 @@ onMounted(() => {
 
       <!-- Top bar: cuma bel notifikasi (layout ini mobile-first, tidak ada header lengkap
            seperti dashboard desktop) -->
-      <header class="sticky top-0 z-40 flex items-center justify-end px-4 py-2.5 bg-slate-50/90 dark:bg-slate-900/90 backdrop-blur border-b border-slate-100 dark:border-slate-800">
+      <header class="sticky top-0 z-[45] flex items-center justify-end px-4 py-2.5 bg-slate-50/90 dark:bg-slate-900/90 backdrop-blur border-b border-slate-100 dark:border-slate-800">
         <div class="relative">
           <div v-if="isNotifOpen" @click="isNotifOpen = false" class="fixed inset-0 z-40 cursor-default"></div>
 
@@ -88,6 +88,13 @@ onMounted(() => {
                         <p class="text-[10px] font-bold text-slate-400">{{ new Date(n.created_at).toLocaleString('id-ID') }}</p>
                         <span v-if="!n.is_read" class="text-[10px] font-bold" :class="isDangerNotif(n) ? 'text-danger' : 'text-primary'">{{ isDangerNotif(n) ? 'Perlu Tindakan' : 'Baru' }}</span>
                       </div>
+                      <button
+                        v-if="n.data?.action_url"
+                        @click.stop="openNotification(n)"
+                        class="mt-2 inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"
+                      >
+                        {{ n.data?.action_label || 'Lihat Detail' }} ->
+                      </button>
                     </div>
                   </div>
                 </div>

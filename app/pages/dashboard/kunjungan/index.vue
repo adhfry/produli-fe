@@ -714,6 +714,7 @@ const submitValidation = async () => {
             <option value="completed">Selesai</option>
             <option value="terlambat">Terlambat</option>
             <option value="diulang">Diulang (Laporan Ditolak)</option>
+            <option value="cancelled">Dibatalkan</option>
           </select>
           <select v-model="filterPuskesmas" class="flex-1 md:w-48 py-2.5 px-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white">
             <option value="">Semua Puskesmas</option>

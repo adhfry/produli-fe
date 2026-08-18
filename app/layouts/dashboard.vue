@@ -378,8 +378,8 @@ onMounted(loadSyncStatus)
     </aside>
 
     <!-- Main Content Wrapper -->
-    <div 
-      class="flex-1 flex flex-col min-h-screen transition-all duration-300"
+    <div
+      class="flex-1 flex flex-col min-h-screen min-w-0 transition-all duration-300"
       :class="isSidebarOpen ? 'ml-0 md:ml-64' : 'ml-0'"
     >
       <!-- Header -->
@@ -494,6 +494,13 @@ onMounted(loadSyncStatus)
                                 <p class="text-[10px] font-bold text-slate-400">{{ new Date(n.created_at).toLocaleString('id-ID') }}</p>
                                 <span v-if="!n.is_read" class="text-[10px] font-bold" :class="isDangerNotif(n) ? 'text-danger' : 'text-primary'">{{ isDangerNotif(n) ? 'Perlu Tindakan' : 'Baru' }}</span>
                              </div>
+                             <button
+                               v-if="n.data?.action_url"
+                               @click.stop="openNotification(n)"
+                               class="mt-2 inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"
+                             >
+                               {{ n.data?.action_label || 'Lihat Detail' }} ->
+                             </button>
                           </div>
                        </div>
                     </div>
@@ -585,7 +592,7 @@ onMounted(loadSyncStatus)
       </header>
 
       <!-- Page Content -->
-      <main class="flex-1 p-4 sm:p-6 lg:p-8 bg-surface theme-transition">
+      <main class="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 bg-surface theme-transition">
         <slot />
       </main>
     </div>

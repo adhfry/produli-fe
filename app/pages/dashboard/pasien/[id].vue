@@ -247,7 +247,7 @@ const trendChartOptions = {
 
 // --- Riwayat Kunjungan -- kader ATAU tenaga_kesehatan, mutually exclusive per assignment. ----
 const VISIT_STATUS_LABELS: Record<string, string> = {
-  pending: 'Terjadwal', in_progress: 'Sedang Berlangsung', completed: 'Selesai', cancelled: 'Dibatalkan'
+  pending: 'Terjadwal', in_progress: 'Sedang Berlangsung', completed: 'Selesai Dikunjungi', cancelled: 'Dibatalkan'
 }
 const VISIT_STATUS_COLORS: Record<string, string> = {
   pending: 'bg-info/10 text-info border border-info/20',
@@ -826,6 +826,12 @@ async function triggerSyncFromHistory() {
                     <span v-if="visit.report.kepatuhan_obat">Kepatuhan Obat: <b>{{ KEPATUHAN_OBAT_LABELS[visit.report.kepatuhan_obat] ?? visit.report.kepatuhan_obat }}</b></span>
                     <span v-if="visit.report.sisa_obat">Sisa Obat: <b>{{ SISA_OBAT_LABELS[visit.report.sisa_obat] ?? visit.report.sisa_obat }}</b></span>
                   </div>
+                </div>
+                <div class="mt-3 pt-3 border-t border-slate-50 flex justify-end">
+                  <NuxtLink :to="`/dashboard/kunjungan/${visit.id}`" class="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline">
+                    Lihat Detail Kunjungan
+                    <LucideArrowRight class="w-3.5 h-3.5" />
+                  </NuxtLink>
                 </div>
               </div>
             </div>
