@@ -30,8 +30,14 @@ git fetch origin
 git checkout dev
 git pull origin dev
 
-echo "== 2/3: npm ci + build =="
-npm ci
+echo "== 2/3: npm install + build =="
+# BUKAN "npm ci" -- beberapa dependency opsional transitif (mis. yjs/@tiptap/y-tiptap dari
+# fitur editor rich-text pengumuman) diresolve npm berbeda antara platform (Windows tempat
+# lockfile terakhir di-generate vs Linux VPS ini), jadi "npm ci" (wajib cocok PERSIS) bisa
+# gagal "Missing: X from lock file" walau package.json/package-lock.json sama-sama sudah
+# ter-commit benar. "npm install" lebih toleran -- otomatis rekonsiliasi kalau ada gap
+# platform-specific begini (ditemukan saat deploy 2026-08-18).
+npm install
 npm run build
 
 echo "== 3/3: restart proses (port $PORT, via $PROCESS_MANAGER) =="
