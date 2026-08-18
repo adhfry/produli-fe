@@ -113,6 +113,7 @@ async function setStatus(item: TenagaKesehatan, active: boolean) {
     }) as ApiSuccessEnvelope<TenagaKesehatan>
     const idx = list.value.findIndex((t) => t.id === item.id)
     if (idx !== -1) list.value[idx] = res.data
+    useToast().add({ title: active ? 'Tenaga kesehatan diaktifkan kembali' : 'Tenaga kesehatan dinonaktifkan', color: 'success' })
   } catch (e) {
     toggleStatusError.value = e instanceof ApiError ? e.message : 'Gagal mengubah status.'
   } finally {
@@ -146,6 +147,7 @@ async function save() {
     if (!isSuperAdmin.value) delete payload.puskesmas_id
     await api('/tenaga-kesehatan', { method: 'POST', body: payload })
     showAddModal.value = false
+    useToast().add({ title: 'Tenaga kesehatan berhasil didaftarkan', color: 'success' })
     await loadList()
   } catch (e) {
     if (e instanceof ApiError) {
@@ -197,6 +199,7 @@ async function saveEdit() {
     const idx = list.value.findIndex((t) => t.id === itemBeingEdited.value!.id)
     if (idx !== -1) list.value[idx] = res.data
     showEditModal.value = false
+    useToast().add({ title: 'Data tenaga kesehatan berhasil diperbarui', color: 'success' })
   } catch (e) {
     if (e instanceof ApiError) {
       editError.value = e.message
@@ -232,6 +235,7 @@ async function confirmDelete() {
     list.value = list.value.filter((t) => t.id !== itemToDelete.value!.id)
     showDeleteConfirm.value = false
     itemToDelete.value = null
+    useToast().add({ title: 'Tenaga kesehatan berhasil dihapus', color: 'success' })
   } catch (e) {
     deleteError.value = e instanceof ApiError ? e.message : 'Gagal menghapus tenaga kesehatan.'
   } finally {
@@ -262,6 +266,7 @@ async function confirmResetPassword() {
     showResetPasswordConfirm.value = false
     resetPasswordSuccess.value = res.message
     itemToReset.value = null
+    useToast().add({ title: 'Password tenaga kesehatan berhasil direset', color: 'success' })
   } catch (e) {
     resetPasswordError.value = e instanceof ApiError ? e.message : 'Gagal mereset password.'
   } finally {
@@ -335,7 +340,9 @@ async function confirmResetPassword() {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-if="isLoading">
+            <!-- Skeleton HANYA saat load pertama/belum ada data, bukan tiap refetch setelah aksi
+                 berhasil -- pola sama dgn dashboard/rujukan/index.vue. -->
+            <tr v-if="isLoading && list.length === 0">
                <td :colspan="canManage ? 4 : 3" class="py-12 text-center text-slate-400">
                   <LucideLoader2 class="w-6 h-6 mx-auto mb-2 animate-spin" />
                   Memuat data...

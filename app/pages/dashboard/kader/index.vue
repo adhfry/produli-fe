@@ -162,6 +162,7 @@ async function setKaderStatus(kader: Kader, active: boolean) {
     }) as ApiSuccessEnvelope<Kader>
     const idx = kaderList.value.findIndex((k) => k.id === kader.id)
     if (idx !== -1) kaderList.value[idx] = res.data
+    useToast().add({ title: active ? 'Kader diaktifkan kembali' : 'Kader dinonaktifkan', color: 'success' })
   } catch (e) {
     toggleStatusError.value = e instanceof ApiError ? e.message : 'Gagal mengubah status kader.'
   } finally {
@@ -195,6 +196,7 @@ async function saveKader() {
     if (!isSuperAdmin.value) delete payload.puskesmas_id
     await api('/kader', { method: 'POST', body: payload })
     showAddModal.value = false
+    useToast().add({ title: 'Kader berhasil didaftarkan', color: 'success' })
     await loadKader()
   } catch (e) {
     if (e instanceof ApiError) {
@@ -248,6 +250,7 @@ async function saveEditKader() {
     const idx = kaderList.value.findIndex((k) => k.id === kaderBeingEdited.value!.id)
     if (idx !== -1) kaderList.value[idx] = res.data
     showEditModal.value = false
+    useToast().add({ title: 'Data kader berhasil diperbarui', color: 'success' })
   } catch (e) {
     if (e instanceof ApiError) {
       editError.value = e.message
@@ -283,6 +286,7 @@ async function confirmDelete() {
     kaderList.value = kaderList.value.filter((k) => k.id !== kaderToDelete.value!.id)
     showDeleteConfirm.value = false
     kaderToDelete.value = null
+    useToast().add({ title: 'Kader berhasil dihapus', color: 'success' })
   } catch (e) {
     deleteError.value = e instanceof ApiError ? e.message : 'Gagal menghapus kader.'
   } finally {
@@ -314,6 +318,7 @@ async function confirmResetPassword() {
     showResetPasswordConfirm.value = false
     resetPasswordSuccess.value = res.message
     kaderToReset.value = null
+    useToast().add({ title: 'Password kader berhasil direset', color: 'success' })
   } catch (e) {
     resetPasswordError.value = e instanceof ApiError ? e.message : 'Gagal mereset password.'
   } finally {
@@ -394,7 +399,10 @@ async function confirmResetPassword() {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-if="isLoading">
+            <!-- isLoading && length===0 -- skeleton HANYA saat load pertama/belum ada data sama
+                 sekali, bukan setiap refetch (mis. setelah "Daftar Kader Baru" berhasil) --
+                 pola sama dgn dashboard/rujukan/index.vue. -->
+            <tr v-if="isLoading && kaderList.length === 0">
                <td :colspan="canManageKader ? 5 : 4" class="py-12 text-center text-slate-400">
                   <LucideLoader2 class="w-6 h-6 mx-auto mb-2 animate-spin" />
                   Memuat data kader...

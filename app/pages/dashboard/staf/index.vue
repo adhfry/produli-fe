@@ -215,6 +215,7 @@ async function saveStaff() {
     })) as ApiSuccessEnvelope<Staff>;
     showAddModal.value = false;
     successMessage.value = `Staf "${res.data.name}" berhasil didaftarkan sebagai ${res.data.roles.join(", ")}. Email aktivasi otomatis terkirim ke ${res.data.email}.`;
+    useToast().add({ title: "Staf berhasil didaftarkan", color: "success" });
     await loadStaffList();
   } catch (e) {
     if (e instanceof ApiError) {
@@ -265,6 +266,7 @@ async function saveEditStaff() {
     );
     if (idx !== -1) staffList.value[idx] = res.data;
     showEditModal.value = false;
+    useToast().add({ title: "Data staf berhasil diperbarui", color: "success" });
   } catch (e) {
     if (e instanceof ApiError) {
       editError.value = e.message;
@@ -302,6 +304,7 @@ async function confirmDelete() {
     );
     showDeleteConfirm.value = false;
     staffToDelete.value = null;
+    useToast().add({ title: "Staf berhasil dihapus", color: "success" });
   } catch (e) {
     deleteError.value =
       e instanceof ApiError ? e.message : "Gagal menghapus staf.";
@@ -338,6 +341,7 @@ async function confirmToggleStatus() {
     if (idx !== -1) staffList.value[idx]!.status_aktif = nextStatus;
     showStatusConfirm.value = false;
     staffToToggle.value = null;
+    useToast().add({ title: nextStatus ? "Staf diaktifkan kembali" : "Staf dinonaktifkan", color: "success" });
   } catch (e) {
     toggleStatusError.value =
       e instanceof ApiError ? e.message : "Gagal mengubah status staf.";
@@ -372,6 +376,7 @@ async function confirmResetPassword() {
     showResetPasswordConfirm.value = false;
     resetPasswordSuccessMsg.value = res.message;
     staffToReset.value = null;
+    useToast().add({ title: "Password staf berhasil direset", color: "success" });
   } catch (e) {
     resetPasswordError.value =
       e instanceof ApiError ? e.message : "Gagal mereset password.";
@@ -503,7 +508,9 @@ async function confirmResetPassword() {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-if="isLoadingStaff">
+            <!-- Skeleton HANYA saat load pertama/belum ada data, bukan tiap refetch setelah
+                 "Tambah Staf" berhasil -- pola sama dgn dashboard/rujukan/index.vue. -->
+            <tr v-if="isLoadingStaff && staffList.length === 0">
               <td
                 :colspan="canManageStaff ? 5 : 4"
                 class="py-12 text-center text-slate-400"
