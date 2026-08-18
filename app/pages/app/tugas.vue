@@ -18,6 +18,18 @@ onMounted(() => {
   loadDraftCount()
 })
 
+// Auto-refresh 30 detik -- kader/nakes sering biarkan halaman ini terbuka lama di lapangan,
+// tugas baru dari admin_puskesmas/pj_prolanis sebelumnya cuma muncul setelah reload manual.
+// Silent (tidak reset assignmentStore.isLoading ke true tiap tick) supaya daftar tidak
+// berkedip skeleton berulang -- cukup timpa assignments begitu data baru datang.
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  refreshTimer = setInterval(() => assignmentStore.fetchAll(true), 30000)
+})
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
+})
+
 // Badge jumlah laporan belum terkirim (docs/planning/10 §3) -- link ke /app/draft. SENGAJA
 // tidak menghitung draft WIP ('draft', docs/planning/14) -- badge ini "perlu perhatian karena
 // belum sampai server", bukan "ada kerja belum selesai" (itu urusan kader sendiri di halaman
@@ -47,7 +59,14 @@ const filteredTasks = computed(() => {
   if (activeTab.value === 'selesai') {
     return all.filter((a) => a.status === 'completed')
   }
+  // Tab "Semua" -- tugas yang dibatalkan (cancelled) TIDAK ditampilkan sama sekali (bukan
+  // tugas aktif, cuma bikin badge "Tugas" di bottom nav terlihat selalu ada sesuatu padahal
+  // tidak perlu ditindaklanjuti). Sisanya: yang BELUM dikunjungi (pending/in_progress)
+  // didahulukan, yang sudah dikunjungi (completed) ditaruh di bawah. Sort stabil (ES2019+),
+  // urutan asli dalam tiap kelompok tetap terjaga.
   return all
+    .filter((a) => a.status !== 'cancelled')
+    .sort((a, b) => (a.status === 'completed' ? 1 : 0) - (b.status === 'completed' ? 1 : 0))
 })
 
 // "Diulang" -- assignment.status kembali 'pending' TAPI sudah punya laporan lama berstatus
@@ -344,6 +363,21 @@ const handleTouchEnd = () => {
            </div>
 
            <div class="space-y-3">
+              <!-- Riwayat pasien sebelumnya -- temuan lapangan: sebelumnya kader/nakes cuma bisa
+                   lihat riwayat pasien SETELAH masuk ke form input kunjungan, tidak ada cara
+                   melihatnya lebih dulu buat persiapan sebelum berangkat/sebelum submit. -->
+              <NuxtLink
+                v-if="selectedTask?.patient"
+                :to="`/app/pasien/${selectedTask.patient.id}`"
+                class="w-full flex items-center justify-between p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-2xl font-bold active:bg-slate-50 dark:active:bg-slate-700 transition-colors shadow-sm"
+              >
+                 <div class="flex items-center gap-3">
+                    <LucideHistory class="w-5 h-5 text-info" />
+                    Lihat Riwayat Pasien
+                 </div>
+                 <LucideChevronRight class="w-5 h-5 opacity-70" />
+              </NuxtLink>
+
               <p v-if="!canSubmitReport && selectedTask?.role_in_assignment === 'companion'" class="text-sm font-semibold text-slate-500 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3">
                 Anda hanya mendampingi kunjungan ini &mdash; laporan diisi oleh kader utama.
               </p>

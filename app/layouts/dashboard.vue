@@ -514,7 +514,8 @@ onMounted(loadSyncStatus)
                                @click.stop="openNotification(n)"
                                class="mt-2 inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"
                              >
-                               {{ n.data?.action_label || 'Lihat Detail' }} ->
+                               {{ n.data?.action_label || 'Lihat Detail' }}
+                               <LucideArrowRight class="w-3 h-3" />
                              </button>
                           </div>
                        </div>

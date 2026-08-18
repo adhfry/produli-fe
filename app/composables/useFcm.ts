@@ -62,10 +62,23 @@ export function useFcm() {
         // Foreground: app sedang dibuka & fokus -- tampilkan toast, JANGAN andalkan browser
         // notification bawaan (itu cuma muncul kalau tab tidak fokus/background).
         onMessage(messaging, (payload) => {
-          useNotificationSound().playFcm();
           const actionUrl = payload.data?.action_url;
           const isDanger = payload.data?.severity === "danger";
           const image = payload.notification?.image;
+
+          // Rujukan pasien BARU (backend: NotifyService target admin_puskesmas/pj_prolanis DI
+          // PUSKESMAS terkait saja -- super_admin TIDAK PERNAH menerima tipe ini sama sekali,
+          // jadi tidak perlu cek role lagi di sini) -- alarm darurat sekarang bunyi lewat FCM
+          // ini, TIDAK PEDULI halaman mana pun admin/PJ sedang buka, selama app terbuka
+          // (foreground). SEBELUMNYA alarm cuma bunyi dari polling 15dtk di /dashboard/rujukan
+          // -- kelewatan total kalau admin/PJ tidak sedang standby di halaman itu (temuan
+          // lapangan). Polling di halaman rujukan TETAP jalan sebagai jaring pengaman (kalau
+          // notifikasi push gagal terkirim/izin belum diberikan), sengaja tidak dihapus.
+          if (payload.data?.type === "pasien_dirujuk") {
+            useNotificationSound().playAlarm();
+          } else {
+            useNotificationSound().playFcm();
+          }
           toast.add({
             title: payload.notification?.title ?? "Notifikasi Baru",
             description: payload.notification?.body,
