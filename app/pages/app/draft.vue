@@ -10,22 +10,24 @@ useHead({
 })
 
 const queue = useOfflineQueue()
-const drafts = ref<VisitReportDraft[]>([])
+const wipDrafts = ref<VisitReportDraft[]>([])
+const pendingDrafts = ref<VisitReportDraft[]>([])
 const isLoading = ref(true)
 
+// docs/planning/14: dua kelompok BEDA makna, sekarang juga dua STORE IndexedDB terpisah
+// (useOfflineQueue) -- 'draft' murni WIP milik user (belum pernah dicoba kirim, tidak ikut
+// sinkron otomatis), 'pending_sync'/'failed' pernah dicoba kirim tapi gagal karena jaringan
+// (ikut sinkron otomatis begitu online). Dipisah jadi dua seksi supaya kader tidak bingung mana
+// yang "menunggu koneksi" vs mana yang "masih saya kerjakan".
 async function reload() {
   isLoading.value = true
-  drafts.value = await queue.getAllDrafts()
+  ;[wipDrafts.value, pendingDrafts.value] = await Promise.all([
+    queue.getAllDrafts(),
+    queue.getPendingDrafts()
+  ])
   isLoading.value = false
 }
 onMounted(reload)
-
-// docs/planning/14: dua kelompok BEDA makna -- 'draft' murni WIP milik user (belum pernah dicoba
-// kirim, tidak ikut sinkron otomatis), 'pending_sync'/'failed' pernah dicoba kirim tapi gagal
-// karena jaringan (ikut sinkron otomatis begitu online). Dipisah jadi dua seksi supaya kader
-// tidak bingung mana yang "menunggu koneksi" vs mana yang "masih saya kerjakan".
-const wipDrafts = computed(() => drafts.value.filter((d) => d.status === 'draft'))
-const pendingDrafts = computed(() => drafts.value.filter((d) => d.status !== 'draft'))
 
 function formatSavedAt(iso: string): string {
   const date = new Date(iso)

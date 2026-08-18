@@ -685,13 +685,18 @@ function buildOnlineFormData(payload: VisitReportDraftPayload, photo: Blob): For
 
 const offlineQueue = useOfflineQueue();
 
-// docs/planning/14: draft-in-progress -- BEDA dari draft 'pending_sync' di atas (yang tercipta
-// otomatis saat submit GAGAL). Ini SENGAJA disimpan user (manual ATAU auto-save berkala) SELAGI
-// masih mengisi, supaya kerja yang sudah diketik/difoto tidak hilang kalau tab tertutup/HP
-// restart sebelum sempat menekan "Kirim Laporan". Status 'draft' TIDAK PERNAH ikut disinkron
-// otomatis (lihat useOfflineQueue.syncAllDrafts()) -- baru jadi 'pending_sync' begitu user
-// benar-benar menekan submit (lewat submitData() di atas, jalur normal).
-const showRestoreBanner = ref(false);
+// docs/planning/14: draft-in-progress -- BEDA dari entri antrean sync (yang tercipta otomatis
+// saat submit GAGAL). Ini SENGAJA disimpan user (manual ATAU auto-save berkala) SELAGI masih
+// mengisi, supaya kerja yang sudah diketik/difoto tidak hilang kalau tab tertutup/HP restart
+// sebelum sempat menekan "Kirim Laporan". Status 'draft' TIDAK PERNAH ikut disinkron otomatis
+// (lihat useOfflineQueue.syncAllDrafts()) -- baru masuk antrean sync begitu user benar-benar
+// menekan submit (lewat submitData() di atas, jalur normal).
+//
+// Revisi -- TIDAK LAGI menunggu konfirmasi user ("Pulihkan?" dua tombol) sebelum mengisi form:
+// draft WIP yang ditemukan langsung diterapkan otomatis (lihat onMounted di bawah), showRestore
+// Notice cuma strip kecil non-blocking yang bisa diabaikan/ditutup, BUKAN gerbang wajib --
+// kerja lama tidak boleh butuh 1 klik ekstra cuma untuk terlihat lagi.
+const showRestoreNotice = ref(false);
 const restorableDraft = ref<VisitReportDraft | null>(null);
 const draftSaveStatus = ref<"idle" | "saving" | "saved">("idle");
 let draftSaveDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -732,13 +737,31 @@ async function restoreDraft() {
   if (!draft) return;
   applyDraftPayloadToForm(draft.payload);
   if (draft.photo) form.value.photoUrl = await blobToDataUrl(draft.photo);
-  showRestoreBanner.value = false;
 }
 
+// Aksi kecil non-blocking ("Mulai Kosong" di strip showRestoreNotice) -- user yang memang
+// sengaja mau mulai dari nol, BUKAN gerbang wajib sebelum form bisa dipakai (form sudah terisi
+// otomatis sejak mount). Foto ikut dibuang & kamera dinyalakan ulang (retakePhoto()) supaya
+// benar-benar kosong, bukan cuma field teks yang di-reset sementara foto lama masih nempel.
 async function discardRestorableDraft() {
   if (restorableDraft.value) await offlineQueue.deleteDraft(restorableDraft.value.id);
-  showRestoreBanner.value = false;
   restorableDraft.value = null;
+  showRestoreNotice.value = false;
+  form.value.kondisi = "";
+  form.value.notes = "";
+  form.value.systolic = "";
+  form.value.diastolic = "";
+  form.value.gda = "";
+  form.value.gdp = "";
+  form.value.gd2jpp = "";
+  form.value.uric_acid = "";
+  form.value.cholesterol = "";
+  form.value.keluhan = "";
+  form.value.tindakan = [];
+  form.value.cara_rujukan = "";
+  form.value.kepatuhan_obat = "";
+  form.value.sisa_obat = "";
+  retakePhoto();
 }
 
 async function persistDraft() {
@@ -746,7 +769,7 @@ async function persistDraft() {
   draftSaveStatus.value = "saving";
   try {
     const photoBlob = form.value.photoUrl ? dataUrlToBlob(form.value.photoUrl) : null;
-    await offlineQueue.saveDraft(buildDraftPayload(), photoBlob, patient.value?.nama ?? "Pasien", "draft");
+    await offlineQueue.saveDraft(buildDraftPayload(), photoBlob, patient.value?.nama ?? "Pasien");
     draftSaveStatus.value = "saved";
   } catch {
     draftSaveStatus.value = "idle";
@@ -779,12 +802,15 @@ async function saveDraftManually() {
 }
 
 // assignmentId berasal dari route param, tersedia sinkron -- TIDAK menunggu assignment/patient
-// selesai dimuat (onMounted lain di atas yang urus itu, keduanya jalan independen).
+// selesai dimuat (onMounted lain di atas yang urus itu, keduanya jalan independen). Draft WIP
+// yang ditemukan LANGSUNG diterapkan (bukan menunggu klik "Pulihkan") -- lihat catatan di
+// showRestoreNotice.
 onMounted(async () => {
   const existing = await offlineQueue.getDraftForAssignment(assignmentId.value);
-  if (existing && existing.status === "draft") {
+  if (existing) {
     restorableDraft.value = existing;
-    showRestoreBanner.value = true;
+    await restoreDraft();
+    showRestoreNotice.value = true;
   }
 });
 
@@ -821,7 +847,7 @@ async function submitData() {
   const photoBlob = dataUrlToBlob(form.value.photoUrl!);
 
   if (!navigator.onLine) {
-    await offlineQueue.saveDraft(payload, photoBlob, patient.value?.nama ?? "Pasien", "pending_sync");
+    await offlineQueue.enqueueForSync(payload, photoBlob, patient.value?.nama ?? "Pasien");
     isSubmitting.value = false;
     useToast().add({
       title: "Tersimpan sebagai draf",
@@ -849,7 +875,7 @@ async function submitData() {
     } else {
       // Bukan ApiError = gagal di level jaringan (offline sungguhan, timeout, dst) -- simpan
       // sebagai draft alih-alih menampilkan error yang bikin kader mengulang dari nol.
-      await offlineQueue.saveDraft(payload, photoBlob, patient.value?.nama ?? "Pasien", "pending_sync");
+      await offlineQueue.enqueueForSync(payload, photoBlob, patient.value?.nama ?? "Pasien");
       useToast().add({
         title: "Tersimpan sebagai draf",
         description: "Koneksi sedang bermasalah. Laporan akan terkirim otomatis begitu koneksi kembali tersambung.",
@@ -1012,19 +1038,16 @@ async function submitData() {
     </div>
 
     <div v-else class="p-5 space-y-6">
-      <!-- docs/planning/14: draft-in-progress ditemukan (auto-save/manual sebelumnya) --
-           tawarkan pulihkan sebelum form kosong ditampilkan, supaya kerja lama tidak tertimpa
-           diam-diam begitu user mulai mengetik lagi. -->
-      <div v-if="showRestoreBanner" class="bg-info/10 border border-info/20 rounded-2xl px-4 py-3.5 flex items-start gap-3">
-        <LucideDatabaseZap class="w-5 h-5 text-info shrink-0 mt-0.5" />
-        <div class="flex-1">
-          <p class="text-base font-bold text-info">Draf tersimpan ditemukan</p>
-          <p class="text-base text-slate-600 dark:text-slate-300 font-medium leading-relaxed mt-1">Ada isian sebelumnya yang belum dikirim. Lanjutkan dari situ?</p>
-          <div class="flex gap-2 mt-3">
-            <button @click="restoreDraft" class="px-4 py-2 bg-info text-white rounded-xl font-bold text-base active:scale-[0.98] transition-transform">Pulihkan</button>
-            <button @click="discardRestorableDraft" class="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl font-bold text-base active:scale-[0.98] transition-transform">Abaikan</button>
-          </div>
-        </div>
+      <!-- docs/planning/14: draft-in-progress ditemukan (auto-save/manual sebelumnya) SUDAH
+           diterapkan otomatis ke form (lihat onMounted) -- strip ini murni info + opsi "mulai
+           kosong" non-blocking, BUKAN gerbang wajib yang menghalangi form terlihat/dipakai. -->
+      <div v-if="showRestoreNotice" class="bg-info/10 border border-info/20 rounded-2xl px-4 py-2.5 flex items-center gap-3">
+        <LucideDatabaseZap class="w-4 h-4 text-info shrink-0" />
+        <p class="flex-1 text-sm text-slate-600 dark:text-slate-300 font-medium">Draf sebelumnya dipulihkan otomatis.</p>
+        <button @click="discardRestorableDraft" class="text-sm font-bold text-info hover:underline shrink-0">Mulai Kosong</button>
+        <button @click="showRestoreNotice = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shrink-0" aria-label="Tutup pemberitahuan">
+          <LucideX class="w-4 h-4" />
+        </button>
       </div>
 
       <!-- Diulang: laporan sebelumnya ditolak Super Admin (docs/planning/02 §11) -- kader perlu
