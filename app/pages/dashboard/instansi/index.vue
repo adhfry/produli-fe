@@ -64,6 +64,10 @@ async function runGeocodeAll() {
       body: { overwrite_existing: overwriteExistingCoords.value }
     }) as ApiSuccessEnvelope<PuskesmasGeocodeAllResult>
     geocodeResult.value = res.data
+    useToast().add({
+      title: `Geocoding selesai: ${res.data.updated} puskesmas diperbarui`,
+      color: 'success'
+    })
     // Refresh daftar supaya tabel/card langsung menampilkan koordinat baru tanpa reload manual.
     await loadPuskesmasList()
   } catch (e) {
@@ -222,6 +226,7 @@ async function saveEdit() {
     const idx = puskesmasList.value.findIndex((p) => p.id === editingPuskesmas.value!.id)
     if (idx !== -1) puskesmasList.value[idx] = res.data
     closeEditModal()
+    useToast().add({ title: 'Data instansi berhasil diperbarui', color: 'success' })
   } catch (e) {
     if (e instanceof ApiError) {
       saveError.value = e.message
@@ -378,7 +383,10 @@ async function saveEdit() {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-if="isLoading">
+            <!-- Skeleton HANYA saat load pertama/belum ada data -- geocode-all (bisa ~1 menit)
+                 memicu refetch di akhir, tidak boleh mengosongkan tabel yang sedang dilihat user
+                 selama itu. Pola sama dgn dashboard/rujukan/index.vue. -->
+            <tr v-if="isLoading && puskesmasList.length === 0">
                <td colspan="6" class="py-12 text-center text-slate-400">
                   <LucideLoader2 class="w-6 h-6 mx-auto mb-2 animate-spin" />
                   Memuat data instansi...

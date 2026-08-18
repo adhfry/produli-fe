@@ -108,6 +108,7 @@ async function submit() {
     }
     await api('/announcements', { method: 'POST', body: payload })
     resetForm()
+    useToast().add({ title: 'Pengumuman berhasil diterbitkan', color: 'success' })
     await loadList()
   } catch (e) {
     if (e instanceof ApiError) {
@@ -376,7 +377,9 @@ onMounted(loadList)
     <div>
       <h2 class="text-sm font-bold uppercase tracking-widest text-slate-400 mb-3">Riwayat Pengumuman</h2>
       <p v-if="listError" class="text-xs font-semibold text-danger mb-3">{{ listError }}</p>
-      <div v-if="isLoadingList" class="flex justify-center py-8">
+      <!-- Skeleton HANYA saat load pertama/belum ada data -- bukan tiap refetch setelah
+           menerbitkan pengumuman baru. Pola sama dgn dashboard/rujukan/index.vue. -->
+      <div v-if="isLoadingList && list.length === 0" class="flex justify-center py-8">
         <LucideLoader2 class="w-5 h-5 animate-spin text-slate-300" />
       </div>
       <p v-else-if="!list.length" class="text-sm text-slate-400 text-center py-8">Belum ada pengumuman.</p>
