@@ -92,6 +92,10 @@ async function konfirmasi(row: Rujukan, status: 'dikonfirmasi' | 'dibatalkan') {
     const res = await api(`/rujukan/${row.id}/konfirmasi`, { method: 'PATCH', body: { status } }) as ApiSuccessEnvelope<Rujukan>
     const idx = rujukanList.value.findIndex((r) => r.id === row.id)
     if (idx !== -1) rujukanList.value[idx] = res.data
+    useToast().add({
+      title: status === 'dikonfirmasi' ? 'Rujukan dikonfirmasi' : 'Rujukan dibatalkan',
+      color: status === 'dikonfirmasi' ? 'success' : 'warning'
+    })
   } catch (e) {
     confirmError.value = e instanceof ApiError ? e.message : 'Gagal memperbarui status rujukan.'
   } finally {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, PatientFieldUpdates, VisitReportPemeriksaan, VisitAssignment } from '~/types/api'
+import type { ApiSuccessEnvelope, Desa, Kecamatan, PatientFieldUpdates, VisitReportPemeriksaan, VisitAssignment } from '~/types/api'
 import type { VisitReportDraft, VisitReportDraftPayload } from '~/composables/useOfflineQueue'
 
 definePageMeta({
@@ -194,11 +194,72 @@ const updateForm = ref<PatientFieldUpdates>({});
 // untuk kasih tahu field ini akan ikut disertakan saat laporan dikirim.
 const hasPatientUpdate = ref(false);
 
-const openUpdateModal = () => {
+// Typeahead Kel/Desa & Kecamatan (bukan input teks bebas) -- nilai yang diajukan HARUS persis
+// sama (huruf besar/kecil) dengan tabel kecamatan/desa kanonik, supaya WilayahResolver di
+// backend tidak perlu fuzzy-match teks bebas untuk usulan dari kader/nakes lewat laporan ini.
+const kecamatanList = ref<Kecamatan[]>([]);
+const desaList = ref<Desa[]>([]);
+const selectedKecamatanId = ref<number | null>(null);
+const isLoadingDesa = ref(false);
+
+async function loadKecamatanList() {
+  try {
+    const api = useApi();
+    const res = (await api("/kecamatan")) as ApiSuccessEnvelope<Kecamatan[]>;
+    kecamatanList.value = res.data;
+  } catch {
+    // Non-fatal -- dropdown kecamatan cuma kosong, field lain tetap bisa diisi.
+  }
+}
+onMounted(loadKecamatanList);
+
+async function loadDesaList(kecamatanId: number) {
+  isLoadingDesa.value = true;
+  try {
+    const api = useApi();
+    const res = (await api("/desa", { query: { kecamatan_id: kecamatanId } })) as ApiSuccessEnvelope<Desa[]>;
+    desaList.value = res.data;
+  } catch {
+    desaList.value = [];
+  } finally {
+    isLoadingDesa.value = false;
+  }
+}
+
+// Dipicu HANYA saat user benar-benar mengganti kecamatan lewat dropdown (bukan pre-select
+// terprogram di openUpdateModal) -- kel_desa lama dikosongkan karena sudah tidak relevan
+// dengan kecamatan baru.
+function onKecamatanChange(event: Event) {
+  const kecamatanId = Number((event.target as HTMLSelectElement).value) || null;
+  selectedKecamatanId.value = kecamatanId;
+  const kecamatan = kecamatanList.value.find((k) => k.id === kecamatanId);
+  updateForm.value.kecamatan = kecamatan?.nama ?? "";
+  updateForm.value.kel_desa = "";
+  desaList.value = [];
+  if (kecamatanId !== null) loadDesaList(kecamatanId);
+}
+
+const openUpdateModal = async () => {
   updateForm.value = {
     alamat: patient.value?.alamat ?? "",
     phone: patient.value?.phone ?? "",
   };
+  // Coba pre-select kecamatan & kel/desa kalau nilai existing (teks bebas dari SiLAKES)
+  // kebetulan cocok dengan nama kanonik -- kalau tidak cocok, biarkan kosong (kader pilih
+  // ulang lewat dropdown, otomatis jadi kanonik).
+  const matchedKecamatan = kecamatanList.value.find(
+    (k) => k.nama.toLowerCase() === (patient.value?.kecamatan_raw ?? "").trim().toLowerCase()
+  );
+  selectedKecamatanId.value = matchedKecamatan?.id ?? null;
+  updateForm.value.kecamatan = matchedKecamatan?.nama ?? "";
+  desaList.value = [];
+  if (matchedKecamatan) {
+    await loadDesaList(matchedKecamatan.id);
+    const matchedDesa = desaList.value.find(
+      (d) => d.nama.toLowerCase() === (patient.value?.kel_desa_raw ?? "").trim().toLowerCase()
+    );
+    updateForm.value.kel_desa = matchedDesa?.nama ?? "";
+  }
   showUpdateModal.value = true;
 };
 
@@ -296,8 +357,15 @@ const onVideoMetadataLoaded = () => {
 
 const startCamera = async () => {
   try {
+    // width+aspectRatio (BUKAN width+height sama-sama ideal 1920) -- constraint lama memaksa
+    // browser memilih resolusi sensor mendekati PERSEGI (1920x1920), padahal tampilan di layar
+    // (object-cover, container fixed inset-0) terlihat potret proporsional cuma karena di-crop
+    // CSS. captureFrame() sendiri jujur (tidak resize/crop apapun) meng-copy buffer native itu
+    // apa adanya -- jadi foto tersimpan ikut jadi kotak walau yang terlihat di modal live potret.
+    // aspectRatio 9/16 secara eksplisit minta framing potret yang jujur, mengikuti orientasi
+    // layar HP sungguhan.
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1920 } },
+      video: { facingMode: "environment", width: { ideal: 1080 }, aspectRatio: { ideal: 9 / 16 } },
       audio: false,
     });
     if (videoRef.value) {
@@ -401,6 +469,93 @@ const handleOrientationChange = () => {
   orientationTimeout = setTimeout(onVideoMetadataLoaded, 300);
 };
 
+// GPS kontinu (watchPosition), BUKAN one-shot getCurrentPosition -- root cause bug "Titik GPS
+// Sudah Terlalu Lama": SEBELUMNYA GPS cuma di-fix SEKALI saat halaman dibuka lalu tidak pernah
+// direfresh sampai submit, padahal kader butuh waktu (kadang bermenit-menit) mengisi form
+// pemeriksaan klinis lengkap setelah foto diambil -- gpsCapturedAt jadi selalu basi di mata
+// GpsActiveCheck backend. form.value.lat/lng/accuracy/gpsCapturedAt sekarang terus diperbarui
+// tiap ada fix baru selama modal kamera aktif, jadi PERSIS SAAT captureFrame() dieksekusi
+// (setelah countdown), nilai yang ikut tersimpan adalah fix GPS TERSEGAR yang tersedia --
+// foto+lokasi+waktu jadi satu momen atomik (bukan lagi fix basi dari momen halaman dibuka).
+// Draft/offline (buildDraftPayload() baca form.value yang sama) otomatis ikut benar tanpa kode
+// tambahan.
+let gpsWatchId: number | null = null;
+let hasResolvedLocationDetailOnce = false;
+
+function startGpsWatch() {
+  if (!navigator.geolocation) return;
+
+  gpsWatchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      form.value.lat = lat;
+      form.value.lng = lng;
+      form.value.accuracy = Math.round(pos.coords.accuracy);
+      // pos.timestamp = waktu FIX GPS sesungguhnya (bukan Date.now() saat callback ini jalan).
+      form.value.gpsCapturedAt = new Date(pos.timestamp).toISOString();
+      isGpsValid.value = true;
+      gpsStatus.value = "Lokasi Terkunci (Radius Akurat)";
+
+      // Peta mini/utama & reverse-geocode/cuaca (Nominatim/Open-Meteo, API pihak ketiga dgn
+      // rate limit) SENGAJA cuma sekali di fix PERTAMA -- bukan tiap watchPosition tick (bisa
+      // beberapa kali per menit), supaya tidak membombardir API eksternal maupun bikin instance
+      // maplibre baru berulang kali.
+      if (hasResolvedLocationDetailOnce) return;
+      hasResolvedLocationDetailOnce = true;
+
+      setTimeout(() => {
+        initMapLibre("maplibre-main", lat, lng);
+        initMapLibre("maplibre-mini", lat, lng, true);
+      }, 300);
+
+      resolveAddressAndWeather(lat, lng);
+    },
+    () => {
+      gpsStatus.value = "Akses Lokasi Ditolak";
+      form.value.fullAddress = "Harap izinkan akses lokasi (GPS).";
+    },
+    { enableHighAccuracy: true },
+  );
+}
+
+function stopGpsWatch() {
+  if (gpsWatchId !== null && navigator.geolocation) {
+    navigator.geolocation.clearWatch(gpsWatchId);
+    gpsWatchId = null;
+  }
+}
+
+async function resolveAddressAndWeather(lat: number, lng: number) {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
+    );
+    const data = await res.json();
+    form.value.fullAddress = data.display_name || "Gagal memuat nama jalan";
+
+    const addr = data.address || {};
+    countryFlag.value = getFlagEmoji(addr.country_code);
+    locationName.value =
+      [addr.village || addr.suburb || addr.city_district || addr.town, addr.city || addr.county]
+        .filter(Boolean)
+        .join(", ") || (data.display_name?.split(",")[0] ?? "-");
+  } catch (e) {
+    form.value.fullAddress = "Alamat tidak dapat diurai";
+  }
+
+  try {
+    const wRes = await fetch(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true`,
+    );
+    const wData = await wRes.json();
+    weather.value.temp = Math.round(wData.current_weather.temperature);
+    weather.value.wind = Math.round(wData.current_weather.windspeed);
+  } catch (e) {
+    // Diamkan saja -- kartu tetap tampil, cuma baris cuaca jadi "-".
+  }
+}
+
 // Kamera & GPS BUKAN onMounted polos lagi -- keduanya menyentuh elemen (#videoRef, #maplibre-main)
 // yang cuma ada di cabang v-else (canSubmit) template, sementara assignment (dari
 // assignmentStore.fetchAll(), fetch async terpisah) belum tentu selesai di mount pertama.
@@ -424,62 +579,7 @@ watch(canSubmit, async (value) => {
   }, 1000);
 
   setTimeout(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
-          form.value.lat = lat;
-          form.value.lng = lng;
-          form.value.accuracy = Math.round(pos.coords.accuracy);
-          // pos.timestamp = waktu FIX GPS sesungguhnya (bukan Date.now() saat kode ini jalan) --
-          // GpsActiveCheck (Layer 1) menolak titik yang sudah "basi" (docs/planning/02 §3),
-          // jadi timestamp ini harus jujur mencerminkan kapan device dapat fix, bukan kapan
-          // form ini dirender.
-          form.value.gpsCapturedAt = new Date(pos.timestamp).toISOString();
-          isGpsValid.value = true;
-          gpsStatus.value = "Lokasi Terkunci (Radius Akurat)";
-
-          setTimeout(() => {
-            initMapLibre("maplibre-main", lat, lng);
-            initMapLibre("maplibre-mini", lat, lng, true);
-          }, 300);
-
-          try {
-            const res = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
-            );
-            const data = await res.json();
-            form.value.fullAddress = data.display_name || "Gagal memuat nama jalan";
-
-            const addr = data.address || {};
-            countryFlag.value = getFlagEmoji(addr.country_code);
-            locationName.value =
-              [addr.village || addr.suburb || addr.city_district || addr.town, addr.city || addr.county]
-                .filter(Boolean)
-                .join(", ") || (data.display_name?.split(",")[0] ?? "-");
-          } catch (e) {
-            form.value.fullAddress = "Alamat tidak dapat diurai";
-          }
-
-          try {
-            const wRes = await fetch(
-              `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true`,
-            );
-            const wData = await wRes.json();
-            weather.value.temp = Math.round(wData.current_weather.temperature);
-            weather.value.wind = Math.round(wData.current_weather.windspeed);
-          } catch (e) {
-            // Diamkan saja -- kartu tetap tampil, cuma baris cuaca jadi "-".
-          }
-        },
-        () => {
-          gpsStatus.value = "Akses Lokasi Ditolak";
-          form.value.fullAddress = "Harap izinkan akses lokasi (GPS).";
-        },
-        { enableHighAccuracy: true },
-      );
-    }
+    startGpsWatch();
   }, 500);
 }, { immediate: true });
 
@@ -487,6 +587,7 @@ onUnmounted(() => {
   window.removeEventListener("resize", handleOrientationChange);
   if (timer) clearInterval(timer);
   stopCamera();
+  stopGpsWatch();
 });
 
 function dataUrlToBlob(dataUrl: string): Blob {
@@ -584,13 +685,18 @@ function buildOnlineFormData(payload: VisitReportDraftPayload, photo: Blob): For
 
 const offlineQueue = useOfflineQueue();
 
-// docs/planning/14: draft-in-progress -- BEDA dari draft 'pending_sync' di atas (yang tercipta
-// otomatis saat submit GAGAL). Ini SENGAJA disimpan user (manual ATAU auto-save berkala) SELAGI
-// masih mengisi, supaya kerja yang sudah diketik/difoto tidak hilang kalau tab tertutup/HP
-// restart sebelum sempat menekan "Kirim Laporan". Status 'draft' TIDAK PERNAH ikut disinkron
-// otomatis (lihat useOfflineQueue.syncAllDrafts()) -- baru jadi 'pending_sync' begitu user
-// benar-benar menekan submit (lewat submitData() di atas, jalur normal).
-const showRestoreBanner = ref(false);
+// docs/planning/14: draft-in-progress -- BEDA dari entri antrean sync (yang tercipta otomatis
+// saat submit GAGAL). Ini SENGAJA disimpan user (manual ATAU auto-save berkala) SELAGI masih
+// mengisi, supaya kerja yang sudah diketik/difoto tidak hilang kalau tab tertutup/HP restart
+// sebelum sempat menekan "Kirim Laporan". Status 'draft' TIDAK PERNAH ikut disinkron otomatis
+// (lihat useOfflineQueue.syncAllDrafts()) -- baru masuk antrean sync begitu user benar-benar
+// menekan submit (lewat submitData() di atas, jalur normal).
+//
+// Revisi -- TIDAK LAGI menunggu konfirmasi user ("Pulihkan?" dua tombol) sebelum mengisi form:
+// draft WIP yang ditemukan langsung diterapkan otomatis (lihat onMounted di bawah), showRestore
+// Notice cuma strip kecil non-blocking yang bisa diabaikan/ditutup, BUKAN gerbang wajib --
+// kerja lama tidak boleh butuh 1 klik ekstra cuma untuk terlihat lagi.
+const showRestoreNotice = ref(false);
 const restorableDraft = ref<VisitReportDraft | null>(null);
 const draftSaveStatus = ref<"idle" | "saving" | "saved">("idle");
 let draftSaveDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -631,13 +737,31 @@ async function restoreDraft() {
   if (!draft) return;
   applyDraftPayloadToForm(draft.payload);
   if (draft.photo) form.value.photoUrl = await blobToDataUrl(draft.photo);
-  showRestoreBanner.value = false;
 }
 
+// Aksi kecil non-blocking ("Mulai Kosong" di strip showRestoreNotice) -- user yang memang
+// sengaja mau mulai dari nol, BUKAN gerbang wajib sebelum form bisa dipakai (form sudah terisi
+// otomatis sejak mount). Foto ikut dibuang & kamera dinyalakan ulang (retakePhoto()) supaya
+// benar-benar kosong, bukan cuma field teks yang di-reset sementara foto lama masih nempel.
 async function discardRestorableDraft() {
   if (restorableDraft.value) await offlineQueue.deleteDraft(restorableDraft.value.id);
-  showRestoreBanner.value = false;
   restorableDraft.value = null;
+  showRestoreNotice.value = false;
+  form.value.kondisi = "";
+  form.value.notes = "";
+  form.value.systolic = "";
+  form.value.diastolic = "";
+  form.value.gda = "";
+  form.value.gdp = "";
+  form.value.gd2jpp = "";
+  form.value.uric_acid = "";
+  form.value.cholesterol = "";
+  form.value.keluhan = "";
+  form.value.tindakan = [];
+  form.value.cara_rujukan = "";
+  form.value.kepatuhan_obat = "";
+  form.value.sisa_obat = "";
+  retakePhoto();
 }
 
 async function persistDraft() {
@@ -645,7 +769,7 @@ async function persistDraft() {
   draftSaveStatus.value = "saving";
   try {
     const photoBlob = form.value.photoUrl ? dataUrlToBlob(form.value.photoUrl) : null;
-    await offlineQueue.saveDraft(buildDraftPayload(), photoBlob, patient.value?.nama ?? "Pasien", "draft");
+    await offlineQueue.saveDraft(buildDraftPayload(), photoBlob, patient.value?.nama ?? "Pasien");
     draftSaveStatus.value = "saved";
   } catch {
     draftSaveStatus.value = "idle";
@@ -678,12 +802,15 @@ async function saveDraftManually() {
 }
 
 // assignmentId berasal dari route param, tersedia sinkron -- TIDAK menunggu assignment/patient
-// selesai dimuat (onMounted lain di atas yang urus itu, keduanya jalan independen).
+// selesai dimuat (onMounted lain di atas yang urus itu, keduanya jalan independen). Draft WIP
+// yang ditemukan LANGSUNG diterapkan (bukan menunggu klik "Pulihkan") -- lihat catatan di
+// showRestoreNotice.
 onMounted(async () => {
   const existing = await offlineQueue.getDraftForAssignment(assignmentId.value);
-  if (existing && existing.status === "draft") {
+  if (existing) {
     restorableDraft.value = existing;
-    showRestoreBanner.value = true;
+    await restoreDraft();
+    showRestoreNotice.value = true;
   }
 });
 
@@ -720,7 +847,7 @@ async function submitData() {
   const photoBlob = dataUrlToBlob(form.value.photoUrl!);
 
   if (!navigator.onLine) {
-    await offlineQueue.saveDraft(payload, photoBlob, patient.value?.nama ?? "Pasien", "pending_sync");
+    await offlineQueue.enqueueForSync(payload, photoBlob, patient.value?.nama ?? "Pasien");
     isSubmitting.value = false;
     useToast().add({
       title: "Tersimpan sebagai draf",
@@ -748,7 +875,7 @@ async function submitData() {
     } else {
       // Bukan ApiError = gagal di level jaringan (offline sungguhan, timeout, dst) -- simpan
       // sebagai draft alih-alih menampilkan error yang bikin kader mengulang dari nol.
-      await offlineQueue.saveDraft(payload, photoBlob, patient.value?.nama ?? "Pasien", "pending_sync");
+      await offlineQueue.enqueueForSync(payload, photoBlob, patient.value?.nama ?? "Pasien");
       useToast().add({
         title: "Tersimpan sebagai draf",
         description: "Koneksi sedang bermasalah. Laporan akan terkirim otomatis begitu koneksi kembali tersambung.",
@@ -911,19 +1038,16 @@ async function submitData() {
     </div>
 
     <div v-else class="p-5 space-y-6">
-      <!-- docs/planning/14: draft-in-progress ditemukan (auto-save/manual sebelumnya) --
-           tawarkan pulihkan sebelum form kosong ditampilkan, supaya kerja lama tidak tertimpa
-           diam-diam begitu user mulai mengetik lagi. -->
-      <div v-if="showRestoreBanner" class="bg-info/10 border border-info/20 rounded-2xl px-4 py-3.5 flex items-start gap-3">
-        <LucideDatabaseZap class="w-5 h-5 text-info shrink-0 mt-0.5" />
-        <div class="flex-1">
-          <p class="text-base font-bold text-info">Draf tersimpan ditemukan</p>
-          <p class="text-base text-slate-600 dark:text-slate-300 font-medium leading-relaxed mt-1">Ada isian sebelumnya yang belum dikirim. Lanjutkan dari situ?</p>
-          <div class="flex gap-2 mt-3">
-            <button @click="restoreDraft" class="px-4 py-2 bg-info text-white rounded-xl font-bold text-base active:scale-[0.98] transition-transform">Pulihkan</button>
-            <button @click="discardRestorableDraft" class="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl font-bold text-base active:scale-[0.98] transition-transform">Abaikan</button>
-          </div>
-        </div>
+      <!-- docs/planning/14: draft-in-progress ditemukan (auto-save/manual sebelumnya) SUDAH
+           diterapkan otomatis ke form (lihat onMounted) -- strip ini murni info + opsi "mulai
+           kosong" non-blocking, BUKAN gerbang wajib yang menghalangi form terlihat/dipakai. -->
+      <div v-if="showRestoreNotice" class="bg-info/10 border border-info/20 rounded-2xl px-4 py-2.5 flex items-center gap-3">
+        <LucideDatabaseZap class="w-4 h-4 text-info shrink-0" />
+        <p class="flex-1 text-sm text-slate-600 dark:text-slate-300 font-medium">Draf sebelumnya dipulihkan otomatis.</p>
+        <button @click="discardRestorableDraft" class="text-sm font-bold text-info hover:underline shrink-0">Mulai Kosong</button>
+        <button @click="showRestoreNotice = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shrink-0" aria-label="Tutup pemberitahuan">
+          <LucideX class="w-4 h-4" />
+        </button>
       </div>
 
       <!-- Diulang: laporan sebelumnya ditolak Super Admin (docs/planning/02 §11) -- kader perlu
@@ -1518,12 +1642,18 @@ async function submitData() {
                 <input type="text" v-model="updateForm.rt_rw" placeholder="002/003" class="w-full bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none" />
               </div>
               <div>
-                <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Kel/Desa</label>
-                <input type="text" v-model="updateForm.kel_desa" placeholder="Pamolokan" class="w-full bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none" />
+                <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Kecamatan</label>
+                <select :value="selectedKecamatanId ?? ''" @change="onKecamatanChange" class="w-full bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none appearance-none">
+                  <option value="">Pilih kecamatan...</option>
+                  <option v-for="k in kecamatanList" :key="k.id" :value="k.id">{{ k.nama }}</option>
+                </select>
               </div>
               <div>
-                <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Kecamatan</label>
-                <input type="text" v-model="updateForm.kecamatan" placeholder="Kota Sumenep" class="w-full bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none" />
+                <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Kel/Desa</label>
+                <select v-model="updateForm.kel_desa" :disabled="!selectedKecamatanId" class="w-full bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none appearance-none disabled:opacity-50">
+                  <option value="">{{ selectedKecamatanId ? (isLoadingDesa ? 'Memuat...' : 'Pilih kel/desa...') : 'Pilih kecamatan dulu' }}</option>
+                  <option v-for="d in desaList" :key="d.id" :value="d.nama">{{ d.nama }}</option>
+                </select>
               </div>
             </div>
             <div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, AssignmentStatus, VisitAssignment, Puskesmas, VisitMonitoringResponse } from '~/types/api'
+import type { ApiSuccessEnvelope, AssignmentStatus, VisitAssignment, Puskesmas, VisitMonitoringResponse, PaginatedData } from '~/types/api'
 import flatpickr from 'flatpickr'
 import 'flatpickr/dist/flatpickr.css'
 import { Indonesian } from 'flatpickr/dist/l10n/id.js'
@@ -14,21 +14,54 @@ useHead({
 
 // GET /visit-assignments -- sudah ter-scope backend (VisitAssignmentService::scopedQuery):
 // super_admin semua, admin_puskesmas/pj_prolanis cuma puskesmasnya sendiri.
+//
+// Revisi paginasi SERVER-SIDE (sebelumnya fetchAllPages menarik SEMUA baris lewat per_page=100
+// berulang lalu filter/paginate di JS -- blok "Pagination" di UI cuma dekorasi, tidak fungsional
+// sama sekali, dan tabel "Semua"/"Selesai" bisa berat kalau datanya banyak). Sama pola dengan
+// dashboard/pasien/index.vue: search/status/puskesmas_id dikirim sebagai query param, hasil
+// pagination.total/current_page/last_page dari backend dipakai langsung.
 const visitsList = ref<VisitAssignment[]>([])
-const isLoadingVisits = ref(false)
+const totalCount = ref(0)
+const currentPage = ref(1)
+const lastPage = ref(1)
+const PER_PAGE = 20
+// isInitialLoading (skeleton penuh, cuma true di load PERTAMA) vs isRefetching (silent --
+// halaman refresh data di latar belakang tanpa mengosongkan tabel yang sedang tampil, dipakai
+// setelah aksi berhasil seperti bulk-assign/batalkan supaya tidak terasa "reload dari nol").
+const isInitialLoading = ref(true)
+const isRefetching = ref(false)
 const visitsError = ref('')
 
-async function loadVisits() {
-  isLoadingVisits.value = true
+async function loadVisits(page = currentPage.value) {
+  if (visitsList.value.length === 0) isInitialLoading.value = true
+  else isRefetching.value = true
   visitsError.value = ''
   try {
     const api = useApi()
-    visitsList.value = await fetchAllPages<VisitAssignment>((page) => api('/visit-assignments', { query: { per_page: 100, page } }))
+    const res = await api('/visit-assignments', {
+      query: {
+        per_page: PER_PAGE,
+        page,
+        ...(searchQuery.value.trim() ? { search: searchQuery.value.trim() } : {}),
+        ...(filterStatus.value ? { status: filterStatus.value } : {}),
+        ...(isSuperAdmin.value && filterPuskesmasId.value ? { puskesmas_id: filterPuskesmasId.value } : {})
+      }
+    }) as ApiSuccessEnvelope<PaginatedData<VisitAssignment>>
+    visitsList.value = res.data.items
+    totalCount.value = res.data.pagination.total
+    currentPage.value = res.data.pagination.current_page
+    lastPage.value = res.data.pagination.last_page
   } catch (e) {
     visitsError.value = e instanceof ApiError ? e.message : 'Gagal memuat data kunjungan.'
   } finally {
-    isLoadingVisits.value = false
+    isInitialLoading.value = false
+    isRefetching.value = false
   }
+}
+
+function goToPage(page: number) {
+  if (page < 1 || page > lastPage.value || page === currentPage.value || isInitialLoading.value || isRefetching.value) return
+  loadVisits(page)
 }
 // Monitoring (revisi Bu Kadis) -- summary status + breakdown per desa, endpoint TERPISAH
 // (bukan diturunkan dari visitsList di atas) karena backend menghitungnya di database (COUNT
@@ -61,13 +94,16 @@ onMounted(() => {
 
 const searchQuery = ref('')
 const filterStatus = ref('')
-const filterPuskesmas = ref('')
+// Puskesmas ID (BUKAN nama lagi) -- dikirim sebagai query param puskesmas_id ke backend
+// (VisitAssignmentController::index()), yang cuma benar-benar menghormatinya untuk super_admin
+// (DataScope::isFullAccess) -- sama persis pola PatientController. admin_puskesmas/pj_prolanis
+// sudah terkunci ke puskesmasnya sendiri lewat scopedQuery(), dropdown ini disembunyikan untuk
+// mereka (lihat template) supaya tidak menampilkan filter yang toh tidak berpengaruh apa pun.
+const filterPuskesmasId = ref<number | null>(null)
 
-// Opsi filter puskesmas -- admin_puskesmas/pj_prolanis cuma akan punya 1 opsi (puskesmasnya
-// sendiri, scoped backend, aman diturunkan dari data yang sudah dimuat). super_admin SEBELUMNYA
-// juga diturunkan dari data yang sudah dimuat -- bug: kalau assignment yang ada kebetulan cuma
-// dari 1 puskesmas (data dev/awal), opsi filter jadi cuma 1 walau se-kabupaten py 31 puskesmas.
-// Sekarang fetch daftar LENGKAP (GET /puskesmas, semua role staf boleh baca) khusus super_admin.
+// Opsi filter puskesmas -- KHUSUS super_admin (lihat catatan filterPuskesmasId di atas). Fetch
+// daftar LENGKAP (GET /puskesmas, semua role staf boleh baca) supaya tetap mencakup seluruh 31
+// puskesmas se-kabupaten, bukan cuma yang kebetulan muncul di halaman yang sedang dimuat.
 const puskesmasFullList = ref<Puskesmas[]>([])
 async function loadPuskesmasFullList() {
   if (!isSuperAdmin.value) return
@@ -79,18 +115,12 @@ async function loadPuskesmasFullList() {
     console.error('Gagal memuat daftar puskesmas', e)
   }
 }
-const puskesmasOptions = computed(() => {
-  if (isSuperAdmin.value && puskesmasFullList.value.length > 0) {
-    return [...puskesmasFullList.value].map((p) => p.nama).sort()
-  }
-  const names = new Set(visitsList.value.map((v) => v.puskesmas?.nama).filter((n): n is string => !!n))
-  return [...names].sort()
-})
+const puskesmasOptions = computed(() => [...puskesmasFullList.value].sort((a, b) => a.nama.localeCompare(b.nama)))
 
 // Deep-link dari card "Lihat Detail"/"Kunjungan Selesai" di /dashboard (docs/planning/02 §17) —
 // ?status=completed dkk pre-select filter di atas. Validasi ketat, jangan langsung pakai nilai
 // query URL apa adanya (bisa diubah manual/dibagikan).
-const VALID_STATUS_FILTERS = ['pending', 'in_progress', 'completed', 'cancelled', 'terlambat']
+const VALID_STATUS_FILTERS = ['pending', 'in_progress', 'completed', 'cancelled', 'terlambat', 'diulang']
 const route = useRoute()
 if (typeof route.query.status === 'string' && VALID_STATUS_FILTERS.includes(route.query.status)) {
   filterStatus.value = route.query.status
@@ -130,16 +160,16 @@ function getStatusLabel(visit) {
   return STATUS_LABELS[displayStatus(visit)] ?? visit.status
 }
 
-const filteredVisits = computed(() => {
-  return visitsList.value.filter(v => {
-    const q = searchQuery.value.toLowerCase()
-    const matchSearch = !q || (v.patient?.nama ?? '').toLowerCase().includes(q) || (v.kader?.name ?? '').toLowerCase().includes(q) || (v.tenaga_kesehatan?.name ?? '').toLowerCase().includes(q)
-    const matchStatus = filterStatus.value
-      ? (filterStatus.value === 'terlambat' ? isOverdue(v) : filterStatus.value === 'diulang' ? isRepeat(v) : v.status === filterStatus.value)
-      : true
-    const matchPuskesmas = filterPuskesmas.value ? v.puskesmas?.nama === filterPuskesmas.value : true
-    return matchSearch && matchStatus && matchPuskesmas
-  })
+// Filter search/status/puskesmas SEKARANG server-side (lihat loadVisits()) -- visitsList sudah
+// berisi HANYA baris hasil query terfilter+terpaginasi backend, tidak perlu disaring lagi di JS.
+// Reset ke halaman 1 begitu filter apa pun berubah (halaman 5 hasil filter lama biasanya tidak
+// nyambung sama sekali dengan hasil filter baru).
+watch(filterStatus, () => loadVisits(1))
+watch(filterPuskesmasId, () => loadVisits(1))
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+watch(searchQuery, () => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(() => loadVisits(1), 350)
 })
 
 const getStatusColor = (visit) => {
@@ -472,10 +502,17 @@ async function submitBulkAssignment() {
     for (const created of resultData.created) {
       if (created.patient?.id) assignedPatientIds.value.add(created.patient.id)
     }
-    // Semua sukses tanpa kegagalan -> tutup alur langsung. Ada yang gagal -> biarkan modal
+    // Semua sukses tanpa kegagalan -> tutup alur langsung + toast + silent refresh (penugasan
+    // baru harus langsung terlihat di tabel tanpa reload manual). Ada yang gagal -> biarkan modal
     // konfirmasi terbuka menampilkan hasil partial success supaya PJ tahu mana yang perlu ditinjau.
     if (resultData.failed.length === 0) {
       closeAssignFlow()
+      useToast().add({
+        title: resultData.created.length > 1 ? `${resultData.created.length} penugasan kunjungan berhasil dibuat` : 'Penugasan kunjungan berhasil dibuat',
+        color: 'success'
+      })
+      await loadVisits(1)
+      await loadMonitoring()
     }
   } catch (e) {
     bulkError.value = e instanceof ApiError ? e.message : 'Gagal membuat penugasan.'
@@ -530,6 +567,7 @@ const acceptReport = async () => {
     selectedVisit.value.report = res.data
     const idx = visitsList.value.findIndex((v) => v.id === selectedVisit.value.id)
     if (idx !== -1) visitsList.value[idx].report = res.data
+    useToast().add({ title: 'Laporan kunjungan diterima', color: 'success' })
   } catch (e) {
     acceptError.value = e instanceof ApiError ? e.message : 'Gagal menerima laporan.'
   } finally {
@@ -584,10 +622,58 @@ const submitValidation = async () => {
       if (!validationForm.value.is_valid) visitsList.value[idx].status = 'pending'
     }
     showValidationModal.value = false
+    useToast().add({
+      title: validationForm.value.is_valid ? 'Laporan ditandai valid' : 'Laporan ditandai tidak valid',
+      color: validationForm.value.is_valid ? 'success' : 'warning'
+    })
   } catch (e) {
     validationError.value = e instanceof ApiError ? e.message : 'Gagal menyimpan validasi.'
   } finally {
     isValidating.value = false
+  }
+}
+
+// --- Batalkan Penugasan (keputusan Kepala Dinas) -- PATCH /visit-assignments/{id}/cancel,
+// VisitAssignmentPolicy::cancel(): admin_puskesmas/pj_prolanis sepuskesmas boleh LANGSUNG, TANPA
+// approval super_admin. Replikasi dari dashboard/kunjungan/[id].vue (halaman detail) supaya aksi
+// yang sama tersedia langsung dari tabel index, bukan cuma setelah masuk ke detail dulu. ---
+const canCancelAssignment = computed(() => isPjProlanis.value || (authStore.roles ?? []).includes('admin_puskesmas'))
+function canCancelVisitNow(visit) {
+  return canCancelAssignment.value && ['pending', 'in_progress'].includes(visit.status)
+}
+
+const visitToCancel = ref(null)
+const showCancelConfirm = ref(false)
+const cancelReason = ref('')
+const isCancelling = ref(false)
+const cancelError = ref('')
+
+function requestCancel(visit) {
+  visitToCancel.value = visit
+  cancelReason.value = ''
+  cancelError.value = ''
+  showCancelConfirm.value = true
+}
+
+async function confirmCancel() {
+  if (!visitToCancel.value) return
+  isCancelling.value = true
+  cancelError.value = ''
+  try {
+    const api = useApi()
+    await api(`/visit-assignments/${visitToCancel.value.id}/cancel`, {
+      method: 'PATCH',
+      body: cancelReason.value.trim() ? { reason: cancelReason.value.trim() } : {}
+    })
+    showCancelConfirm.value = false
+    useToast().add({ title: 'Penugasan dibatalkan', color: 'success' })
+    // Silent refresh -- baris yang baru dibatalkan cukup hilang/berubah status di halaman yang
+    // sedang dilihat, tidak perlu skeleton penuh seolah halaman dimuat ulang dari awal.
+    await loadVisits(currentPage.value)
+  } catch (e) {
+    cancelError.value = e instanceof ApiError ? e.message : 'Gagal membatalkan penugasan.'
+  } finally {
+    isCancelling.value = false
   }
 }
 </script>
@@ -701,7 +787,7 @@ const submitValidation = async () => {
           <input 
             v-model="searchQuery" 
             type="text" 
-            placeholder="Cari pasien atau kader..." 
+            placeholder="Cari nama pasien, kader, atau tenaga kesehatan..."
             class="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-white"
           />
         </div>
@@ -714,10 +800,15 @@ const submitValidation = async () => {
             <option value="completed">Selesai</option>
             <option value="terlambat">Terlambat</option>
             <option value="diulang">Diulang (Laporan Ditolak)</option>
+            <option value="cancelled">Dibatalkan</option>
           </select>
-          <select v-model="filterPuskesmas" class="flex-1 md:w-48 py-2.5 px-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white">
-            <option value="">Semua Puskesmas</option>
-            <option v-for="nama in puskesmasOptions" :key="nama" :value="nama">{{ nama }}</option>
+          <!-- Cuma berpengaruh untuk super_admin (backend abaikan puskesmas_id utk role lain,
+               DataScope::isFullAccess) -- disembunyikan utk admin_puskesmas/pj_prolanis supaya
+               tidak menampilkan filter yang toh tidak mengubah apa pun (mereka sudah terkunci
+               ke puskesmasnya sendiri). -->
+          <select v-if="isSuperAdmin" v-model="filterPuskesmasId" class="flex-1 md:w-48 py-2.5 px-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white">
+            <option :value="null">Semua Puskesmas</option>
+            <option v-for="p in puskesmasOptions" :key="p.id" :value="p.id">{{ p.nama }}</option>
           </select>
         </div>
       </div>
@@ -736,7 +827,10 @@ const submitValidation = async () => {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-if="isLoadingVisits">
+            <!-- isInitialLoading = skeleton penuh (load PERTAMA saja). isRefetching (silent,
+                 setelah aksi berhasil/ganti halaman-filter) SENGAJA tidak mengosongkan tabel --
+                 baris lama tetap tampil sampai data baru datang, tidak terasa "reload dari nol". -->
+            <tr v-if="isInitialLoading">
               <td colspan="6" class="py-12 text-center text-slate-400">
                 <LucideLoader2 class="w-6 h-6 mx-auto mb-2 animate-spin" />
                 Memuat data kunjungan...
@@ -745,7 +839,7 @@ const submitValidation = async () => {
             <tr v-else-if="visitsError">
               <td colspan="6" class="py-8 text-center text-sm font-semibold text-danger">{{ visitsError }}</td>
             </tr>
-            <tr v-for="visit in filteredVisits" v-else :key="visit.id" class="hover:bg-slate-50/80 transition-colors group">
+            <tr v-for="visit in visitsList" v-else :key="visit.id" class="hover:bg-slate-50/80 transition-colors group">
                <td class="py-4 px-5">
                   <div class="flex items-center gap-3">
                      <div class="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shadow-sm shrink-0 border" :class="getRiskColor(visit.priority) + ' border-current/20'">
@@ -799,12 +893,18 @@ const submitValidation = async () => {
                         <LucideX class="w-4 h-4" />
                      </button>
                   </template>
-                  <button @click="viewVisit(visit)" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-primary hover:border-primary transition-colors p-2 rounded-xl shadow-sm mr-2">
+                  <button @click="viewVisit(visit)" title="Lihat Detail" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-primary hover:border-primary transition-colors p-2 rounded-xl shadow-sm mr-2">
                      <LucideEye class="w-4 h-4" />
+                  </button>
+                  <!-- Batalkan Penugasan (keputusan Kepala Dinas) -- admin_puskesmas/pj_prolanis
+                       sepuskesmas, cuma muncul kalau assignment masih bisa dibatalkan (pending/
+                       in_progress). Sama endpoint & modal dgn dashboard/kunjungan/[id].vue. -->
+                  <button v-if="canCancelVisitNow(visit)" @click="requestCancel(visit)" title="Batalkan Penugasan" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-danger hover:border-danger transition-colors p-2 rounded-xl shadow-sm">
+                     <LucideCircleX class="w-4 h-4" />
                   </button>
                </td>
             </tr>
-            <tr v-if="!isLoadingVisits && !visitsError && filteredVisits.length === 0">
+            <tr v-if="!isInitialLoading && !visitsError && visitsList.length === 0">
                <td colspan="6" class="py-12 text-center">
                  <div class="flex flex-col items-center justify-center text-slate-400">
                     <LucideCalendarX class="w-10 h-10 mb-3 text-slate-300" />
@@ -815,14 +915,32 @@ const submitValidation = async () => {
           </tbody>
         </table>
       </div>
-      
-      <!-- Pagination (Mock) -->
+
+      <!-- Paginasi SERVER-SIDE -- totalCount/currentPage/lastPage dari pagination hasil query
+           TERFILTER backend (bukan window klien), sama pola dgn dashboard/pasien/index.vue. -->
       <div class="p-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4 bg-slate-50/50">
-        <span class="text-sm text-slate-500">Menampilkan <b class="text-slate-700">{{ filteredVisits.length }}</b> dari <b class="text-slate-700">{{ visitsList.length }}</b> kunjungan</span>
-        <div class="flex items-center gap-1.5">
-          <button class="p-2 rounded-xl border border-slate-200 text-slate-400 bg-white cursor-not-allowed"><LucideChevronLeft class="w-4 h-4" /></button>
-          <button class="w-8 h-8 flex items-center justify-center rounded-xl bg-primary text-white text-sm font-bold shadow-sm">1</button>
-          <button class="p-2 rounded-xl border border-slate-200 text-slate-600 bg-white hover:bg-slate-100 transition-colors"><LucideChevronRight class="w-4 h-4" /></button>
+        <span class="text-sm text-slate-500">
+          Menampilkan <b class="text-slate-700">{{ visitsList.length }}</b> dari total <b class="text-slate-700">{{ totalCount }}</b> kunjungan
+          <template v-if="lastPage > 1"> (halaman {{ currentPage }} dari {{ lastPage }})</template>
+        </span>
+        <div v-if="lastPage > 1" class="flex items-center gap-1.5">
+          <button
+            type="button"
+            :disabled="currentPage <= 1 || isInitialLoading || isRefetching"
+            @click="goToPage(currentPage - 1)"
+            class="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-white hover:text-primary disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-600 transition-colors"
+          >
+            <LucideChevronLeft class="w-4 h-4" />
+          </button>
+          <span class="text-xs font-semibold text-slate-600 px-2">{{ currentPage }} / {{ lastPage }}</span>
+          <button
+            type="button"
+            :disabled="currentPage >= lastPage || isInitialLoading || isRefetching"
+            @click="goToPage(currentPage + 1)"
+            class="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-white hover:text-primary disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-600 transition-colors"
+          >
+            <LucideChevronRight class="w-4 h-4" />
+          </button>
         </div>
       </div>
     </div>
@@ -1271,6 +1389,58 @@ const submitValidation = async () => {
              </button>
           </div>
        </div>
+    </div>
+
+    <!-- Konfirmasi Batalkan Penugasan -- satu-satunya safety net (backend sengaja tidak butuh
+         approval super_admin, keputusan Kepala Dinas). Sama markup dgn dashboard/kunjungan/
+         [id].vue supaya konsisten, cuma sumber datanya visitToCancel (baris tabel), bukan
+         assignment (halaman detail). Kader/nakes bersangkutan otomatis dinotif backend. -->
+    <div
+      v-if="showCancelConfirm && visitToCancel"
+      class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
+    >
+      <div class="bg-white rounded-3xl shadow-xl w-full max-w-sm max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+        <div class="p-6 overflow-y-auto">
+          <div class="w-14 h-14 rounded-2xl bg-danger/10 text-danger flex items-center justify-center mb-4">
+            <LucideCircleX class="w-7 h-7" />
+          </div>
+          <h3 class="font-bold text-accent text-lg mb-1">Batalkan Penugasan Ini?</h3>
+          <p class="text-sm text-slate-500 leading-relaxed mb-4">
+            <span class="font-bold text-slate-700">{{ petugasName(visitToCancel) }}</span> ({{ petugasLabel(visitToCancel) }})
+            akan diberi tahu bahwa penugasan kunjungan ke
+            <span class="font-bold text-slate-700">{{ visitToCancel.patient?.nama }}</span>
+            tanggal {{ visitToCancel.scheduled_date }} dibatalkan. Tindakan ini tidak bisa
+            dibatalkan (undo) -- kalau salah batal, buat penugasan baru dari awal.
+          </p>
+          <label class="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-1.5">Alasan (opsional, disertakan di notifikasi)</label>
+          <textarea
+            v-model="cancelReason"
+            rows="3"
+            maxlength="500"
+            placeholder="Mis. salah pilih kader, typo data pasien..."
+            class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-danger focus:ring-1 focus:ring-danger/30 outline-none resize-none"
+          />
+          <p v-if="cancelError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2 mt-4">
+            {{ cancelError }}
+          </p>
+        </div>
+        <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
+          <button
+            @click="showCancelConfirm = false"
+            class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors"
+          >
+            Batal
+          </button>
+          <button
+            @click="confirmCancel"
+            :disabled="isCancelling"
+            class="py-2.5 px-6 rounded-xl font-bold text-white bg-danger hover:bg-danger/90 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <LucideLoader2 v-if="isCancelling" class="w-4 h-4 animate-spin" />
+            Ya, Batalkan Penugasan
+          </button>
+        </div>
+      </div>
     </div>
 
   </div>

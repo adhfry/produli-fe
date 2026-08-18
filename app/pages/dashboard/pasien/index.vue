@@ -468,7 +468,7 @@ function closeNikNotFoundModal() {
             type="text"
             inputmode="text"
             maxlength="16"
-            placeholder="Cari nama, no. registrasi, atau NIK (16 digit)..."
+            placeholder="Cari nama, no. registrasi, no. BPJS, atau NIK (16 digit)..."
             class="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-white"
           />
           <p v-if="/^\d+$/.test(searchQuery.trim()) && searchQuery.trim().length > 0 && searchQuery.trim().length < 16" class="absolute -bottom-5 left-1 text-[11px] font-semibold text-slate-400">

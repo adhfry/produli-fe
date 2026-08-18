@@ -18,6 +18,7 @@ import {
 
 let app: FirebaseApp | null = null;
 let messaging: Messaging | null = null;
+let activeToken: string | null = null;
 
 export function useFcm() {
   const config = useRuntimeConfig();
@@ -104,6 +105,7 @@ export function useFcm() {
         body: { token, device_label: navigator.userAgent.slice(0, 100) },
       });
 
+      activeToken = token;
       return token;
     } catch (e) {
       console.warn("[useFcm] Gagal registrasi token FCM:", e);
@@ -111,5 +113,18 @@ export function useFcm() {
     }
   }
 
-  return { isConfigured, registerAndSendToken };
+  // Dipanggil saat logout supaya device ini berhenti menerima push utk sesi yang sudah
+  // berakhir -- tanpa ini token lama tetap valid di server sampai kebetulan dirotasi.
+  async function unregisterToken(): Promise<void> {
+    if (!import.meta.client || !activeToken) return;
+    try {
+      await api("/fcm-tokens", { method: "DELETE", body: { token: activeToken } });
+    } catch (e) {
+      console.warn("[useFcm] Gagal hapus token FCM saat logout:", e);
+    } finally {
+      activeToken = null;
+    }
+  }
+
+  return { isConfigured, registerAndSendToken, unregisterToken };
 }

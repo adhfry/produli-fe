@@ -166,6 +166,10 @@ export const useAuthStore = defineStore(
     async function logout() {
       const api = useApi()
       try {
+        // Hapus token FCM device ini dulu SEBELUM access token dicabut server (endpoint
+        // /fcm-tokens butuh auth) -- mencegah device menerima push untuk sesi yang sudah
+        // berakhir & mencegah baris token lama menumpuk (lihat FcmTokenController::store()).
+        await useFcm().unregisterToken()
         await api('/auth/logout', { method: 'POST' })
       } finally {
         clearSession()

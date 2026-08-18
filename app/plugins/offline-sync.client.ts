@@ -18,8 +18,8 @@ export default defineNuxtPlugin(() => {
     isSyncing = true
     try {
       const queue = useOfflineQueue()
-      const drafts = await queue.getAllDrafts()
-      if (drafts.some((d) => d.status === 'pending_sync')) {
+      const pending = await queue.getPendingDrafts()
+      if (pending.some((d) => d.status === 'pending_sync')) {
         await queue.syncAllDrafts()
       }
     } catch {

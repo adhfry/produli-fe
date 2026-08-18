@@ -25,7 +25,7 @@ onMounted(() => {
 const offlineQueue = useOfflineQueue()
 const draftCount = ref(0)
 async function loadDraftCount() {
-  draftCount.value = (await offlineQueue.getAllDrafts()).filter((d) => d.status !== 'draft').length
+  draftCount.value = (await offlineQueue.getPendingDrafts()).length
 }
 
 const activeTab = ref('semua')

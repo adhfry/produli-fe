@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, Kader, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem, TenagaKesehatan, RiskClassificationHistory, RiskCriteriaSnapshotItem, VisitAssignment, PatientRiskLevel, LabResult } from '~/types/api'
+import type { ApiSuccessEnvelope, Desa, Kader, Kecamatan, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem, TenagaKesehatan, RiskClassificationHistory, RiskCriteriaSnapshotItem, VisitAssignment, PatientRiskLevel, LabResult } from '~/types/api'
 import { Line } from 'vue-chartjs'
 import { Chart as ChartJS, Title, Tooltip, Legend, LineElement, CategoryScale, LinearScale, PointElement } from 'chart.js'
 
@@ -191,7 +191,7 @@ const trendChartData = computed(() => {
   // biasa. Dibedakan lewat cincin merah tebal + radius lebih besar, BUKAN warna isi (yang tetap
   // ikut level seperti biasa), supaya tetap jelas beda dari titik 'berat' sungguhan.
   return {
-    labels: rows.map((r) => formatCriteriaDate(r.computed_at)),
+    labels: rows.map((r) => formatCriteriaDate(r.assessment_date ?? r.computed_at)),
     datasets: [{
       label: 'Tingkat Risiko',
       data: rows.map((r) => SEVERITY_ORDER.indexOf(r.level)),
@@ -247,7 +247,7 @@ const trendChartOptions = {
 
 // --- Riwayat Kunjungan -- kader ATAU tenaga_kesehatan, mutually exclusive per assignment. ----
 const VISIT_STATUS_LABELS: Record<string, string> = {
-  pending: 'Terjadwal', in_progress: 'Sedang Berlangsung', completed: 'Selesai', cancelled: 'Dibatalkan'
+  pending: 'Terjadwal', in_progress: 'Sedang Berlangsung', completed: 'Selesai Dikunjungi', cancelled: 'Dibatalkan'
 }
 const VISIT_STATUS_COLORS: Record<string, string> = {
   pending: 'bg-info/10 text-info border border-info/20',
@@ -423,6 +423,53 @@ const updateForm = ref<PatientFieldUpdates>({})
 const isSavingUpdate = ref(false)
 const updateError = ref('')
 
+// Typeahead Kel/Desa & Kecamatan (bukan input teks bebas lagi) -- nilai yang diajukan HARUS
+// persis sama (huruf besar/kecil) dengan tabel kecamatan/desa kanonik, supaya WilayahResolver
+// di backend tidak perlu fuzzy-match teks bebas untuk data yang masuk lewat jalur ini.
+const kecamatanList = ref<Kecamatan[]>([])
+const desaList = ref<Desa[]>([])
+const selectedKecamatanId = ref<number | null>(null)
+const isLoadingDesa = ref(false)
+
+async function loadKecamatanList() {
+  try {
+    const api = useApi()
+    const res = await api('/kecamatan') as ApiSuccessEnvelope<Kecamatan[]>
+    kecamatanList.value = res.data
+  } catch {
+    // Non-fatal -- dropdown kecamatan cuma kosong, tidak menghalangi field lain di form.
+  }
+}
+onMounted(loadKecamatanList)
+
+async function loadDesaList(kecamatanId: number) {
+  isLoadingDesa.value = true
+  try {
+    const api = useApi()
+    const res = await api('/desa', { query: { kecamatan_id: kecamatanId } }) as ApiSuccessEnvelope<Desa[]>
+    desaList.value = res.data
+  } catch {
+    desaList.value = []
+  } finally {
+    isLoadingDesa.value = false
+  }
+}
+
+const kecamatanSelectItems = computed(() => kecamatanList.value.map((k) => ({ label: k.nama, value: k.id })))
+const desaSelectItems = computed(() => desaList.value.map((d) => ({ label: d.nama, value: d.nama })))
+
+// Dipicu HANYA saat user benar-benar mengganti kecamatan lewat dropdown (bukan pre-select
+// terprogram di openUpdateModal) -- kel_desa lama dikosongkan karena sudah tidak relevan
+// dengan kecamatan baru, supaya tidak keliru submit kombinasi yang tidak nyambung.
+function onKecamatanChange(kecamatanId: number | null) {
+  selectedKecamatanId.value = kecamatanId
+  const kecamatan = kecamatanList.value.find((k) => k.id === kecamatanId)
+  updateForm.value.kecamatan = kecamatan?.nama ?? ''
+  updateForm.value.kel_desa = ''
+  desaList.value = []
+  if (kecamatanId !== null) loadDesaList(kecamatanId)
+}
+
 function openUpdateModal() {
   updateForm.value = {
     alamat: patient.value?.alamat ?? '',
@@ -434,6 +481,14 @@ function openUpdateModal() {
     jenis_perokok: patient.value?.jenis_perokok ?? ''
   }
   updateError.value = ''
+  // Coba pre-select kecamatan kalau nilai lama (teks bebas dari SiLAKES) kebetulan cocok
+  // dengan salah satu nama kanonik -- kalau tidak cocok, biarkan kosong (user pilih ulang
+  // lewat dropdown, otomatis jadi kanonik).
+  const matchedKecamatan = kecamatanList.value.find(
+    (k) => k.nama.toLowerCase() === (patient.value?.kecamatan_raw ?? '').trim().toLowerCase()
+  )
+  selectedKecamatanId.value = matchedKecamatan?.id ?? null
+  if (matchedKecamatan) loadDesaList(matchedKecamatan.id)
   showUpdateModal.value = true
 }
 
@@ -827,6 +882,12 @@ async function triggerSyncFromHistory() {
                     <span v-if="visit.report.sisa_obat">Sisa Obat: <b>{{ SISA_OBAT_LABELS[visit.report.sisa_obat] ?? visit.report.sisa_obat }}</b></span>
                   </div>
                 </div>
+                <div class="mt-3 pt-3 border-t border-slate-50 flex justify-end">
+                  <NuxtLink :to="`/dashboard/kunjungan/${visit.id}`" class="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline">
+                    Lihat Detail Kunjungan
+                    <LucideArrowRight class="w-3.5 h-3.5" />
+                  </NuxtLink>
+                </div>
               </div>
             </div>
           </div>
@@ -860,7 +921,7 @@ async function triggerSyncFromHistory() {
             </thead>
             <tbody class="divide-y divide-slate-100">
               <tr v-for="entry in riskHistory" :key="entry.id" class="hover:bg-slate-50/80 transition-colors" :class="{ 'bg-danger/5': entry.level === 'berat' }">
-                <td class="py-3 px-3 text-sm font-semibold text-slate-700">{{ formatCriteriaDate(entry.computed_at) }}</td>
+                <td class="py-3 px-3 text-sm font-semibold text-slate-700">{{ formatCriteriaDate(entry.assessment_date ?? entry.computed_at) }}</td>
                 <td class="py-3 px-3">
                   <span class="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider" :class="getRiskColor(entry.level)">
                     {{ getRiskLabel(entry.level) }}
@@ -1038,12 +1099,29 @@ async function triggerSyncFromHistory() {
               <input type="text" v-model="updateForm.rt_rw" placeholder="002/003" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
             </div>
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kel/Desa</label>
-              <input type="text" v-model="updateForm.kel_desa" placeholder="Pamolokan" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kecamatan</label>
+              <USelectMenu
+                :model-value="selectedKecamatanId"
+                @update:model-value="onKecamatanChange"
+                :items="kecamatanSelectItems"
+                value-key="value"
+                searchable
+                placeholder="Pilih kecamatan..."
+                class="w-full"
+              />
             </div>
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kecamatan</label>
-              <input type="text" v-model="updateForm.kecamatan" placeholder="Kota Sumenep" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kel/Desa</label>
+              <USelectMenu
+                v-model="updateForm.kel_desa"
+                :items="desaSelectItems"
+                value-key="value"
+                searchable
+                :disabled="!selectedKecamatanId"
+                :loading="isLoadingDesa"
+                :placeholder="selectedKecamatanId ? 'Pilih kel/desa...' : 'Pilih kecamatan dulu'"
+                class="w-full"
+              />
             </div>
           </div>
           <div>

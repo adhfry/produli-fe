@@ -26,7 +26,7 @@ import {
 } from "#components"
 import { resolveAnnouncementIcon } from '~/utils/announcement-icons'
 
-import type { ApiSuccessEnvelope, DashboardSummary, DashboardKecamatanRisk, DashboardDesaRisk, PaginatedData, Announcement, Puskesmas } from '~/types/api'
+import type { ApiSuccessEnvelope, DashboardSummary, DashboardKecamatanRisk, DashboardDesaRisk, DashboardPuskesmasPerformance, PaginatedData, Announcement, Puskesmas } from '~/types/api'
 import flatpickr from 'flatpickr'
 import 'flatpickr/dist/flatpickr.css'
 import { Indonesian } from 'flatpickr/dist/l10n/id.js'
@@ -108,20 +108,12 @@ const activities = ref<any[]>([])
 const topDistricts = ref<any[]>([])
 const puskesmasPerformanceRows = ref<any[]>([])
 
-// Label level risiko manusiawi -- dipakai formatBreakdown() di bawah, breakdown backend
-// berbentuk kunci mentah "{level_lama}_ke_{level_baru}" (mis. "berat_ke_sedang").
-function formatLevelLabel(level: string): string {
-  if (level === 'tidak_berisiko') return 'Tidak Berisiko'
-  return level.charAt(0).toUpperCase() + level.slice(1)
-}
-
-function formatBreakdown(breakdown: Record<string, number>): string {
-  return Object.entries(breakdown)
-    .map(([key, count]) => {
-      const [from, to] = key.split('_ke_')
-      return `${count} ${formatLevelLabel(from)} → ${formatLevelLabel(to)}`
-    })
-    .join(' · ')
+// Detail skor "Top 5 Puskesmas Kinerja Terbaik" (tooltip bar) -- lihat App\Services\Performance\
+// PuskesmasPerformanceScoringService di backend untuk arti tiap komponen.
+function formatPerformanceDetail(p: DashboardPuskesmasPerformance): string {
+  return `Improvement Rate ${p.improvement_rate}% · Risk Reduction ${p.risk_reduction_score}% · `
+    + `Stability ${p.stability_rate}% · ${p.eligible_patients} pasien eligible, ${p.improved_patients} membaik, `
+    + `${p.validated_visits} kunjungan tervalidasi`
 }
 
 async function loadDashboardSummary() {
@@ -201,18 +193,24 @@ async function loadDashboardSummary() {
         colorClass: TOP_DISTRICT_COLORS[idx] ?? 'bg-primary/60'
       }))
 
-    // Leaderboard SE-KABUPATEN (revisi Bu Kadis) -- backend (DashboardService::
-    // puskesmasPerformance()) SENGAJA mengirim data seluruh puskesmas tanpa scope role, sama
-    // untuk semua role login (super_admin/admin_puskesmas/pj_prolanis), supaya "Top 5 Puskesmas
-    // Kinerja Terbaik" tetap jadi pembanding se-Kabupaten Sumenep, bukan cuma puskesmas sendiri.
-    // Sudah terurut total_membaik desc dari backend, tinggal dipotong 5 teratas di sini.
-    const maxMembaik = Math.max(...data.puskesmas_performance.map((p) => p.total_membaik), 1)
+    // Leaderboard SE-KABUPATEN (revisi Bu Kadis) -- backend (PuskesmasPerformanceScoringService)
+    // SENGAJA mengirim data seluruh puskesmas tanpa scope role, sama untuk semua role login
+    // (super_admin/admin_puskesmas/pj_prolanis), supaya "Top 5 Puskesmas Kinerja Terbaik" tetap
+    // jadi pembanding se-Kabupaten Sumenep, bukan cuma puskesmas sendiri. Sudah terurut
+    // final_score desc dari backend (deterministic tie-break), tinggal dipotong 5 teratas.
+    // Kinerja dinilai dari keberhasilan meningkatkan kondisi pasien (transisi risiko dengan
+    // kunjungan TERVALIDASI sebagai bukti intervensi) -- BUKAN jumlah kunjungan mentah.
     puskesmasPerformanceRows.value = data.puskesmas_performance.slice(0, 5).map((p) => ({
       name: p.puskesmas_nama,
-      targetValue: p.total_membaik,
-      displayValue: 0,
-      percentage: Math.round((p.total_membaik / maxMembaik) * 100),
-      breakdownText: formatBreakdown(p.breakdown)
+      // Wajib string ber-akhiran '%' (bukan angka desimal polos) -- animateNumber() salah
+      // membaca titik desimal sebagai pemisah ribuan di cabang `hasDot` kalau bukan format
+      // persen (lihat komentar bug serupa di animateNumber untuk tingkat_kepatuhan).
+      targetValue: `${p.final_score}%`,
+      displayValue: '0%',
+      // final_score sudah dalam skala 0-100 -- persentase bar langsung dari skor absolut, bukan
+      // relatif terhadap puskesmas lain (beda dari topDistricts di atas yang memang perbandingan).
+      percentage: Math.round(p.final_score),
+      breakdownText: formatPerformanceDetail(p)
     }))
 
     // Reload akibat filter puskesmas/tanggal berubah -- animasikan count-up lagi supaya angka
@@ -1392,13 +1390,14 @@ const initMap = () => {
         </button>
       </div>
 
-      <!-- Kanan: Top 5 Puskesmas Kinerja Terbaik (revisi Bu Kadis) -- jumlah pasien Prolanis
-           yang tertangani dengan baik (turun tingkat risiko: berat->sedang, berat->ringan,
-           sedang->ringan, dst.) dalam periode filter aktif. super_admin otomatis melihat
-           SELURUH puskesmas (bisa persempit lewat filter puskesmas di atas -- backend sudah
-           menghormati puskesmas_id yang sama dipakai peta/statistik lain), admin_puskesmas/
-           pj_prolanis otomatis cuma lihat puskesmasnya sendiri (DashboardService::
-           puskesmasPerformance() pakai $scopedPatients yang sudah terkunci per role). -->
+      <!-- Kanan: Top 5 Puskesmas Kinerja Terbaik -- skor gabungan (final_score, 0-100) dari
+           improvement rate + risk reduction + stability rate, HANYA dari transisi risiko yang
+           punya kunjungan TERVALIDASI sebagai bukti intervensi (bukan jumlah kunjungan mentah,
+           bukan pasien yang kebetulan membaik tanpa program PRODULI -- lihat App\Services\
+           Performance\PuskesmasPerformanceScoringService di backend). Leaderboard SE-KABUPATEN
+           untuk SEMUA role (super_admin/admin_puskesmas/pj_prolanis) -- super_admin bisa
+           persempit lewat filter puskesmas di atas, role lain tetap melihat puskesmas lain
+           sebagai pembanding. -->
       <div class="bg-white rounded-2xl border border-slate-100 shadow-card p-5 flex flex-col">
         <div class="flex items-center justify-between mb-1">
           <h3 class="font-bold text-accent text-base flex items-center gap-2">
@@ -1407,7 +1406,7 @@ const initMap = () => {
           </h3>
           <span class="text-[11px] font-semibold text-slate-400">{{ dateRangeLabel }}</span>
         </div>
-        <p class="text-[11px] text-slate-400 mb-4">Pasien Prolanis yang kondisinya membaik (turun tingkat risiko)</p>
+        <p class="text-[11px] text-slate-400 mb-4">Skor kinerja (0-100) dari keberhasilan intervensi tervalidasi menurunkan risiko pasien</p>
 
         <div class="space-y-3 flex-1 mt-2">
           <div v-for="(row, idx) in puskesmasPerformanceRows" :key="idx" class="flex items-center h-10">
@@ -1417,7 +1416,7 @@ const initMap = () => {
                 </AppTooltip>
              </div>
              <div class="flex-1 border-l-2 border-slate-200 flex items-center h-full pl-0">
-                <AppTooltip :text="row.breakdownText || 'Belum ada rincian transisi.'">
+                <AppTooltip :text="row.breakdownText || 'Belum ada transisi eligible pada periode ini.'">
                    <div class="flex-1 h-3 bg-slate-100 rounded-r-full overflow-hidden shadow-inner flex items-center cursor-help">
                       <div class="h-full rounded-r-full bg-success transition-all duration-[2500ms] ease-out" :style="{ width: isLoaded ? `${row.percentage}%` : '0%' }"></div>
                    </div>
@@ -1427,7 +1426,7 @@ const initMap = () => {
                 </div>
              </div>
           </div>
-          <p v-if="!puskesmasPerformanceRows.length" class="text-sm text-slate-400 text-center py-6">Belum ada pasien yang membaik pada periode ini.</p>
+          <p v-if="!puskesmasPerformanceRows.length" class="text-sm text-slate-400 text-center py-6">Belum ada transisi risiko dengan kunjungan tervalidasi pada periode ini.</p>
         </div>
 
         <button class="w-full text-center text-sm font-semibold text-primary hover:text-primary-600 mt-4 pt-4 border-t border-slate-100 flex items-center justify-center gap-1 transition-colors">
