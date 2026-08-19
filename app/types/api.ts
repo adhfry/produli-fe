@@ -129,6 +129,8 @@ export interface Kecamatan {
   id: number
   nama: string
   kode_kemendagri: string | null
+  latitude: number | null
+  longitude: number | null
 }
 
 export interface Desa {
@@ -136,6 +138,8 @@ export interface Desa {
   kecamatan_id: number
   nama: string
   kode_kemendagri: string | null
+  latitude: number | null
+  longitude: number | null
 }
 
 export interface Patient {
@@ -536,7 +540,27 @@ export interface VisitAssignment {
   // 'wilayah_resolved' (jalur biasa) | 'phone_contact' (pasien Berat, wilayah belum resolved
   // tapi ada no. telepon — kader diarahkan hubungi lewat telepon, bukan peta).
   assignment_method: 'wilayah_resolved' | 'phone_contact'
-  patient?: { id: number, nama: string, alamat: string | null, phone: string | null, latitude: number | null, longitude: number | null, geo_status: string }
+  patient?: {
+    id: number
+    nama: string
+    alamat: string | null
+    phone: string | null
+    latitude: number | null
+    longitude: number | null
+    geo_status: string
+    // Wilayah administratif (docs/planning/10 §5, fitur unduh peta offline) -- desa_id null
+    // WALAU kecamatan_id terisi itu kasus umum (~19,6% pasien): dipakai useMapTileDownload.ts
+    // untuk deteksi "wilayah ambigu" & tawarkan kader pilih desa/kecamatan manual.
+    desa_id: number | null
+    desa_nama: string | null
+    desa_latitude: number | null
+    desa_longitude: number | null
+    kecamatan_id: number | null
+    kecamatan_nama: string | null
+    kecamatan_latitude: number | null
+    kecamatan_longitude: number | null
+    wilayah_status: WilayahStatus
+  }
   kader?: { id: number, name: string | null, no_hp: string | null } | null
   // Petugas tenaga_kesehatan (revisi Bu Kadis, Fase 2/5) -- kader/tenaga_kesehatan saling
   // eksklusif per assignment (lihat visit_origin di backend), null kalau assignment ini kader.

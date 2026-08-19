@@ -113,8 +113,12 @@ onUnmounted(() => {
 })
 
 // --- Unduh Peta Wilayah Kerja (docs/planning/10 §5, docs/planning/11 §9) -----------------
-// GET /visit-assignments (sudah scoped ke kader login) -- bounding box dari tugas HARI INI yang
-// lokasinya diketahui (patient.latitude/longitude terisi), bukan seluruh riwayat.
+// GET /visit-assignments (sudah scoped ke kader login) -- area dari tugas HARI INI, per-pasien
+// (titik presisi kalau geocoded, atau centroid desa kalau tidak) -- BUKAN lagi satu kotak
+// tunggal yang membentang menutupi jarak kosong antar pasien, dan BUKAN lagi jatuh diam-diam ke
+// seluruh Kabupaten Sumenep (~100rb tile) begitu ada 1 pasien tanpa koordinat. Pasien yang
+// wilayahnya benar-benar ambigu (desa_id null) diarahkan ke /app/mode-offline untuk dilengkapi
+// manual (kecamatan+desa), bukan ditebak di sini.
 const assignmentStore = useAssignmentStore()
 const tileDownload = useMapTileDownload()
 
@@ -125,9 +129,28 @@ function isToday(dateStr: string): boolean {
 const todayAssignments = computed(() =>
   assignmentStore.assignments.filter((a) => isToday(a.scheduled_date))
 )
-const todayAssignmentsWithLocation = computed(() =>
-  todayAssignments.value.filter((a) => a.patient?.latitude !== null && a.patient?.latitude !== undefined && a.patient?.longitude !== null && a.patient?.longitude !== undefined)
-)
+
+const areaResolution = computed(() => tileDownload.resolveAreas(todayAssignments.value))
+const resolvedAreas = computed(() => areaResolution.value.areas)
+const ambiguousCount = computed(() => areaResolution.value.ambiguousPatients.length)
+
+const isEstimatingMap = ref(false)
+const mapEstimatedBytes = ref(0)
+async function refreshMapEstimate() {
+  if (resolvedAreas.value.length === 0) {
+    mapEstimatedBytes.value = 0
+    return
+  }
+  isEstimatingMap.value = true
+  try {
+    const tiles = tileDownload.buildTileSetForAreas(resolvedAreas.value)
+    const result = await tileDownload.estimateTileSetSize(tiles)
+    mapEstimatedBytes.value = result.estimatedBytes
+  } finally {
+    isEstimatingMap.value = false
+  }
+}
+watch(resolvedAreas, () => { void refreshMapEstimate() })
 
 // Statistik ASLI dari assignmentStore -- SEBELUMNYA "Ada 3 Tugas Baru!", progress ring 80%,
 // dan "12/15 Kunjungan" semua angka hardcode di template, tidak pernah dihitung dari data
@@ -168,29 +191,34 @@ async function loadDraftCount() {
 }
 
 const isDownloadingMap = ref(false)
-const mapDownloadProgress = ref({ current: 0, total: 0 })
+const mapDownloadProgress = ref({ current: 0, total: 0, skipped: 0 })
 const mapDownloadError = ref('')
 const mapDownloadResult = ref('')
-const cachedTileCount = ref(0)
+const cachedTileBytes = ref(0)
 
 async function refreshCachedTileInfo() {
   const info = await tileDownload.getCachedTileInfo()
-  cachedTileCount.value = info.count
+  cachedTileBytes.value = info.bytes
 }
 
 async function downloadWorkAreaMap() {
+  if (resolvedAreas.value.length === 0) return
+
   isDownloadingMap.value = true
   mapDownloadError.value = ''
   mapDownloadResult.value = ''
-  mapDownloadProgress.value = { current: 0, total: 0 }
+  mapDownloadProgress.value = { current: 0, total: 0, skipped: 0 }
   try {
-    const result = await tileDownload.downloadTilesForAssignments(todayAssignments.value, (progress) => {
+    const tiles = tileDownload.buildTileSetForAreas(resolvedAreas.value)
+    const result = await tileDownload.downloadTileSet(tiles, (progress) => {
       mapDownloadProgress.value = progress
     })
     if (!result.ok) {
       mapDownloadError.value = result.error ?? 'Gagal mengunduh peta.'
     } else {
-      mapDownloadResult.value = `${result.downloaded} dari ${result.total} berkas peta berhasil diunduh untuk dipakai offline.`
+      mapDownloadResult.value =
+        `${result.downloaded} berkas peta baru (≈ ${tileDownload.formatBytes(result.bytesDownloaded)}) berhasil diunduh` +
+        (result.skipped > 0 ? `, ${result.skipped} sudah tersimpan sebelumnya.` : '.')
       await refreshCachedTileInfo()
     }
   } catch (e) {
@@ -320,17 +348,30 @@ onMounted(async () => {
           <div class="flex-1 min-w-0">
             <h3 class="font-bold text-slate-800 dark:text-white text-sm">Peta Offline Wilayah Kerja</h3>
             <p class="text-xs text-slate-500 dark:text-slate-400">
-              {{ todayAssignmentsWithLocation.length }} dari {{ todayAssignments.length }} tugas hari ini punya titik lokasi
-              <template v-if="cachedTileCount > 0"> &bull; {{ cachedTileCount }} berkas peta tersimpan offline</template>
+              {{ resolvedAreas.length }} wilayah dari {{ todayAssignments.length }} tugas hari ini siap diunduh
+              <template v-if="cachedTileBytes > 0"> &bull; ≈ {{ tileDownload.formatBytes(cachedTileBytes) }} peta tersimpan di perangkat ini</template>
             </p>
           </div>
+        </div>
+
+        <!-- Rincian wilayah -- ganti angka jumlah tile mentah (tidak informatif) dengan nama
+             wilayah + ukuran nyata dalam MB, hasil sampel via estimateTileSetSize(). -->
+        <div v-if="resolvedAreas.length > 0 && !isDownloadingMap" class="mb-3 space-y-1">
+          <div v-for="a in resolvedAreas" :key="a.key" class="flex items-center justify-between text-xs bg-slate-50 dark:bg-slate-900 rounded-lg px-3 py-1.5">
+            <span class="font-medium text-slate-600 dark:text-slate-300 truncate">{{ a.label }}</span>
+            <span v-if="a.patientCount > 0" class="text-slate-400 shrink-0 ml-2">{{ a.patientCount }} pasien</span>
+          </div>
+          <p class="text-xs text-info font-semibold px-1 pt-1">
+            <LucideLoader2 v-if="isEstimatingMap" class="w-3 h-3 animate-spin inline" />
+            <template v-else>≈ {{ tileDownload.formatBytes(mapEstimatedBytes) }} unduhan</template>
+          </p>
         </div>
 
         <div v-if="isDownloadingMap" class="mb-1">
           <div class="flex items-center justify-between mb-1.5">
             <span class="text-xs font-bold text-info flex items-center gap-1.5">
               <LucideLoader2 class="w-3.5 h-3.5 animate-spin" />
-              Mengunduh {{ mapDownloadProgress.current }} / {{ mapDownloadProgress.total }}...
+              Mengunduh {{ mapDownloadProgress.current }} / {{ mapDownloadProgress.total }}{{ mapDownloadProgress.skipped > 0 ? ` (${mapDownloadProgress.skipped} sudah tersimpan)` : '' }}...
             </span>
           </div>
           <div class="h-2 w-full bg-info/10 rounded-full overflow-hidden">
@@ -340,7 +381,8 @@ onMounted(async () => {
         <button
           v-else
           @click="downloadWorkAreaMap"
-          class="w-full py-2.5 bg-info/10 text-info rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 active:scale-[0.98]"
+          :disabled="resolvedAreas.length === 0"
+          class="w-full py-2.5 bg-info/10 text-info rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50"
         >
           <LucideDownload class="w-4 h-4" />
           Unduh Peta Wilayah Kerja
@@ -348,10 +390,19 @@ onMounted(async () => {
 
         <p v-if="mapDownloadError" class="text-xs font-semibold text-danger mt-2">{{ mapDownloadError }}</p>
         <p v-else-if="mapDownloadResult" class="text-xs font-semibold text-success mt-2">{{ mapDownloadResult }}</p>
-        <!-- docs/planning/12: tombol TETAP aktif walau 0 tugas berkoordinat -- downloadWorkAreaMap
-             otomatis jatuh ke cakupan Kabupaten Sumenep penuh (computeKabupatenBoundingBox), jadi
-             ini murni informasi, bukan lagi alasan tombol dimatikan. -->
-        <p v-else-if="todayAssignmentsWithLocation.length === 0" class="text-xs text-slate-400 mt-2">Belum ada tugas hari ini dengan lokasi diketahui — unduhan akan mencakup seluruh Kabupaten Sumenep.</p>
+        <!-- Tidak lagi jatuh diam-diam ke seluruh Kabupaten Sumenep -- kalau tidak ada wilayah
+             yang bisa ditentukan otomatis, arahkan ke wizard lengkap yang bisa melengkapi wilayah
+             ambigu secara manual. -->
+        <p v-else-if="resolvedAreas.length === 0" class="text-xs text-slate-400 mt-2">Belum ada wilayah tugas hari ini yang bisa ditentukan otomatis — lengkapi lewat "Siapkan Mode Offline Lengkap" di bawah.</p>
+
+        <NuxtLink
+          v-if="ambiguousCount > 0"
+          to="/app/mode-offline"
+          class="mt-3 w-full py-2 bg-warning/10 text-warning-700 rounded-xl font-bold text-xs transition-colors flex items-center justify-center gap-2 active:scale-[0.98]"
+        >
+          <LucideMapPinOff class="w-3.5 h-3.5" />
+          {{ ambiguousCount }} pasien wilayahnya belum jelas — lengkapi manual
+        </NuxtLink>
 
         <NuxtLink to="/app/mode-offline" class="mt-3 w-full py-2.5 border border-info/30 text-info rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 active:scale-[0.98] hover:bg-info/5">
           <LucidePackageCheck class="w-4 h-4" />
