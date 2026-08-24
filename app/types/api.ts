@@ -1,5 +1,5 @@
-// Kontrak API backend KOPIPU — sumber kebenaran: Controller/Request/Resource di repo backend
-// (D:\Project_Web\kopipu-smart-backend), bukan docs/planning/05 (itu cuma peta endpoint).
+// Kontrak API backend PRODULI — sumber kebenaran: Controller/Request/Resource di repo backend
+// (D:\Project_Web\produli-backend), bukan docs/planning/05 (itu cuma peta endpoint).
 // Tambahkan tipe domain lain di sini begitu composable/store baru mulai dibangun.
 
 export interface ApiSuccessEnvelope<T> {
@@ -249,7 +249,7 @@ export interface LabResult {
   tanggal_periksa: string | null
 }
 
-// POST /patients/search-nik (SearchPatientByNikRequest) -- KOPIPU TIDAK PERNAH menyimpan NIK
+// POST /patients/search-nik (SearchPatientByNikRequest) -- PRODULI TIDAK PERNAH menyimpan NIK
 // asli (patients_cache cuma punya nik_hash HMAC dari SiLAKES, docs/planning/04) -- endpoint ini
 // cuma cocokkan hash-vs-hash, TIDAK PERNAH bisa menampilkan digit NIK asli di mana pun. POST
 // (bukan GET) supaya password re-autentikasi tidak nyangkut di query string/log akses.
@@ -651,7 +651,7 @@ export interface DashboardKecamatanRisk {
 
 // Paralel DashboardKecamatanRisk, TAPI cuma pasien wilayah_status=resolved (bukan ikut
 // kecamatan_fallback seperti kecamatan -- level desa butuh presisi lebih tinggi). Cakupan
-// wajar kecil, banyak desa tetap kosong sampai kopipu:import-desa-puskesmas dijalankan penuh.
+// wajar kecil, banyak desa tetap kosong sampai produli:import-desa-puskesmas dijalankan penuh.
 export interface DashboardDesaRisk {
   desa_id: number
   desa_nama: string
@@ -837,7 +837,7 @@ export type SisaObat = 'cukup' | 'menipis' | 'habis'
 // SubmitVisitReportRequest::patientFieldUpdates() -- usulan pelengkapan/koreksi data pasien
 // (docs/planning/01 §9), SEMUA opsional. Dikirim sebagai field individual dalam multipart yang
 // SAMA dengan POST /visit-reports (bukan endpoint terpisah). Selalu masuk sebagai pending_review
-// di SiLAKES, TIDAK PERNAH auto-apply ke data pasien KOPIPU sendiri.
+// di SiLAKES, TIDAK PERNAH auto-apply ke data pasien PRODULI sendiri.
 export interface PatientFieldUpdates {
   alamat?: string
   kel_desa?: string
@@ -879,7 +879,7 @@ export interface KaderUpdateRequest {
 }
 
 // GET /patients/{id}/update-history -- dibaca LIVE dari SiLAKES (patient_field_updates,
-// difilter sumber kopipu_*), bukan disimpan lokal di KOPIPU.
+// difilter sumber produli_*), bukan disimpan lokal di PRODULI.
 export interface PatientFieldUpdateHistoryItem {
   id: number
   kategori: 'geo' | 'kontak' | 'identitas'
@@ -887,8 +887,8 @@ export interface PatientFieldUpdateHistoryItem {
   old_value: string | null
   new_value: string | null
   sumber: string
-  kopipu_visit_id: number | null
-  kopipu_kader_nama: string | null
+  produli_visit_id: number | null
+  produli_kader_nama: string | null
   status: 'pending_review' | 'approved' | 'rejected'
   reviewed_at: string | null
   catatan_reviewer: string | null

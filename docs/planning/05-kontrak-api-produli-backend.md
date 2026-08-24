@@ -5,7 +5,7 @@
 ## Detail terverifikasi dari kode backend langsung (bukan cuma route:list)
 
 - List response: `data.items` + `data.pagination` — **bukan** `meta`/`links` standar Laravel.
-- Refresh token: cookie bernama `kopipu_refresh_token` + header `X-Device-Id` wajib disertakan.
+- Refresh token: cookie bernama `produli_refresh_token` + header `X-Device-Id` wajib disertakan.
 - Middleware `password.changed` aktif di hampir semua route privat (kecuali `logout`, `me`, `change-password`) — kalau dapat 403 dengan `data.code=MUST_CHANGE_PASSWORD`, redirect ke halaman ganti password.
 - `GET /dashboard/summary`: key risk-level & status kunjungan selalu lengkap di-fill 0 (tidak pernah hilang dari response meski datanya kosong) — aman diasumsikan ada tanpa optional-chaining berlebihan.
 - `GET /notifications`: `unread_count` selalu dihitung ulang tiap request (bukan cache).
@@ -14,7 +14,7 @@
 
 ```
 Dev:  NUXT_PUBLIC_API_BASE=http://localhost:8033/api/v1
-Prod: NUXT_PUBLIC_API_BASE=https://api.kopipu-smart.labkesdasumenep.id/api/v1
+Prod: NUXT_PUBLIC_API_BASE=https://api.produli.labkesdasumenep.id/api/v1
 ```
 
 Set di `nuxt.config.ts` → `runtimeConfig.public.apiBase`, baca dari env var di atas.

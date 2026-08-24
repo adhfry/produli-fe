@@ -336,7 +336,7 @@ const getGeoLabel = (status) => {
 // Jalur PARALEL dari usulan kader lewat POST /visit-reports (itu terikat satu laporan
 // kunjungan) -- PatientsCachePolicy::update sudah scoped ke puskesmas yang sama, staf cuma bisa
 // ajukan untuk pasien di wilayah kerjanya sendiri. SELALU pending_review di SiLAKES, TIDAK
-// PERNAH auto-apply ke data KOPIPU sendiri (docs/planning/01 §9).
+// PERNAH auto-apply ke data PRODULI sendiri (docs/planning/01 §9).
 const canProposeUpdate = computed(() => {
   const roles = authStore.roles ?? []
   if (roles.includes('super_admin')) return true
@@ -529,7 +529,7 @@ async function submitProposeUpdate() {
 }
 
 // --- Riwayat Pengajuan Perubahan Data (GET /patients/{id}/update-history) ------------------
-// Dibaca LIVE dari SiLAKES (patient_field_updates, sumber kopipu_*) -- KOPIPU tidak menyimpan
+// Dibaca LIVE dari SiLAKES (patient_field_updates, sumber produli_*) -- PRODULI tidak menyimpan
 // salinan lokal status approval, SiLAKES tetap satu-satunya sumber kebenaran. Gerbang akses
 // SAMA dengan canProposeUpdate (kalau boleh mengajukan, boleh lihat riwayatnya).
 const updateHistory = ref<PatientFieldUpdateHistoryItem[]>([])
@@ -580,7 +580,7 @@ function formatHistoryDate(iso: string | null): string {
 }
 
 // Usulan disetujui SiLAKES SETELAH sinkronisasi lokal terakhir -- berarti data pasien di
-// KOPIPU masih versi lama, belum menangkap perubahan yang baru disetujui itu (dibandingkan
+// PRODULI masih versi lama, belum menangkap perubahan yang baru disetujui itu (dibandingkan
 // lewat reviewed_at vs patient.last_synced_at, bukan cuma "ada status approved" -- approval
 // LAMA yang sudah tertangkap sync sebelumnya tidak perlu terus disarankan sync ulang).
 const pendingSyncSuggestion = computed(() => {
@@ -963,7 +963,7 @@ async function triggerSyncFromHistory() {
         </div>
 
         <!-- Saran sinkronisasi -- muncul kalau ada usulan yang DISETUJUI SETELAH sync lokal
-             terakhir (data pasien di KOPIPU masih versi lama). super_admin: tombol langsung
+             terakhir (data pasien di PRODULI masih versi lama). super_admin: tombol langsung
              memicu sinkronisasi. Role lain: cuma teks anjuran, mereka tidak berwenang sync. -->
         <div v-if="pendingSyncSuggestion" class="mb-5 flex items-center gap-3 bg-success/5 border border-success/20 rounded-2xl px-5 py-3.5">
           <div class="w-9 h-9 rounded-xl bg-success/10 text-success flex items-center justify-center shrink-0">
@@ -1015,7 +1015,7 @@ async function triggerSyncFromHistory() {
                   <span class="mx-1 text-slate-300">→</span>
                   <span class="font-semibold text-slate-700">{{ item.new_value || '-' }}</span>
                 </td>
-                <td class="py-3 px-3 text-xs font-medium text-slate-600">{{ item.kopipu_kader_nama || 'Staf KOPIPU' }}</td>
+                <td class="py-3 px-3 text-xs font-medium text-slate-600">{{ item.produli_kader_nama || 'Staf PRODULI' }}</td>
                 <td class="py-3 px-3 text-xs text-slate-500">{{ formatHistoryDate(item.created_at) }}</td>
                 <td class="py-3 px-3 text-center">
                   <span class="px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider inline-block" :class="HISTORY_STATUS_COLORS[item.status]">

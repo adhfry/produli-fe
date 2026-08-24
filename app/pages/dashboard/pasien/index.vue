@@ -361,7 +361,7 @@ async function exportPdf() {
 }
 
 // --- Pencarian by NIK (POST /patients/search-nik) -----------------------------------------
-// KOPIPU tidak pernah menyimpan NIK asli (patients_cache cuma punya nik_hash HMAC dari
+// PRODULI tidak pernah menyimpan NIK asli (patients_cache cuma punya nik_hash HMAC dari
 // SiLAKES) -- pencarian ini cuma cocokkan hash-vs-hash di server, TIDAK PERNAH bisa
 // menampilkan digit NIK asli. Deteksi otomatis: begitu kotak pencarian berisi PERSIS 16 digit
 // angka, itu jelas maksudnya NIK (bukan nama/no. registrasi) -- langsung minta konfirmasi
