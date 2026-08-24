@@ -1724,7 +1724,7 @@ async function submitData() {
 
     <!-- Modal Detail Data Pasien (z-[60]) -- field mengikuti apa adanya yang tersedia dari
          VisitAssignmentResource.patient (id/nama/alamat/phone/lat/lng/geo_status), TIDAK ada
-         NIK/agama/status kawin/dst -- KOPIPU tidak menyimpan field itu sama sekali. -->
+         NIK/agama/status kawin/dst -- PRODULI tidak menyimpan field itu sama sekali. -->
     <Transition name="fade">
       <div v-if="showPatientModal" class="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center" @click="showPatientModal = false">
         <div class="bg-white dark:bg-slate-900 w-full sm:max-w-md sm:rounded-3xl rounded-t-3xl p-6 shadow-2xl transition-colors duration-300 transform" @click.stop>
