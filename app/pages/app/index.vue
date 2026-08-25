@@ -17,13 +17,16 @@ const toggleDark = () => {
 // Hysteresis dua-ambang (bukan satu threshold tunggal) -- SEBELUMNYA `computed(() => scrollY > 60)`
 // bikin isScrolled flip-flop tiap kali posisi scroll goyang beberapa px di sekitar 60 (lazim
 // terjadi pas scroll pelan/momentum scroll di HP), tiap flip me-restart transisi 500ms di
-// ~10 elemen sekaligus -- itu yang tampak sebagai glitch/jitter. Naik butuh lewat 80, turun
-// harus di bawah 40 -- rentang aman di antaranya bikin state stabil, tidak ada re-trigger beruntun.
+// ~10 elemen sekaligus -- itu yang tampak sebagai glitch/jitter. Ambang diperpendek (permintaan
+// user: scroll sedikit saja sudah cukup memicu minimize) -- naik butuh lewat 24, turun harus di
+// bawah 8. Gap 16px tetap dipertahankan (proporsional thd gap 40px versi lama) supaya rentang
+// aman di antaranya tetap ada, state tidak flip-flop/re-trigger beruntun walau ambangnya sendiri
+// jauh lebih dekat ke atas halaman.
 const { y: scrollY } = useWindowScroll()
 const isScrolled = ref(false)
 watch(scrollY, (y) => {
-  if (!isScrolled.value && y > 80) isScrolled.value = true
-  else if (isScrolled.value && y < 40) isScrolled.value = false
+  if (!isScrolled.value && y > 24) isScrolled.value = true
+  else if (isScrolled.value && y < 8) isScrolled.value = false
 })
 
 const greeting = ref('Selamat Pagi,')
