@@ -989,7 +989,7 @@ async function confirmReassign() {
           </div>
         </div>
         <p v-else class="mt-4 pt-4 border-t border-slate-100 text-xs text-slate-400 italic">
-          Belum ada kunjungan dengan desa pasien yang teridentifikasi.
+          Belum ada kunjungan.
         </p>
       </template>
     </div>
