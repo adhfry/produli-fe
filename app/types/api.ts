@@ -698,10 +698,12 @@ export interface DashboardPuskesmasPerformance {
 }
 
 export interface DashboardSummary {
+  // "Total Pasien Aktif" -- pasien yang levelnya SEDANG berisiko sekarang (ringan/sedang/
+  // berat), BUKAN "pernah punya klasifikasi apa pun". Lihat DashboardService::summaryFor().
   total_patients: number
   // Revisi Bu Kadis -- "3.900 dari total 5.000 pasien Prolanis": SELALU >= total_patients
-  // (superset -- semua pasien Prolanis ter-sync dalam scope, bukan cuma yang efektif
-  // terklasifikasi risiko). Lihat DashboardService::summaryFor() backend.
+  // (superset -- semua pasien Prolanis ter-sync dalam scope, terlepas dari level risikonya).
+  // Lihat DashboardService::summaryFor() backend.
   total_patients_prolanis: number
   // REVISI Bu Kadis: kunci 'tidak_berisiko' ikut muncul di sini sejak tier itu ditambahkan
   // (Fase 1) -- PatientRiskLevel (bukan RiskLevel biasa) supaya tipe ini akurat.

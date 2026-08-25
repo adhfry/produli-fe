@@ -137,15 +137,17 @@ async function loadDashboardSummary() {
     stats.value = [
       // "3.900 dari total 5.000 pasien Prolanis" (revisi Bu Kadis) -- totalSuffix statis
       // (tidak dianimasikan, animateNumber() cuma memparse SATU angka per objek) ditampilkan
-      // setelah displayValue yang tetap dianimasikan seperti biasa.
+      // setelah displayValue yang tetap dianimasikan seperti biasa. total_patients ("Total
+      // Pasien Aktif") = pasien yang levelnya SEDANG berisiko sekarang (ringan/sedang/berat),
+      // BUKAN "pernah dievaluasi" (revisi kelima -- lihat DashboardService::summaryFor()).
       { label: 'Total Pasien Aktif', targetValue: formatId(data.total_patients), displayValue: '0', totalSuffix: `/ ${formatId(data.total_patients_prolanis)}`, icon: LucideUsers, colorClass: 'text-primary', bgClass: 'bg-primary/10', to: '/dashboard/pasien' },
-      // "Pasien Tidak Berisiko" -- gabungan 2 kelompok: (1) SELISIH total_patients_prolanis
-      // dikurangi total_patients (pasien yang lolos eligibility sync tapi TIDAK PERNAH punya
-      // baris risk_classifications sama sekali -- belum pernah ada parameter lab yang melebihi
-      // ambang rujukan), dan (2) patients_per_risk_level.tidak_berisiko (pasien yang PERNAH
-      // berisiko lalu membaik total, lihat RiskClassificationService::classify()). Keduanya
-      // sama-sama "tidak sedang berisiko sekarang", tapi berasal dari 2 kolom summary berbeda.
-      { label: 'Pasien Tidak Berisiko', targetValue: formatId((data.total_patients_prolanis - data.total_patients) + risk.tidak_berisiko), displayValue: '0', icon: LucideShieldCheck, colorClass: 'text-success', bgClass: 'bg-success/10', to: '/dashboard/pasien?risk_level=tidak_berisiko' },
+      // "Pasien Tidak Berisiko" = SELISIH total_patients_prolanis - total_patients (murni
+      // pengurangan) -- backend sekarang menjamin SETIAP pasien eligible selalu punya baris
+      // klasifikasi minimal 'tidak_berisiko' (RiskClassificationService revisi keempat), jadi
+      // selisih ini otomatis = jumlah baris tidak_berisiko sungguhan, sama persis dengan yang
+      // muncul kalau kartu ini diklik (?risk_level=tidak_berisiko) -- tidak perlu lagi
+      // menggabungkan 2 sumber angka seperti sebelumnya.
+      { label: 'Pasien Tidak Berisiko', targetValue: formatId(data.total_patients_prolanis - data.total_patients), displayValue: '0', icon: LucideShieldCheck, colorClass: 'text-success', bgClass: 'bg-success/10', to: '/dashboard/pasien?risk_level=tidak_berisiko' },
       { label: 'Risiko Berat', targetValue: formatId(risk.berat), displayValue: '0', icon: LucideAlertTriangle, colorClass: 'text-danger', bgClass: 'bg-danger/10', to: '/dashboard/pasien?risk_level=berat' },
       { label: 'Risiko Sedang', targetValue: formatId(risk.sedang), displayValue: '0', icon: LucideAlertCircle, colorClass: 'text-warning', bgClass: 'bg-warning/10', to: '/dashboard/pasien?risk_level=sedang' },
       { label: 'Kunjungan Selesai', targetValue: formatId(visits.completed), displayValue: '0', icon: LucideCheckCircle2, colorClass: 'text-success', bgClass: 'bg-success/10', to: '/dashboard/kunjungan?status=completed' },
