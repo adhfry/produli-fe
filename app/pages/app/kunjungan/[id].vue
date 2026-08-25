@@ -294,6 +294,16 @@ const form = ref({
   accuracy: null as number | null,
   gpsCapturedAt: null as string | null,
   fullAddress: "Mencari detail alamat...",
+  // Permintaan user: kader/nakes yang BENAR-BENAR berdiri di rumah pasien saat submit --
+  // dikirim sbg confirmed_patient_location, dipakai backend (VisitReportService::submit())
+  // utk (1) menandai geo_status pasien 'verified' dari titik ini, DAN (2) resolusi otomatis
+  // desa/kecamatan lewat titik-dalam-polygon (WilayahResolver::resolveByCoordinates(), berguna
+  // khususnya utk ~93% pasien yang wilayah_status='unknown' krn SiLAKES tidak pernah kirim
+  // alamat mereka sama sekali). Default TRUE -- kunjungan rumah SECARA DEFINISI berarti kader
+  // ada di lokasi pasien; opsi uncheck disediakan utk kasus jarang (mis. submit telat/dari
+  // tempat lain karena sinyal). Sebelumnya field ini TIDAK PERNAH dikirim sama sekali dari
+  // sini -- backend sudah siap tapi tidak pernah terpicu, lihat commit backend terkait.
+  confirmedPatientLocation: true,
 });
 
 // Tindakan multi-select (Fase 2) -- checkbox-card, pola toggle sama dgn toggleAttendee() di
@@ -938,6 +948,7 @@ function buildDraftPayload(): VisitReportDraftPayload {
     sisa_obat: form.value.sisa_obat || null,
     attendeeKaderIds: [...attendeeKaderIds.value],
     patientFieldUpdates: buildPatientFieldUpdates(),
+    confirmedPatientLocation: form.value.confirmedPatientLocation,
   };
 }
 
@@ -975,6 +986,8 @@ function buildOnlineFormData(payload: VisitReportDraftPayload, photo: Blob): For
       fd.append(key, typeof value === "boolean" ? (value ? "1" : "0") : value);
     }
   }
+
+  fd.append("confirmed_patient_location", payload.confirmedPatientLocation ? "1" : "0");
 
   return fd;
 }
@@ -1026,6 +1039,7 @@ function applyDraftPayloadToForm(payload: VisitReportDraftPayload) {
   form.value.cara_rujukan = (payload.cara_rujukan ?? "") as typeof form.value.cara_rujukan;
   form.value.kepatuhan_obat = (payload.kepatuhan_obat ?? "") as typeof form.value.kepatuhan_obat;
   form.value.sisa_obat = (payload.sisa_obat ?? "") as typeof form.value.sisa_obat;
+  form.value.confirmedPatientLocation = payload.confirmedPatientLocation;
 }
 
 async function restoreDraft() {
@@ -1402,6 +1416,34 @@ async function submitData() {
             </div>
           </div>
         </div>
+
+        <!-- Konfirmasi lokasi (permintaan user) -- default TRUE (kunjungan rumah = kader ada di
+             lokasi pasien), kader boleh uncheck utk kasus jarang (submit tidak persis di rumah
+             pasien, mis. sinyal). Ditandai lebih menonjol saat data lokasi pasien belum pasti
+             (geo_status bukan 'verified') krn di situ konfirmasi ini paling berguna -- titik
+             GPS kader dipakai backend memperbaiki data desa/kecamatan pasien lewat resolusi
+             titik-dalam-polygon, lihat VisitReportService::submit(). -->
+        <button
+          type="button"
+          class="w-full p-4 border-t flex items-center gap-3 text-left transition-colors active:scale-[0.99]"
+          :class="form.confirmedPatientLocation
+            ? 'border-success/20 bg-success/5 dark:bg-success/10'
+            : 'border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-900'"
+          @click="form.confirmedPatientLocation = !form.confirmedPatientLocation"
+        >
+          <span
+            class="w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 transition-colors"
+            :class="form.confirmedPatientLocation ? 'bg-success border-success' : 'border-slate-300 dark:border-slate-600'"
+          >
+            <LucideCheck v-if="form.confirmedPatientLocation" class="w-4 h-4 text-white" />
+          </span>
+          <span class="flex-1">
+            <span class="block text-base font-bold text-slate-800 dark:text-slate-200">Saya benar-benar berada di lokasi rumah pasien</span>
+            <span class="block text-sm text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+              Membantu memperbarui data lokasi pasien di sistem<template v-if="patient?.geo_status !== 'verified'"> -- data lokasi pasien ini <b>belum pasti</b>, konfirmasi Anda sangat membantu</template>.
+            </span>
+          </span>
+        </button>
       </div>
 
       <!-- Kondisi Pasien -->

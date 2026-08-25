@@ -51,6 +51,11 @@ export interface VisitReportDraftPayload {
   attendeeKaderIds: number[]
   // SubmitVisitReportRequest::patientFieldUpdates() -- string fields + is_bpjs (boolean).
   patientFieldUpdates: Record<string, string | boolean> | null
+  // Kader/nakes BENAR-BENAR di lokasi pasien saat submit -- dipakai backend utk update
+  // geo_status pasien jadi 'verified' DAN resolusi otomatis desa/kecamatan dari titik GPS
+  // (WilayahResolver::resolveByCoordinates()). Lihat komentar di [id].vue::form untuk alasan
+  // default TRUE di sisi pemanggil.
+  confirmedPatientLocation: boolean
 }
 
 export interface VisitReportDraft {
@@ -324,6 +329,8 @@ export function draftToFormData(draft: VisitReportDraft): FormData {
       fd.append(key, typeof value === 'boolean' ? (value ? '1' : '0') : value)
     }
   }
+
+  fd.append('confirmed_patient_location', p.confirmedPatientLocation ? '1' : '0')
 
   return fd
 }
