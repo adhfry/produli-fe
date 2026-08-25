@@ -618,10 +618,16 @@ function triggerImageDownload(dataUrl: string, patientName: string) {
   document.body.removeChild(a);
 }
 
-// Foto YANG DISUBMIT adalah frame mentah dari kamera (crop WYSIWYG, lihat di bawah), BUKAN
-// hasil komposit -- backend sudah punya watermark resminya sendiri (WatermarkGenerator, Layer
-// 4: nama kader + timestamp + koordinat dibakar server-side sebelum foto disimpan ke S3/MinIO).
-// Kalau komposit di sini ikut dibakar ke file yang disubmit, hasilnya watermark dobel.
+// BUG NYATA (laporan lapangan: foto auto-download sudah lengkap -- logo, peta mini, lokasi,
+// teks -- tapi yang tersimpan di server "kering", tanpa apa pun) -- SEBELUMNYA foto yang
+// disubmit sengaja frame mentah (backend yang membakar watermark resminya sendiri,
+// WatermarkGenerator Layer 4), TAPI watermark server itu cuma teks polos (nama+waktu+
+// koordinat), jauh lebih sederhana dari komposit di bawah (logo asli, thumbnail peta MapLibre
+// live, alamat lengkap, cuaca) -- dan thumbnail peta MEMANG MUSTAHIL direkonstruksi ulang di
+// server (cuma ada selagi kamera+peta live di browser). Sekarang foto YANG DISUBMIT adalah
+// KOMPOSIT yang sama persis dengan auto-download/kartu review (satu sumber kebenaran, WYSIWYG
+// dijamin identik) -- WatermarkGenerator server-side sudah dinonaktifkan (lihat
+// app/Services/Visit/Validation/Layers/WatermarkGenerator.php) supaya tidak double-watermark.
 const captureFrame = () => {
   const video = videoRef.value;
   const canvas = canvasRef.value;
@@ -660,17 +666,23 @@ const captureFrame = () => {
   nativeVideoWidth.value = sw;
   nativeVideoHeight.value = sh;
 
+  // Fallback dulu -- frame mentah polos, DIPERTAHANKAN cuma untuk kasus komposit gagal di bawah
+  // (mis. canvas MapLibre tainted karena tile server tidak kirim header CORS). Kalau komposit
+  // berhasil, INI DITIMPA di bawah supaya foto yang benar-benar tersubmit = yang terlihat di
+  // kartu review & auto-download, bukan lagi 2 sumber yang berbeda.
   form.value.photoUrl = canvas.toDataURL("image/jpeg", 0.9);
 
   // Komposit watermark (peta #maplibre-mini HARUS diambil di sini, SEBELUM stopCamera()/unmount
-  // modal live) -- dipakai untuk kartu review (gambar statis beku, bukan overlay live lagi) dan
-  // auto-download. Best-effort: kalau gagal (mis. canvas MapLibre tainted karena tile server
-  // tidak kirim header CORS), JANGAN sampai menghentikan captureFrame() -- stopCamera() & kartu
-  // review tetap harus jalan, fallback ke foto polos tanpa watermark.
+  // modal live) -- dipakai untuk 3 tujuan sekaligus: kartu review (gambar statis beku, bukan
+  // overlay live lagi), auto-download, DAN foto yang disubmit ke server (form.value.photoUrl) --
+  // satu sumber kebenaran, WYSIWYG dijamin identik di ketiganya. Best-effort: kalau gagal, JANGAN
+  // sampai menghentikan captureFrame() -- stopCamera() & kartu review tetap harus jalan, fallback
+  // ke foto polos tanpa watermark (fallback di atas tetap berlaku).
   try {
     const composite = buildWatermarkComposite(canvas);
     const compositeUrl = composite.toDataURL("image/jpeg", 0.92);
     reviewImageUrl.value = compositeUrl;
+    form.value.photoUrl = compositeUrl;
     triggerImageDownload(compositeUrl, patient.value?.nama ?? "pasien");
   } catch (e) {
     console.error("Gagal membuat komposit watermark (tidak fatal, lanjut submit seperti biasa):", e);
