@@ -476,9 +476,11 @@ export interface VisitReport {
   systolic: number | null
   diastolic: number | null
   keluhan: string | null
-  // Bisa lebih dari satu tindakan sekaligus (Fase 2, sebelumnya enum tunggal) -- null kalau
-  // belum diisi sama sekali.
+  // Radio eksklusif (revisi -- array 0-1 elemen dipertahankan cuma utk wire format) -- null
+  // kalau belum diisi sama sekali.
   tindakan: TindakanKunjungan[] | null
+  // Detail obat -- relevan HANYA kalau tindakan mencakup 'diberi_obat', bisa >1 obat.
+  obat_detail: { nama: string, dosis: string | null, frekuensi: string | null }[] | null
   // Alur rujukan (Fase 2/3) -- cara_rujukan diisi kalau tindakan mencakup 'dirujuk_puskesmas',
   // rujukan_status diubah admin_puskesmas/pj_prolanis di /dashboard/rujukan (Fase 3).
   cara_rujukan: CaraRujukan | null
@@ -907,6 +909,7 @@ export interface VisitReportPemeriksaan {
   diastolic?: number | null
   keluhan?: string | null
   tindakan?: TindakanKunjungan[] | null
+  obat_detail?: { nama: string, dosis: string | null, frekuensi: string | null }[] | null
   cara_rujukan?: CaraRujukan | null
   kepatuhan_obat?: KepatuhanObat | null
   sisa_obat?: SisaObat | null

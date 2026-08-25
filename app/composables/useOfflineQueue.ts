@@ -41,9 +41,12 @@ export interface VisitReportDraftPayload {
   uric_acid: string | null
   cholesterol: string | null
   keluhan: string | null
-  // Bisa lebih dari satu tindakan sekaligus (Fase 2, sebelumnya string tunggal).
+  // Radio eksklusif (revisi -- array 0-1 elemen dipertahankan cuma utk wire format, lihat
+  // [id].vue::selectTindakan()).
   tindakan: string[] | null
   cara_rujukan: string | null
+  // Detail obat -- HANYA relevan kalau tindakan=['diberi_obat'], bisa >1 obat.
+  obat_detail: { nama: string; dosis: string; frekuensi: string }[] | null
   // PMO mingguan kader (revisi Bu Kadis) -- kunjungan kader-only, terpisah dari pemeriksaan
   // klinis di atas yang jadi tanggung jawab tenaga_kesehatan.
   kepatuhan_obat: string | null
@@ -319,6 +322,11 @@ export function draftToFormData(draft: VisitReportDraft): FormData {
   if (p.keluhan) fd.append('keluhan', p.keluhan)
   p.tindakan?.forEach((t) => fd.append('tindakan[]', t))
   if (p.cara_rujukan) fd.append('cara_rujukan', p.cara_rujukan)
+  p.obat_detail?.forEach((o, i) => {
+    fd.append(`obat_detail[${i}][nama]`, o.nama)
+    fd.append(`obat_detail[${i}][dosis]`, o.dosis)
+    fd.append(`obat_detail[${i}][frekuensi]`, o.frekuensi)
+  })
   if (p.kepatuhan_obat) fd.append('kepatuhan_obat', p.kepatuhan_obat)
   if (p.sisa_obat) fd.append('sisa_obat', p.sisa_obat)
 

@@ -40,21 +40,40 @@ async function loadDraftCount() {
   draftCount.value = (await offlineQueue.getPendingDrafts()).length
 }
 
-const activeTab = ref('semua')
+// Default "Belum" (permintaan user) -- kader buka halaman ini paling sering justru untuk
+// lihat apa yang BELUM dikunjungi, bukan daftar lengkap tercampur dengan yang sudah selesai.
+const activeTab = ref('belum')
 
 function isToday(dateStr: string): boolean {
   return dateStr === new Date().toISOString().slice(0, 10)
 }
 
+// Urutkan tenggat terdekat ke hari ini duluan (permintaan user) -- string 'YYYY-MM-DD' aman
+// dibandingkan leksikografis, tenggat yang sudah lewat (lebih kecil) otomatis tetap paling atas
+// (paling mendesak), bukan malah terkubur di bawah.
+function byNearestDeadline(a: VisitAssignment, b: VisitAssignment): number {
+  return a.scheduled_date.localeCompare(b.scheduled_date)
+}
+
 const todayCount = computed(
   () => assignmentStore.assignments.filter((a) => isToday(a.scheduled_date) && ['pending', 'in_progress'].includes(a.status)).length
+)
+const belumCount = computed(
+  () => assignmentStore.assignments.filter((a) => ['pending', 'in_progress'].includes(a.status)).length
 )
 const selesaiCount = computed(() => assignmentStore.assignments.filter((a) => a.status === 'completed').length)
 
 const filteredTasks = computed(() => {
   const all = assignmentStore.assignments
   if (activeTab.value === 'hari_ini') {
-    return all.filter((a) => isToday(a.scheduled_date) && ['pending', 'in_progress'].includes(a.status))
+    return all
+      .filter((a) => isToday(a.scheduled_date) && ['pending', 'in_progress'].includes(a.status))
+      .sort(byNearestDeadline)
+  }
+  if (activeTab.value === 'belum') {
+    return all
+      .filter((a) => ['pending', 'in_progress'].includes(a.status))
+      .sort(byNearestDeadline)
   }
   if (activeTab.value === 'selesai') {
     return all.filter((a) => a.status === 'completed')
@@ -62,11 +81,14 @@ const filteredTasks = computed(() => {
   // Tab "Semua" -- tugas yang dibatalkan (cancelled) TIDAK ditampilkan sama sekali (bukan
   // tugas aktif, cuma bikin badge "Tugas" di bottom nav terlihat selalu ada sesuatu padahal
   // tidak perlu ditindaklanjuti). Sisanya: yang BELUM dikunjungi (pending/in_progress)
-  // didahulukan, yang sudah dikunjungi (completed) ditaruh di bawah. Sort stabil (ES2019+),
-  // urutan asli dalam tiap kelompok tetap terjaga.
+  // didahulukan (di antaranya sendiri diurutkan tenggat terdekat dulu), yang sudah dikunjungi
+  // (completed) ditaruh di bawah.
   return all
     .filter((a) => a.status !== 'cancelled')
-    .sort((a, b) => (a.status === 'completed' ? 1 : 0) - (b.status === 'completed' ? 1 : 0))
+    .sort((a, b) => {
+      const doneOrder = (a.status === 'completed' ? 1 : 0) - (b.status === 'completed' ? 1 : 0)
+      return doneOrder !== 0 ? doneOrder : byNearestDeadline(a, b)
+    })
 })
 
 // "Diulang" -- assignment.status kembali 'pending' TAPI sudah punya laporan lama berstatus
@@ -177,11 +199,11 @@ const handleTouchEnd = () => {
     <!-- Custom Tabs -->
     <div class="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl transition-colors duration-300">
       <button
-        @click="activeTab = 'semua'"
+        @click="activeTab = 'belum'"
         class="flex-1 py-2 text-base font-bold rounded-lg transition-all"
-        :class="activeTab === 'semua' ? 'bg-white dark:bg-slate-700 text-primary shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'"
+        :class="activeTab === 'belum' ? 'bg-white dark:bg-slate-700 text-primary shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'"
       >
-        Semua
+        Belum ({{ belumCount }})
       </button>
       <button
         @click="activeTab = 'hari_ini'"
@@ -189,6 +211,13 @@ const handleTouchEnd = () => {
         :class="activeTab === 'hari_ini' ? 'bg-white dark:bg-slate-700 text-primary shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'"
       >
         Hari Ini ({{ todayCount }})
+      </button>
+      <button
+        @click="activeTab = 'semua'"
+        class="flex-1 py-2 text-base font-bold rounded-lg transition-all"
+        :class="activeTab === 'semua' ? 'bg-white dark:bg-slate-700 text-primary shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'"
+      >
+        Semua
       </button>
       <button
         @click="activeTab = 'selesai'"

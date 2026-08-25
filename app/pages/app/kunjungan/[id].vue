@@ -149,6 +149,17 @@ function formatHistoryTindakan(tindakan: string[] | null): string {
   return (tindakan ?? []).map((t) => HISTORY_TINDAKAN_LABELS[t] ?? t).join(", ");
 }
 
+// Ringkasan "Obat A (500mg, 2x/hari), Obat B" -- dosis/frekuensi ikut disertakan HANYA kalau
+// diisi (kader kadang cuma sempat catat nama obatnya saja, lihat SubmitVisitReportRequest).
+function formatHistoryObatDetail(obatDetail: { nama: string, dosis: string | null, frekuensi: string | null }[] | null): string {
+  return (obatDetail ?? [])
+    .map((o) => {
+      const rincian = [o.dosis, o.frekuensi].filter((v) => v && v.trim() !== "").join(", ");
+      return rincian ? `${o.nama} (${rincian})` : o.nama;
+    })
+    .join("; ");
+}
+
 // 'primary'/'companion' = viewer (kader/nakes yang sedang login) BERPERAN di kunjungan itu --
 // "Anda", null = petugas lain sama sekali. Dihitung backend (VisitAssignmentResource::
 // role_in_assignment), bukan ditebak dari nama (lebih akurat, tidak salah kalau ada nama kembar).
@@ -281,10 +292,16 @@ const form = ref({
   uric_acid: "",
   cholesterol: "",
   keluhan: "",
-  // Bisa lebih dari satu tindakan sekaligus (Fase 2, sebelumnya select tunggal) -- lihat
-  // toggleTindakan() di bawah, pola sama dgn toggleAttendee().
+  // Permintaan user (revisi): kembali jadi radio EKSKLUSIF (BUKAN lagi multi-select Fase 2) --
+  // array 0-1 elemen dipertahankan cuma supaya wire format (tindakan[]) & kolom JSON backend
+  // tidak perlu migrasi ulang, tapi UI/perilakunya sekarang "harus pilih salah satu", lihat
+  // selectTindakan() di bawah.
   tindakan: [] as ("diberi_obat" | "dirujuk_puskesmas" | "tidak_ada")[],
   cara_rujukan: "" as "" | "datang_sendiri" | "dijemput_ambulan" | "diantar_keluarga" | "diantar_nakes_kader",
+  // Detail obat (permintaan user) -- HANYA relevan kalau tindakan='diberi_obat', bisa >1 obat.
+  // Diisi siapa pun yang submit laporan ini (kader ATAU nakes kalau kunjungan bareng -- lihat
+  // komentar kartu Tindakan di bawah, sengaja TIDAK digerbang role).
+  obatDetail: [] as { nama: string; dosis: string; frekuensi: string }[],
   kepatuhan_obat: "" as "" | "patuh" | "kurang_patuh" | "tidak_patuh",
   sisa_obat: "" as "" | "cukup" | "menipis" | "habis",
   notes: "",
@@ -306,17 +323,30 @@ const form = ref({
   confirmedPatientLocation: true,
 });
 
-// Tindakan multi-select (Fase 2) -- checkbox-card, pola toggle sama dgn toggleAttendee() di
-// atas. Kader JUGA bisa mencatat tindakan (termasuk rujukan) -- BUKAN cuma nakes, jadi kartu ini
-// (lihat template) sengaja tidak lagi digerbang isNakesAssignment.
-const isTindakanChecked = (value: "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada") => form.value.tindakan.includes(value);
-const toggleTindakan = (value: "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada") => {
-  const idx = form.value.tindakan.indexOf(value);
-  if (idx === -1) form.value.tindakan.push(value);
-  else form.value.tindakan.splice(idx, 1);
-  if (!form.value.tindakan.includes("dirujuk_puskesmas")) form.value.cara_rujukan = "";
+// Tindakan RADIO eksklusif (revisi -- sebelumnya multi-select Fase 2, dibalik lagi atas
+// permintaan user "harus dipilih salah satu, ga bisa dipilih berbarengan"). Kader JUGA bisa
+// mencatat tindakan (termasuk rujukan) -- BUKAN cuma nakes, jadi kartu ini (lihat template)
+// sengaja tidak digerbang isNakesAssignment.
+const isTindakanChecked = (value: "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada") => form.value.tindakan[0] === value;
+const selectTindakan = (value: "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada") => {
+  form.value.tindakan = [value];
+  if (value !== "dirujuk_puskesmas") form.value.cara_rujukan = "";
+  if (value !== "diberi_obat") form.value.obatDetail = [];
+  else if (form.value.obatDetail.length === 0) addObatDetail();
 };
-const isRujukan = computed(() => form.value.tindakan.includes("dirujuk_puskesmas"));
+const isRujukan = computed(() => form.value.tindakan[0] === "dirujuk_puskesmas");
+const isDiberiObat = computed(() => form.value.tindakan[0] === "diberi_obat");
+
+// Detail obat -- minimal 1 baris begitu "Diberi Obat" dipilih (lihat selectTindakan()), kader/
+// nakes bisa tambah lagi kalau >1 obat. Baris kosong (nama belum diisi) DIBUANG saat submit
+// (buildObatDetailPayload()), bukan divalidasi wajib di sini -- biar tidak menghalangi submit
+// kalau sekadar lupa isi salah satu baris tambahan.
+function addObatDetail() {
+  form.value.obatDetail.push({ nama: "", dosis: "", frekuensi: "" });
+}
+function removeObatDetail(index: number) {
+  form.value.obatDetail.splice(index, 1);
+}
 
 const locationName = ref("Mencari lokasi...");
 const countryFlag = ref("");
@@ -925,6 +955,16 @@ function buildPatientFieldUpdates(): Record<string, string | boolean> | null {
   return out;
 }
 
+// Baris kosong (nama belum diisi) dibuang -- kader/nakes bisa saja menambah baris "+ Tambah
+// Obat Lain" lalu tidak jadi mengisinya, tidak perlu ikut terkirim sbg entri kosong.
+function buildObatDetailPayload(): { nama: string; dosis: string; frekuensi: string }[] | null {
+  if (!isDiberiObat.value) return null;
+  const filled = form.value.obatDetail
+    .filter((o) => o.nama.trim() !== "")
+    .map((o) => ({ nama: o.nama.trim(), dosis: o.dosis.trim(), frekuensi: o.frekuensi.trim() }));
+  return filled.length > 0 ? filled : null;
+}
+
 function buildDraftPayload(): VisitReportDraftPayload {
   return {
     assignment_id: assignment.value!.id,
@@ -944,6 +984,7 @@ function buildDraftPayload(): VisitReportDraftPayload {
     keluhan: form.value.keluhan.trim() || null,
     tindakan: form.value.tindakan.length > 0 ? [...form.value.tindakan] : null,
     cara_rujukan: form.value.cara_rujukan || null,
+    obat_detail: buildObatDetailPayload(),
     kepatuhan_obat: form.value.kepatuhan_obat || null,
     sisa_obat: form.value.sisa_obat || null,
     attendeeKaderIds: [...attendeeKaderIds.value],
@@ -974,6 +1015,11 @@ function buildOnlineFormData(payload: VisitReportDraftPayload, photo: Blob): For
   if (payload.keluhan) fd.append("keluhan", payload.keluhan);
   payload.tindakan?.forEach((t) => fd.append("tindakan[]", t));
   if (payload.cara_rujukan) fd.append("cara_rujukan", payload.cara_rujukan);
+  payload.obat_detail?.forEach((o, i) => {
+    fd.append(`obat_detail[${i}][nama]`, o.nama);
+    fd.append(`obat_detail[${i}][dosis]`, o.dosis);
+    fd.append(`obat_detail[${i}][frekuensi]`, o.frekuensi);
+  });
   if (payload.kepatuhan_obat) fd.append("kepatuhan_obat", payload.kepatuhan_obat);
   if (payload.sisa_obat) fd.append("sisa_obat", payload.sisa_obat);
 
@@ -1037,6 +1083,7 @@ function applyDraftPayloadToForm(payload: VisitReportDraftPayload) {
   form.value.keluhan = payload.keluhan ?? "";
   form.value.tindakan = [...(payload.tindakan ?? [])] as typeof form.value.tindakan;
   form.value.cara_rujukan = (payload.cara_rujukan ?? "") as typeof form.value.cara_rujukan;
+  form.value.obatDetail = payload.obat_detail ? payload.obat_detail.map((o) => ({ ...o })) : [];
   form.value.kepatuhan_obat = (payload.kepatuhan_obat ?? "") as typeof form.value.kepatuhan_obat;
   form.value.sisa_obat = (payload.sisa_obat ?? "") as typeof form.value.sisa_obat;
   form.value.confirmedPatientLocation = payload.confirmedPatientLocation;
@@ -1069,6 +1116,7 @@ async function discardRestorableDraft() {
   form.value.keluhan = "";
   form.value.tindakan = [];
   form.value.cara_rujukan = "";
+  form.value.obatDetail = [];
   form.value.kepatuhan_obat = "";
   form.value.sisa_obat = "";
   retakePhoto();
@@ -1308,6 +1356,7 @@ async function submitData() {
 
         <p v-if="assignment.report.keluhan"><span class="font-bold text-slate-700 dark:text-slate-300">Keluhan:</span> <span class="text-slate-600 dark:text-slate-400">"{{ assignment.report.keluhan }}"</span></p>
         <p v-if="assignment.report.tindakan?.length"><span class="font-bold text-slate-700 dark:text-slate-300">Tindakan:</span> <span class="text-slate-600 dark:text-slate-400">{{ formatHistoryTindakan(assignment.report.tindakan) }}</span></p>
+        <p v-if="assignment.report.obat_detail?.length"><span class="font-bold text-slate-700 dark:text-slate-300">Detail Obat:</span> <span class="text-slate-600 dark:text-slate-400">{{ formatHistoryObatDetail(assignment.report.obat_detail) }}</span></p>
         <p v-if="assignment.report.cara_rujukan"><span class="font-bold text-slate-700 dark:text-slate-300">Cara Rujukan:</span> <span class="text-slate-600 dark:text-slate-400">{{ HISTORY_CARA_RUJUKAN_LABELS[assignment.report.cara_rujukan] ?? assignment.report.cara_rujukan }}</span></p>
 
         <div v-if="assignment.report.kepatuhan_obat || assignment.report.sisa_obat" class="flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-slate-100 dark:border-slate-800">
@@ -1549,8 +1598,8 @@ async function submitData() {
            di atas yang memang nakes-only). -->
       <div class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
         <h2 class="font-bold text-slate-800 dark:text-slate-200 text-base mb-1">Tindakan</h2>
-        <p class="text-base text-slate-500 dark:text-slate-400 mb-4">Bisa pilih lebih dari satu kalau perlu.</p>
-        <div class="grid grid-cols-1 gap-2.5">
+        <p class="text-base text-slate-500 dark:text-slate-400 mb-4">Pilih salah satu.</p>
+        <div class="grid grid-cols-1 gap-2.5" role="radiogroup" aria-label="Tindakan">
           <label
             v-for="opt in [
               { value: 'diberi_obat', label: 'Diberi Obat' },
@@ -1561,20 +1610,80 @@ async function submitData() {
             class="flex items-center gap-3 border-2 rounded-xl px-4 py-3 cursor-pointer transition-colors"
             :class="isTindakanChecked(opt.value as any) ? 'border-primary bg-primary/5 dark:bg-primary/10' : 'border-slate-200 dark:border-slate-700'"
           >
-            <input type="checkbox" :checked="isTindakanChecked(opt.value as any)" @change="toggleTindakan(opt.value as any)" class="w-5 h-5 rounded border-slate-300 text-primary focus:ring-primary/30 shrink-0" />
+            <input type="radio" name="tindakan" :checked="isTindakanChecked(opt.value as any)" @change="selectTindakan(opt.value as any)" class="w-5 h-5 border-slate-300 text-primary focus:ring-primary/30 shrink-0" />
             <span class="text-base font-bold text-slate-800 dark:text-white">{{ opt.label }}</span>
           </label>
         </div>
 
         <div v-if="isRujukan" class="mt-4">
-          <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Cara Rujukan <span class="text-danger">*</span></label>
-          <select v-model="form.cara_rujukan" class="w-full bg-transparent border-2 border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 text-base font-medium text-slate-800 dark:text-white focus:border-danger focus:ring-0 outline-none transition-colors appearance-none">
-            <option value="">Pilih cara rujukan...</option>
-            <option value="datang_sendiri">Datang Sendiri</option>
-            <option value="dijemput_ambulan">Dijemput Ambulan</option>
-            <option value="diantar_keluarga">Diantar Keluarga</option>
-            <option value="diantar_nakes_kader">Diantar Nakes/Kader</option>
-          </select>
+          <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Cara Rujukan <span class="text-danger">*</span></label>
+          <div class="grid grid-cols-1 gap-2" role="radiogroup" aria-label="Cara Rujukan">
+            <label
+              v-for="opt in [
+                { value: 'datang_sendiri', label: 'Datang Sendiri' },
+                { value: 'dijemput_ambulan', label: 'Dijemput Ambulan' },
+                { value: 'diantar_keluarga', label: 'Diantar Keluarga' },
+                { value: 'diantar_nakes_kader', label: 'Diantar Nakes/Kader' },
+              ]"
+              :key="opt.value"
+              class="flex items-center gap-3 border-2 rounded-xl px-4 py-2.5 cursor-pointer transition-colors"
+              :class="form.cara_rujukan === opt.value ? 'border-danger bg-danger/5 dark:bg-danger/10' : 'border-slate-200 dark:border-slate-700'"
+            >
+              <input type="radio" name="cara_rujukan" :value="opt.value" v-model="form.cara_rujukan" class="w-5 h-5 border-slate-300 text-danger focus:ring-danger/30 shrink-0" />
+              <span class="text-base font-bold text-slate-800 dark:text-white">{{ opt.label }}</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Detail Obat (permintaan user) -- muncul HANYA saat tindakan='diberi_obat'. Diisi
+             siapa pun yang submit laporan ini (kader ATAU nakes saat kunjungan bareng), sama
+             seperti kartu Tindakan sendiri, TIDAK digerbang isNakesAssignment. -->
+        <div v-if="isDiberiObat" class="mt-4 space-y-3">
+          <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider">Detail Obat</label>
+          <div
+            v-for="(obat, idx) in form.obatDetail"
+            :key="idx"
+            class="border-2 border-slate-200 dark:border-slate-700 rounded-xl p-3 space-y-2.5"
+          >
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-bold text-primary">Obat ke-{{ idx + 1 }}</span>
+              <button
+                v-if="form.obatDetail.length > 1"
+                type="button"
+                @click="removeObatDetail(idx)"
+                class="text-xs font-bold text-danger px-2 py-1 active:scale-95 transition-transform"
+              >
+                Hapus
+              </button>
+            </div>
+            <input
+              v-model="obat.nama"
+              type="text"
+              placeholder="Nama obat"
+              class="w-full bg-transparent border-2 border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 text-base font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none transition-colors"
+            />
+            <div class="grid grid-cols-2 gap-2.5">
+              <input
+                v-model="obat.dosis"
+                type="text"
+                placeholder="Dosis (mis. 500mg)"
+                class="w-full bg-transparent border-2 border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 text-base font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none transition-colors"
+              />
+              <input
+                v-model="obat.frekuensi"
+                type="text"
+                placeholder="Frekuensi (mis. 3x sehari)"
+                class="w-full bg-transparent border-2 border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 text-base font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none transition-colors"
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            @click="addObatDetail"
+            class="w-full py-2.5 border-2 border-dashed border-primary/40 text-primary rounded-xl font-bold text-sm active:scale-[0.98] transition-transform"
+          >
+            + Tambah Obat Lain
+          </button>
         </div>
       </div>
 
@@ -1899,6 +2008,7 @@ async function submitData() {
 
                     <p v-if="entry.report.keluhan"><span class="font-bold text-slate-700 dark:text-slate-300">Keluhan:</span> <span class="text-slate-600 dark:text-slate-400">"{{ entry.report.keluhan }}"</span></p>
                     <p v-if="entry.report.tindakan?.length"><span class="font-bold text-slate-700 dark:text-slate-300">Tindakan:</span> <span class="text-slate-600 dark:text-slate-400">{{ formatHistoryTindakan(entry.report.tindakan) }}</span></p>
+                    <p v-if="entry.report.obat_detail?.length"><span class="font-bold text-slate-700 dark:text-slate-300">Detail Obat:</span> <span class="text-slate-600 dark:text-slate-400">{{ formatHistoryObatDetail(entry.report.obat_detail) }}</span></p>
                     <p v-if="entry.report.cara_rujukan"><span class="font-bold text-slate-700 dark:text-slate-300">Cara Rujukan:</span> <span class="text-slate-600 dark:text-slate-400">{{ HISTORY_CARA_RUJUKAN_LABELS[entry.report.cara_rujukan] ?? entry.report.cara_rujukan }}</span></p>
 
                     <div v-if="entry.report.kepatuhan_obat || entry.report.sisa_obat" class="flex flex-wrap gap-x-4 gap-y-1">
