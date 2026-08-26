@@ -86,10 +86,36 @@ async function loadMonitoring() {
   }
 }
 
-onMounted(() => {
+// Realtime (permintaan user, lewat produli-wss) -- backend membroadcast "visit_report.submitted"
+// ke topic puskesmas:{id}/role:super_admin tiap ada laporan kunjungan masuk (lihat
+// RealtimeBroadcastService::broadcastDashboardSignal() sisi backend), halaman ini sebelumnya
+// cuma load sekali saat mount tanpa cara tahu ada laporan baru tanpa refresh manual. Poll 2 menit
+// dipertahankan sebagai jaring pengaman (socket gagal connect/putus lama), sama pola dgn
+// dashboard/rujukan/index.vue.
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let unsubscribeRealtime: (() => void) | null = null
+
+function refreshOnSignal() {
+  loadVisits()
+  loadMonitoring()
+}
+
+onMounted(async () => {
   loadVisits()
   loadPuskesmasFullList()
   loadMonitoring()
+
+  pollTimer = setInterval(refreshOnSignal, 120_000)
+
+  const { subscribe, dashboardTopic } = useRealtime()
+  const topic = dashboardTopic()
+  if (topic) {
+    unsubscribeRealtime = await subscribe(topic, 'visit_report.submitted', refreshOnSignal)
+  }
+})
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer)
+  unsubscribeRealtime?.()
 })
 
 const searchQuery = ref('')

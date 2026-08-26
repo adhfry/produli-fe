@@ -42,6 +42,12 @@ export default defineNuxtConfig({
       apiBase:
         process.env.NUXT_PUBLIC_API_BASE || "http://localhost:8033/api/v1",
 
+      // produli-wss (repo terpisah D:\Project_Web\produli-wss) -- endpoint socket Phoenix
+      // ada di path "/socket" (lihat lib/produli_wss_web/endpoint.ex di repo itu), useRealtime.ts
+      // yang menambahkan path itu, di sini cukup origin-nya saja.
+      wssBase:
+        process.env.NUXT_PUBLIC_WSS_BASE || "ws://localhost:4001",
+
       tileServerUrl:
         process.env.NUXT_PUBLIC_TILE_SERVER_URL ||
         "https://tiles.labkesdasumenep.cloud",

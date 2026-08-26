@@ -77,6 +77,10 @@ export const useAuthStore = defineStore(
     }
 
     function clearSession() {
+      // Putus socket produli-wss di SINI (bukan cuma di logout()) supaya kedua jalur yang
+      // mengosongkan sesi -- logout eksplisit DAN refresh-token ditolak server (lihat
+      // restoreSession() di bawah) -- sama-sama tidak menyisakan koneksi realtime milik sesi lama.
+      useRealtime().disconnect()
       accessToken.value = null
       expiresAt.value = null
       user.value = null

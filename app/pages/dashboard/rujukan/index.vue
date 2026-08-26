@@ -48,13 +48,28 @@ function detectNewRujukan(items: Rujukan[]) {
   seenIds.value = currentIds
 }
 
+// REVISI (permintaan user, realtime lewat produli-wss) -- SEBELUMNYA polling 15 detik jadi
+// jalur utama. Sekarang event "pasien_dirujuk" dari topic dashboardTopic() (puskesmas:{id} atau
+// role:super_admin, lihat useRealtime.ts & RealtimeBroadcastService sisi backend) memicu
+// loadRujukan() nyaris seketika begitu kader/nakes submit rujukan. Polling 2 menit dipertahankan
+// TURUN dari 15 detik jadi cuma jaring pengaman (socket gagal connect/offline/produli-wss down)
+// -- alarm sfx tetap sama seperti sebelumnya, dipicu detectNewRujukan() setiap loadRujukan()
+// selesai, tidak peduli dipanggil dari websocket atau fallback poll.
 let pollTimer: ReturnType<typeof setInterval> | null = null
-onMounted(() => {
+let unsubscribeRealtime: (() => void) | null = null
+onMounted(async () => {
   loadRujukan()
-  pollTimer = setInterval(loadRujukan, 15000)
+  pollTimer = setInterval(loadRujukan, 120_000)
+
+  const { subscribe, dashboardTopic } = useRealtime()
+  const topic = dashboardTopic()
+  if (topic) {
+    unsubscribeRealtime = await subscribe(topic, 'pasien_dirujuk', () => loadRujukan())
+  }
 })
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  unsubscribeRealtime?.()
 })
 watch(filterStatus, () => loadRujukan())
 
