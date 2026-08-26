@@ -52,6 +52,13 @@ export default defineNuxtConfig({
         process.env.NUXT_PUBLIC_TILE_SERVER_URL ||
         "https://tiles.labkesdasumenep.cloud",
 
+      // KHUSUS branch `dev`/lingkungan simulasi -- kalau diisi (mis. "SIMULASI"), tampil
+      // sebagai ribbon peringatan di layouts/dashboard.vue & layouts/public.vue supaya
+      // tidak ada yang salah kira data demo sebagai data produksi live saat presentasi.
+      // SENGAJA kosong ("") di .env.example/default supaya build produksi normal tidak
+      // pernah menampilkannya tanpa diisi eksplisit.
+      appEnvLabel: process.env.NUXT_PUBLIC_APP_ENV_LABEL || "",
+
       // Firebase Cloud Messaging (push notification) — semua nilai ini config client-side
       // publik Firebase (aman diekspos), lihat .env.example untuk cara dapatkannya.
       firebase: {
