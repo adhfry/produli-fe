@@ -10,6 +10,35 @@
 // supaya tidak ada unhandled promise rejection di console).
 const audioCache: Record<string, HTMLAudioElement> = {}
 
+// Switch "Notifikasi Darurat" (permintaan user, default AKTIF) -- /dashboard/profil/pengaturan.vue
+// yang mengubahnya. localStorage (BUKAN token/kredensial, jadi tidak melanggar larangan
+// localStorage di CLAUDE.md -- itu cuma soal token auth) supaya preferensi per-DEVICE ini tetap
+// tersimpan lintas sesi tanpa perlu endpoint backend baru (murni preferensi bunyi/UI lokal, tidak
+// ada nilai buat siapa pun kalau disinkron ke server/device lain). Default true kalau belum
+// pernah diatur -- staf yang benar-benar butuh alarm ini (respons cepat rujukan) tidak boleh
+// diam-diam nonaktif tanpa mereka sadar.
+const EMERGENCY_ALARM_STORAGE_KEY = 'produli_emergency_alarm_enabled'
+
+export function isEmergencyAlarmEnabled(): boolean {
+  if (import.meta.server) return true
+  try {
+    const stored = localStorage.getItem(EMERGENCY_ALARM_STORAGE_KEY)
+    return stored === null ? true : stored === '1'
+  } catch {
+    return true
+  }
+}
+
+export function setEmergencyAlarmEnabled(enabled: boolean) {
+  if (import.meta.server) return
+  try {
+    localStorage.setItem(EMERGENCY_ALARM_STORAGE_KEY, enabled ? '1' : '0')
+  } catch {
+    // Storage penuh/diblokir (private browsing dsb) -- preferensi cuma gagal tersimpan, bukan
+    // error yang perlu menghentikan apa pun.
+  }
+}
+
 function getAudio(key: string, src: string): HTMLAudioElement | null {
   if (import.meta.server) return null
   if (!audioCache[key]) {
@@ -36,6 +65,7 @@ export function useNotificationSound() {
   }
 
   function playAlarm() {
+    if (!isEmergencyAlarmEnabled()) return
     playSafely(getAudio('alarm', '/sfx/alarm-darurat.webm'))
   }
 

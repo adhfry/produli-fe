@@ -45,6 +45,25 @@ export function useApi() {
         void navigateTo(target)
       }
 
+      // BUG KRITIS (laporan user): sebelumnya 401 tidak ditangani sama sekali di sini -- pesan
+      // error mentah backend ("Anda perlu login untuk mengakses resource ini") cuma tampil apa
+      // adanya di manapun caller kebetulan menampilkannya (toast/banner), user tersangkut di
+      // halaman yang sama sampai refresh manual. authStore sudah punya refresh proaktif
+      // (scheduleProactiveRefresh() di stores/auth.ts) yang mencegah SEBAGIAN BESAR 401 ini
+      // terjadi sama sekali -- blok ini jaring pengaman utk sisanya (mis. refresh proaktif
+      // terlewat karena laptop baru bangun dari sleep, atau token dicabut manual/role berubah
+      // di sisi lain). Cuma di area privat (/dashboard, /app -- satu-satunya yang dipasangi
+      // middleware 'auth', lihat middleware/auth.ts) supaya TIDAK ikut memicu redirect paksa saat
+      // pengunjung anonim membuka halaman publik (refresh() boot-time di auth.client.ts memang
+      // sengaja dipanggil di semua halaman dan WAJAR 401 kalau belum pernah login).
+      const isPrivateArea = route.path.startsWith('/dashboard') || route.path.startsWith('/app')
+      if (response.status === 401 && isPrivateArea && route.path !== '/auth/login') {
+        const authStore = useAuthStore()
+        authStore.clearSession()
+        const target: string = `/auth/login?redirect=${encodeURIComponent(route.fullPath)}`
+        void navigateTo(target)
+      }
+
       throw new ApiError(
         body?.message ?? 'Terjadi kesalahan pada server',
         response.status,

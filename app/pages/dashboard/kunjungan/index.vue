@@ -611,23 +611,33 @@ const isPjProlanis = computed(() => (authStore.roles ?? []).includes('pj_prolani
 // per-supervisi), jadi tombol tetap ditampilkan untuk semua pj_prolanis; 403 kalau bukan
 // kadernya ditangani sebagai error biasa, bukan disembunyikan di frontend (policy tetap sumber
 // kebenaran, bukan ditebak di sini).
-const isAccepting = ref(false)
+//
+// REVISI (laporan user: "tombol konfirmasi pj prolanis dimana?") -- sebelumnya SATU-SATUNYA cara
+// menerima laporan adalah buka modal detail dulu (klik ikon mata), scroll ke bawah, baru ketemu
+// tombolnya -- tidak ada penanda apa pun di tabel sendiri kalau suatu baris menunggu tindakan PJ,
+// beda dengan super_admin yang sudah dapat tombol validasi cepat langsung di baris (lihat
+// quickValidate() di atas). acceptReport() sekarang terima parameter `visit` eksplisit (dipanggil
+// baik dari tombol cepat di baris tabel MAUPUN dari dalam modal, bukan cuma dari selectedVisit)
+// supaya bisa dipakai di tabel, dan menyamakan `visit` dgn `selectedVisit` kalau sedang dibuka.
+const acceptingVisitId = ref(null)
 const acceptError = ref('')
-const acceptReport = async () => {
-  if (!selectedVisit.value?.report) return
-  isAccepting.value = true
+const acceptReport = async (visit) => {
+  if (!visit?.report) return
+  acceptingVisitId.value = visit.id
   acceptError.value = ''
   try {
     const api = useApi()
-    const res = await api(`/visit-reports/${selectedVisit.value.report.id}/accept`, { method: 'PATCH' })
-    selectedVisit.value.report = res.data
-    const idx = visitsList.value.findIndex((v) => v.id === selectedVisit.value.id)
+    const res = await api(`/visit-reports/${visit.report.id}/accept`, { method: 'PATCH' })
+    visit.report = res.data
+    if (selectedVisit.value?.id === visit.id) selectedVisit.value.report = res.data
+    const idx = visitsList.value.findIndex((v) => v.id === visit.id)
     if (idx !== -1) visitsList.value[idx].report = res.data
     useToast().add({ title: 'Laporan kunjungan diterima', color: 'success' })
   } catch (e) {
     acceptError.value = e instanceof ApiError ? e.message : 'Gagal menerima laporan.'
+    useToast().add({ title: acceptError.value, color: 'error' })
   } finally {
-    isAccepting.value = false
+    acceptingVisitId.value = null
   }
 }
 
@@ -868,15 +878,25 @@ function canReassignVisit(visit) {
 const visitToReassign = ref(null)
 const showReassignModal = ref(false)
 const reassignDate = ref('')
+const reassignDateInputRef = ref(null)
 const isReassigning = ref(false)
 const reassignError = ref('')
 
-function requestReassign(visit) {
+// Flatpickr (permintaan user: konsisten di SELURUH input tanggal, config bersama lewat
+// useFlatpickr.ts) -- sebelumnya <input type="date"> native, tidak konsisten dgn picker lain di
+// halaman ini & lintas browser/OS tampilannya berbeda-beda.
+function initReassignDatePicker() {
+  initDatePicker(reassignDateInputRef.value, reassignDate, { minDate: 'today' })
+}
+
+async function requestReassign(visit) {
   visitToReassign.value = visit
   reassignDate.value = ''
   reassignError.value = ''
   showReassignModal.value = true
   openActionsForVisitId.value = null
+  await nextTick()
+  initReassignDatePicker()
 }
 
 async function confirmReassign() {
@@ -914,7 +934,14 @@ async function confirmReassign() {
     useToast().add({ title: 'Kunjungan berhasil ditugaskan ulang', color: 'success' })
     await loadVisits(currentPage.value)
   } catch (e) {
-    reassignError.value = e instanceof ApiError ? e.message : 'Gagal menugaskan ulang kunjungan.'
+    // REVISI (laporan user: "tugaskan kembali gagal") -- sebelumnya cuma e.message (pesan
+    // generik Laravel "The given data was invalid.") ditampilkan, alasan SPESIFIK gagalnya
+    // (mis. "Wilayah pasien belum resolved", "Kader bukan dari puskesmas yang sama", "Pasien
+    // ini sudah punya assignment aktif" -- lihat VisitAssignmentService::ensureWilayahResolvable/
+    // ensureKaderAvailable) ada di e.errors tapi tidak pernah ditampilkan, jadi user tidak tahu
+    // alasan sebenarnya & menebak-nebak (format tanggal, dst). Pola sama dgn app/kunjungan/[id].vue.
+    const firstFieldError = e instanceof ApiError && e.errors ? Object.values(e.errors)[0]?.[0] : null
+    reassignError.value = firstFieldError ?? (e instanceof ApiError ? e.message : 'Gagal menugaskan ulang kunjungan.')
   } finally {
     isReassigning.value = false
   }
@@ -1174,6 +1201,17 @@ async function confirmReassign() {
                   >
                      {{ visit.report.validation_status === 'pending' ? 'Menunggu Validasi Admin' : visit.report.validation_status === 'valid' ? 'Divalidasi Admin' : 'Ditolak Admin' }}
                   </span>
+                  <!-- Status penerimaan PJ Prolanis -- sebelumnya CUMA tampil di dalam modal detail
+                       (temuan lapangan: PJ Prolanis tidak tahu baris mana yang perlu ditindaklanjuti
+                       tanpa buka satu-satu). Tampil untuk SEMUA role (bukan cuma PJ) supaya
+                       admin_puskesmas/super_admin juga bisa pantau laporan mana yang belum diterima. -->
+                  <span
+                    v-if="visit.report"
+                    class="block max-w-min mx-auto mt-1.5 px-2.5 py-1 rounded-md text-[9px] font-bold uppercase tracking-wider whitespace-nowrap"
+                    :class="visit.report.pj_reviewed_at ? 'bg-success/10 text-success border border-success/20' : 'bg-warning/10 text-warning-700 border border-warning/20'"
+                  >
+                     {{ visit.report.pj_reviewed_at ? 'Diterima PJ' : 'Menunggu Diterima PJ' }}
+                  </span>
                </td>
                <td class="py-4 px-5">
                   <div v-if="visit.report?.systolic" class="flex gap-2">
@@ -1229,6 +1267,19 @@ async function confirmReassign() {
                         </Transition>
                      </div>
                   </template>
+                  <!-- Aksi cepat terima laporan -- KHUSUS pj_prolanis, muncul cuma kalau ada laporan &
+                       belum diterima (padanan tombol validasi cepat super_admin di atas, supaya
+                       PJ Prolanis tidak perlu buka modal dulu buat tahu/menjalankan aksinya). -->
+                  <button
+                    v-if="isPjProlanis && visit.report && !visit.report.pj_reviewed_at"
+                    @click="acceptReport(visit)"
+                    :disabled="acceptingVisitId === visit.id"
+                    title="Terima Laporan"
+                    class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-info hover:border-info transition-colors p-2 rounded-xl shadow-sm mr-2 disabled:opacity-50"
+                  >
+                     <LucideLoader2 v-if="acceptingVisitId === visit.id" class="w-4 h-4 animate-spin" />
+                     <LucideCheckCircle v-else class="w-4 h-4" />
+                  </button>
                   <button @click="viewVisit(visit)" title="Lihat Detail" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-primary hover:border-primary transition-colors p-2 rounded-xl shadow-sm mr-2">
                      <LucideEye class="w-4 h-4" />
                   </button>
@@ -1648,10 +1699,10 @@ async function confirmReassign() {
                       <span v-else class="px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-warning/10 text-warning border border-warning/20">Menunggu Diterima PJ</span>
 
                       <div v-if="isPjProlanis && !selectedVisit.report.pj_reviewed_at" class="mt-3">
-                         <button @click="acceptReport" :disabled="isAccepting" class="w-full py-3 px-4 rounded-xl font-bold text-white bg-info hover:bg-info/90 transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-70 active:scale-[0.98]">
-                            <LucideCheckCircle class="w-5 h-5" v-if="!isAccepting"/>
+                         <button @click="acceptReport(selectedVisit)" :disabled="acceptingVisitId === selectedVisit.id" class="w-full py-3 px-4 rounded-xl font-bold text-white bg-info hover:bg-info/90 transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-70 active:scale-[0.98]">
+                            <LucideCheckCircle class="w-5 h-5" v-if="acceptingVisitId !== selectedVisit.id"/>
                             <LucideLoader2 v-else class="w-5 h-5 animate-spin" />
-                            {{ isAccepting ? 'Memproses...' : 'Terima Laporan' }}
+                            {{ acceptingVisitId === selectedVisit.id ? 'Memproses...' : 'Terima Laporan' }}
                          </button>
                          <p v-if="acceptError" class="text-xs font-semibold text-danger mt-2">{{ acceptError }}</p>
                       </div>
@@ -1882,10 +1933,11 @@ async function confirmReassign() {
           </p>
           <label class="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-1.5">Tanggal Kunjungan Baru</label>
           <input
-            v-model="reassignDate"
-            type="date"
-            :min="new Date().toISOString().slice(0, 10)"
-            class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none"
+            ref="reassignDateInputRef"
+            type="text"
+            placeholder="Pilih tanggal..."
+            readonly
+            class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none bg-white cursor-pointer"
           />
           <p v-if="reassignError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2 mt-4">
             {{ reassignError }}

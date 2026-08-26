@@ -12,6 +12,24 @@ useHead({
 const authStore = useAuthStore()
 const toast = useToast()
 
+// --- Notifikasi Darurat (alarm suara /dashboard/rujukan + FCM foreground danger, permintaan
+// user, default aktif) -- preferensi per-DEVICE murni lokal (localStorage lewat
+// useNotificationSound.ts), tidak ada endpoint backend, lihat docblock EMERGENCY_ALARM_STORAGE_KEY
+// di sana untuk alasannya. ref di-init `true` (SSR-safe placeholder) lalu diselaraskan ke nilai
+// localStorage sungguhan begitu di client (onMounted) -- mencegah hydration mismatch.
+const emergencyAlarmEnabled = ref(true)
+onMounted(() => {
+  emergencyAlarmEnabled.value = isEmergencyAlarmEnabled()
+})
+function toggleEmergencyAlarm() {
+  emergencyAlarmEnabled.value = !emergencyAlarmEnabled.value
+  setEmergencyAlarmEnabled(emergencyAlarmEnabled.value)
+  toast.add({
+    title: emergencyAlarmEnabled.value ? 'Alarm notifikasi darurat diaktifkan' : 'Alarm notifikasi darurat dimatikan',
+    color: 'success'
+  })
+}
+
 // --- Notifikasi email (PATCH /auth/profile) ---
 const isSavingNotif = ref(false)
 const notifError = ref('')
@@ -190,6 +208,26 @@ async function submitChangePassword() {
         </button>
       </div>
       <p v-if="notifError" class="text-xs font-semibold text-danger mt-2">{{ notifError }}</p>
+
+      <div class="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 mt-3">
+        <div>
+          <p class="text-sm font-bold text-slate-700">Alarm Notifikasi Darurat</p>
+          <p class="text-xs text-slate-500">Bunyikan alarm di perangkat ini saat ada rujukan/kunjungan baru yang butuh perhatian segera.</p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          :aria-checked="emergencyAlarmEnabled"
+          @click="toggleEmergencyAlarm"
+          class="relative inline-flex w-12 h-7 items-center rounded-full transition-colors shrink-0"
+          :class="emergencyAlarmEnabled ? 'bg-primary' : 'bg-slate-300'"
+        >
+          <span
+            class="inline-block w-5 h-5 rounded-full bg-white shadow-sm transition-transform"
+            :class="emergencyAlarmEnabled ? 'translate-x-6' : 'translate-x-1'"
+          ></span>
+        </button>
+      </div>
     </div>
 
     <!-- Akun Google -->
