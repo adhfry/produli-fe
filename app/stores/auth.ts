@@ -61,6 +61,47 @@ export const useAuthStore = defineStore(
       if (response.roles) {
         roles.value = response.roles
       }
+      scheduleProactiveRefresh()
+    }
+
+    // BUG KRITIS (laporan user): halaman yang dibiarkan standby (mis. layar monitoring puskesmas)
+    // menampilkan error mentah "Anda perlu login..." begitu access token (TTL 30 menit,
+    // config('sanctum.expiration')) kedaluwarsa -- sebelumnya TIDAK ADA mekanisme refresh proaktif
+    // sama sekali, authStore.refresh() cuma dipanggil reaktif (boot app, event 'online', middleware
+    // navigasi) sehingga sesi baru "ketahuan" habis saat request berikutnya gagal, dan tidak ada
+    // yang meredirect ke /auth/login (lihat juga fix di useApi.ts onResponseError untuk jaring
+    // pengaman kalau proactive refresh ini sendiri gagal/terlewat, mis. laptop baru bangun dari
+    // sleep melewati beberapa siklus expiry sekaligus).
+    //
+    // Refresh dijadwalkan 2 menit SEBELUM expiresAt (bukan tepat saat itu) supaya ada margin utk
+    // request yang sedang berjalan + latensi jaringan. Timer di-reset di setSession() (dipanggil
+    // dari login/refresh/loginWithGoogleCode) supaya selalu menjadwal ulang dari expiresAt TERBARU,
+    // dan dihentikan di clearSession() supaya tidak terus jalan setelah logout.
+    let proactiveRefreshTimer: ReturnType<typeof setTimeout> | null = null
+    function scheduleProactiveRefresh() {
+      if (proactiveRefreshTimer) clearTimeout(proactiveRefreshTimer)
+      if (!expiresAt.value || !import.meta.client) return
+
+      const msUntilExpiry = new Date(expiresAt.value).getTime() - Date.now()
+      const REFRESH_MARGIN_MS = 2 * 60 * 1000
+      const delay = Math.max(msUntilExpiry - REFRESH_MARGIN_MS, 5000)
+
+      proactiveRefreshTimer = setTimeout(async () => {
+        try {
+          await refresh()
+        } catch {
+          // refresh() sendiri sudah membedakan 'rejected' (sesi sungguhan habis) dari
+          // 'network-unknown' (offline sementara, jangan logout) -- kalau sungguhan rejected,
+          // langsung antar ke /auth/login SEKARANG (bukan menunggu request berikutnya kena 401)
+          // supaya halaman standby yang tidak sedang manggil API apa pun tetap ter-redirect.
+          if (restoreStatus.value === 'rejected' && import.meta.client) {
+            const route = useRoute()
+            if (!route.path.startsWith('/auth/login')) {
+              void navigateTo(`/auth/login?redirect=${encodeURIComponent(route.fullPath)}`)
+            }
+          }
+        }
+      }, delay)
     }
 
     // Snapshot profil tampilan non-rahasia (docs/planning/12) -- dipanggil setelah user/roles
@@ -81,6 +122,10 @@ export const useAuthStore = defineStore(
       // mengosongkan sesi -- logout eksplisit DAN refresh-token ditolak server (lihat
       // restoreSession() di bawah) -- sama-sama tidak menyisakan koneksi realtime milik sesi lama.
       useRealtime().disconnect()
+      if (proactiveRefreshTimer) {
+        clearTimeout(proactiveRefreshTimer)
+        proactiveRefreshTimer = null
+      }
       accessToken.value = null
       expiresAt.value = null
       user.value = null

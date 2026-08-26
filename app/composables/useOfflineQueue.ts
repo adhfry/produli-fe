@@ -41,8 +41,8 @@ export interface VisitReportDraftPayload {
   uric_acid: string | null
   cholesterol: string | null
   keluhan: string | null
-  // Radio eksklusif (revisi -- array 0-1 elemen dipertahankan cuma utk wire format, lihat
-  // [id].vue::selectTindakan()).
+  // diberi_obat & dirujuk_puskesmas bisa combo (0-2 elemen), tidak_ada eksklusif (selalu sendiri)
+  // -- lihat [id].vue::toggleTindakan().
   tindakan: string[] | null
   cara_rujukan: string | null
   // Detail obat -- HANYA relevan kalau tindakan=['diberi_obat'], bisa >1 obat.

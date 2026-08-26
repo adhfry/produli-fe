@@ -1,5 +1,5 @@
 // Kontrak API backend PRODULI — sumber kebenaran: Controller/Request/Resource di repo backend
-// (D:\Project_Web\produli-backend-dev), bukan docs/planning/05 (itu cuma peta endpoint).
+// (D:\Project_Web\produli-backend), bukan docs/planning/05 (itu cuma peta endpoint).
 // Tambahkan tipe domain lain di sini begitu composable/store baru mulai dibangun.
 
 export interface ApiSuccessEnvelope<T> {
@@ -476,8 +476,8 @@ export interface VisitReport {
   systolic: number | null
   diastolic: number | null
   keluhan: string | null
-  // Radio eksklusif (revisi -- array 0-1 elemen dipertahankan cuma utk wire format) -- null
-  // kalau belum diisi sama sekali.
+  // diberi_obat & dirujuk_puskesmas bisa combo (0-2 elemen), tidak_ada eksklusif (selalu
+  // sendiri) -- null kalau belum diisi sama sekali.
   tindakan: TindakanKunjungan[] | null
   // Detail obat -- relevan HANYA kalau tindakan mencakup 'diberi_obat', bisa >1 obat.
   obat_detail: { nama: string, dosis: string | null, frekuensi: string | null }[] | null

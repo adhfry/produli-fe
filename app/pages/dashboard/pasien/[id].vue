@@ -362,6 +362,7 @@ const tkOptions = ref<TenagaKesehatan[]>([])
 const isLoadingTkOptions = ref(false)
 const selectedTkId = ref<number | null>(null)
 const assignTkDate = ref(new Date().toISOString().slice(0, 10))
+const assignTkDateInputRef = ref<HTMLElement | null>(null)
 const isAssigningTk = ref(false)
 const assignTkError = ref('')
 
@@ -378,6 +379,10 @@ async function openAssignTkModal() {
   selectedTkId.value = null
   selectedKaderId.value = null
   assignTkDate.value = new Date().toISOString().slice(0, 10)
+  // Flatpickr (permintaan user: konsisten di seluruh input tanggal) -- sebelumnya <input
+  // type="date"> native, lihat useFlatpickr.ts untuk config bersama.
+  await nextTick()
+  initDatePicker(assignTkDateInputRef.value, assignTkDate, { minDate: 'today', defaultDate: assignTkDate.value })
   if (!tkOptions.value.length) {
     isLoadingTkOptions.value = true
     try {
@@ -1058,7 +1063,7 @@ async function triggerSyncFromHistory() {
           </div>
           <div>
             <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tanggal Kunjungan Pertama</label>
-            <input v-model="assignTkDate" type="date" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+            <input ref="assignTkDateInputRef" type="text" placeholder="Pilih tanggal..." readonly class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white cursor-pointer" />
           </div>
           <div>
             <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kader Pendamping (opsional)</label>

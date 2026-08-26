@@ -323,19 +323,27 @@ const form = ref({
   confirmedPatientLocation: true,
 });
 
-// Tindakan RADIO eksklusif (revisi -- sebelumnya multi-select Fase 2, dibalik lagi atas
-// permintaan user "harus dipilih salah satu, ga bisa dipilih berbarengan"). Kader JUGA bisa
-// mencatat tindakan (termasuk rujukan) -- BUKAN cuma nakes, jadi kartu ini (lihat template)
-// sengaja tidak digerbang isNakesAssignment.
-const isTindakanChecked = (value: "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada") => form.value.tindakan[0] === value;
-const selectTindakan = (value: "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada") => {
-  form.value.tindakan = [value];
-  if (value !== "dirujuk_puskesmas") form.value.cara_rujukan = "";
-  if (value !== "diberi_obat") form.value.obatDetail = [];
+// Tindakan REVISI KEDUA (permintaan user) -- 'diberi_obat' & 'dirujuk_puskesmas' sekarang bisa
+// di-combo ATAU pilih salah satu (checkbox independen antar keduanya), tapi 'tidak_ada' TETAP
+// eksklusif: memilihnya membuang pilihan lain, dan memilih diberi_obat/dirujuk_puskesmas
+// otomatis membuang 'tidak_ada' kalau sedang aktif (lihat SubmitVisitReportRequest sisi backend
+// utk aturan validasi yang sama persis). Kader JUGA bisa mencatat tindakan (termasuk rujukan) --
+// BUKAN cuma nakes, jadi kartu ini (lihat template) sengaja tidak digerbang isNakesAssignment.
+const isTindakanChecked = (value: "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada") => form.value.tindakan.includes(value);
+const toggleTindakan = (value: "diberi_obat" | "dirujuk_puskesmas" | "tidak_ada") => {
+  if (isTindakanChecked(value)) {
+    form.value.tindakan = form.value.tindakan.filter((t) => t !== value);
+  } else if (value === "tidak_ada") {
+    form.value.tindakan = ["tidak_ada"];
+  } else {
+    form.value.tindakan = [...form.value.tindakan.filter((t) => t !== "tidak_ada"), value];
+  }
+  if (!form.value.tindakan.includes("dirujuk_puskesmas")) form.value.cara_rujukan = "";
+  if (!form.value.tindakan.includes("diberi_obat")) form.value.obatDetail = [];
   else if (form.value.obatDetail.length === 0) addObatDetail();
 };
-const isRujukan = computed(() => form.value.tindakan[0] === "dirujuk_puskesmas");
-const isDiberiObat = computed(() => form.value.tindakan[0] === "diberi_obat");
+const isRujukan = computed(() => form.value.tindakan.includes("dirujuk_puskesmas"));
+const isDiberiObat = computed(() => form.value.tindakan.includes("diberi_obat"));
 
 // Detail obat -- minimal 1 baris begitu "Diberi Obat" dipilih (lihat selectTindakan()), kader/
 // nakes bisa tambah lagi kalau >1 obat. Baris kosong (nama belum diisi) DIBUANG saat submit
@@ -1598,8 +1606,8 @@ async function submitData() {
            di atas yang memang nakes-only). -->
       <div class="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
         <h2 class="font-bold text-slate-800 dark:text-slate-200 text-base mb-1">Tindakan</h2>
-        <p class="text-base text-slate-500 dark:text-slate-400 mb-4">Pilih salah satu.</p>
-        <div class="grid grid-cols-1 gap-2.5" role="radiogroup" aria-label="Tindakan">
+        <p class="text-base text-slate-500 dark:text-slate-400 mb-4">Diberi obat &amp; dirujuk bisa dipilih bersamaan. "Tidak Ada Tindakan" tidak bisa digabung dengan pilihan lain.</p>
+        <div class="grid grid-cols-1 gap-2.5" role="group" aria-label="Tindakan">
           <label
             v-for="opt in [
               { value: 'diberi_obat', label: 'Diberi Obat' },
@@ -1610,7 +1618,7 @@ async function submitData() {
             class="flex items-center gap-3 border-2 rounded-xl px-4 py-3 cursor-pointer transition-colors"
             :class="isTindakanChecked(opt.value as any) ? 'border-primary bg-primary/5 dark:bg-primary/10' : 'border-slate-200 dark:border-slate-700'"
           >
-            <input type="radio" name="tindakan" :checked="isTindakanChecked(opt.value as any)" @change="selectTindakan(opt.value as any)" class="w-5 h-5 border-slate-300 text-primary focus:ring-primary/30 shrink-0" />
+            <input type="checkbox" :checked="isTindakanChecked(opt.value as any)" @change="toggleTindakan(opt.value as any)" class="w-5 h-5 rounded border-slate-300 text-primary focus:ring-primary/30 shrink-0" />
             <span class="text-base font-bold text-slate-800 dark:text-white">{{ opt.label }}</span>
           </label>
         </div>

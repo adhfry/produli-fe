@@ -168,8 +168,15 @@ const editError = ref('')
 const editFieldErrors = ref<Record<string, string[]>>({})
 const itemBeingEdited = ref<TenagaKesehatan | null>(null)
 const editForm = ref<UpdateTenagaKesehatanPayload>({})
+const editTglLahirInputRef = ref<HTMLElement | null>(null)
+// Getter/setter (bukan ref biasa) -- initDatePicker() cuma butuh bentuk { value: string }, target
+// sebenarnya adalah properti bersarang editForm.value.tgl_lahir, bukan ref berdiri sendiri.
+const editTglLahirTarget = {
+  get value() { return editForm.value.tgl_lahir ?? '' },
+  set value(v: string) { editForm.value.tgl_lahir = v || null }
+}
 
-function openEditModal(item: TenagaKesehatan) {
+async function openEditModal(item: TenagaKesehatan) {
   itemBeingEdited.value = item
   editForm.value = {
     name: item.user?.name ?? '',
@@ -183,6 +190,11 @@ function openEditModal(item: TenagaKesehatan) {
   editError.value = ''
   editFieldErrors.value = {}
   showEditModal.value = true
+  // Flatpickr (permintaan user: konsisten di seluruh input tanggal) -- sebelumnya <input
+  // type="date"> native, lihat useFlatpickr.ts untuk config bersama. maxDate 'today' (bukan
+  // minDate) -- tanggal lahir tidak mungkin di masa depan.
+  await nextTick()
+  initDatePicker(editTglLahirInputRef.value, editTglLahirTarget, { maxDate: 'today', defaultDate: item.tgl_lahir ?? undefined })
 }
 
 async function saveEdit() {
@@ -560,7 +572,7 @@ async function confirmResetPassword() {
                 </div>
                 <div>
                    <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tanggal Lahir</label>
-                   <input v-model="editForm.tgl_lahir" type="date" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                   <input ref="editTglLahirInputRef" type="text" placeholder="Pilih tanggal..." readonly class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white cursor-pointer" />
                 </div>
              </div>
           </div>
