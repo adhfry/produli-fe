@@ -859,6 +859,46 @@ async function confirmCancel() {
   }
 }
 
+// --- Hapus Kunjungan (permintaan user, takut ada kunjungan yang BENAR-BENAR salah) -- DELETE
+// /visit-assignments/{id}, VisitAssignmentPolicy::delete(): super_admin SAJA (beda dari
+// Batalkan di atas yang admin_puskesmas/pj_prolanis juga boleh) -- ini soft-delete permanen
+// dari tampilan (baris + laporan terkait hilang dari SEMUA daftar/riwayat), bukan cuma ubah
+// status, jadi digerbang lebih ketat. Alasan WAJIB diisi (beda dari Batalkan yang opsional).
+const canDeleteAssignment = computed(() => isSuperAdmin.value)
+const visitToDelete = ref(null)
+const showDeleteConfirm = ref(false)
+const deleteReason = ref('')
+const isDeleting = ref(false)
+const deleteError = ref('')
+
+function requestDelete(visit) {
+  visitToDelete.value = visit
+  deleteReason.value = ''
+  deleteError.value = ''
+  showDeleteConfirm.value = true
+}
+
+async function confirmDelete() {
+  if (!visitToDelete.value || !deleteReason.value.trim()) return
+  isDeleting.value = true
+  deleteError.value = ''
+  try {
+    const api = useApi()
+    await api(`/visit-assignments/${visitToDelete.value.id}`, {
+      method: 'DELETE',
+      body: { reason: deleteReason.value.trim() }
+    })
+    showDeleteConfirm.value = false
+    useToast().add({ title: 'Kunjungan berhasil dihapus', color: 'success' })
+    await loadVisits(currentPage.value)
+  } catch (e) {
+    const firstFieldError = e instanceof ApiError && e.errors ? Object.values(e.errors)[0]?.[0] : null
+    deleteError.value = firstFieldError ?? (e instanceof ApiError ? e.message : 'Gagal menghapus kunjungan.')
+  } finally {
+    isDeleting.value = false
+  }
+}
+
 // --- Tugaskan Ulang Kunjungan Ini (temuan lapangan, revisi Bu Kadis) -- KHUSUS admin_puskesmas/
 // pj_prolanis (VisitAssignmentPolicy::create() menolak super_admin untuk jalur kader; super_admin
 // TIDAK diberi tombol ini sama sekali, bukan cuma disembunyikan setengah). Petugas (kader ATAU
@@ -1286,8 +1326,14 @@ async function confirmReassign() {
                   <!-- Batalkan Penugasan (keputusan Kepala Dinas) -- admin_puskesmas/pj_prolanis
                        sepuskesmas, cuma muncul kalau assignment masih bisa dibatalkan (pending/
                        in_progress). Sama endpoint & modal dgn dashboard/kunjungan/[id].vue. -->
-                  <button v-if="canCancelVisitNow(visit)" @click="requestCancel(visit)" title="Batalkan Penugasan" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-danger hover:border-danger transition-colors p-2 rounded-xl shadow-sm">
+                  <button v-if="canCancelVisitNow(visit)" @click="requestCancel(visit)" title="Batalkan Penugasan" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-danger hover:border-danger transition-colors p-2 rounded-xl shadow-sm mr-2">
                      <LucideCircleX class="w-4 h-4" />
+                  </button>
+                  <!-- Hapus Kunjungan (permintaan user) -- KHUSUS super_admin, status apa pun
+                       (beda dari Batalkan yang cuma pending/in_progress) -- lihat komentar
+                       requestDelete() di script kenapa lebih ketat dari Batalkan. -->
+                  <button v-if="canDeleteAssignment" @click="requestDelete(visit)" title="Hapus Kunjungan" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-danger hover:border-danger transition-colors p-2 rounded-xl shadow-sm">
+                     <LucideTrash2 class="w-4 h-4" />
                   </button>
                   <!-- Tugaskan Ulang -- KHUSUS admin_puskesmas/pj_prolanis, cuma untuk kunjungan
                        yang DIBATALKAN (lihat catatan canReassignVisit() di script kenapa 'diulang'
@@ -1907,6 +1953,56 @@ async function confirmReassign() {
           >
             <LucideLoader2 v-if="isCancelling" class="w-4 h-4 animate-spin" />
             Ya, Batalkan Penugasan
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Konfirmasi Hapus Kunjungan (permintaan user) -- KHUSUS super_admin, alasan WAJIB diisi
+         (beda dari Batalkan yang opsional) -- lihat komentar requestDelete() di script. -->
+    <div
+      v-if="showDeleteConfirm && visitToDelete"
+      class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
+    >
+      <div class="bg-white rounded-3xl shadow-xl w-full max-w-sm max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+        <div class="p-6 overflow-y-auto">
+          <div class="w-14 h-14 rounded-2xl bg-danger/10 text-danger flex items-center justify-center mb-4">
+            <LucideTrash2 class="w-7 h-7" />
+          </div>
+          <h3 class="font-bold text-accent text-lg mb-1">Hapus Kunjungan Ini?</h3>
+          <p class="text-sm text-slate-500 leading-relaxed mb-4">
+            Kunjungan ke <span class="font-bold text-slate-700">{{ visitToDelete.patient?.nama }}</span>
+            tanggal {{ visitToDelete.scheduled_date }} (petugas {{ petugasName(visitToDelete) }}) beserta
+            laporannya akan hilang dari SELURUH daftar &amp; riwayat -- gunakan ini HANYA untuk
+            kunjungan yang benar-benar salah (mis. salah pasien, data uji coba). Untuk pembatalan
+            biasa, pakai "Batalkan Penugasan", bukan ini.
+          </p>
+          <label class="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-1.5">Alasan (wajib diisi)</label>
+          <textarea
+            v-model="deleteReason"
+            rows="3"
+            maxlength="500"
+            placeholder="Mis. salah pasien, ini data uji coba yang tidak sengaja tersubmit..."
+            class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-danger focus:ring-1 focus:ring-danger/30 outline-none resize-none"
+          />
+          <p v-if="deleteError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2 mt-4">
+            {{ deleteError }}
+          </p>
+        </div>
+        <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
+          <button
+            @click="showDeleteConfirm = false"
+            class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors"
+          >
+            Batal
+          </button>
+          <button
+            @click="confirmDelete"
+            :disabled="isDeleting || !deleteReason.trim()"
+            class="py-2.5 px-6 rounded-xl font-bold text-white bg-danger hover:bg-danger/90 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <LucideLoader2 v-if="isDeleting" class="w-4 h-4 animate-spin" />
+            Ya, Hapus Kunjungan
           </button>
         </div>
       </div>
