@@ -26,20 +26,27 @@ function toYmd(date: Date): string {
 
 // Dipanggil dari onMounted/nextTick setelah elemen <input> ada di DOM (pola sama dgn
 // initScheduledDatePicker() yang sudah ada) -- elRef biasanya template ref ke <input type="text"
-// readonly>, target v-model biasanya Ref<string> yang diisi format 'Y-m-d' lewat onChange di
-// bawah (bukan v-model langsung ke flatpickr, supaya tidak circular dgn setDate()).
+// readonly>, target v-model biasanya Ref<string> yang diisi format 'Y-m-d' lewat onChange
+// default di bawah (bukan v-model langsung ke flatpickr, supaya tidak circular dgn setDate()).
+//
+// options.onChange (kalau caller mengisinya sendiri -- mis. mode:'multiple' utk fitur
+// multi-tanggal, single target.value string tidak cukup utk banyak tanggal terpilih) MENANG
+// atas default di bawah, bukan ditimpa -- tanpa ini caller custom onChange-nya diam-diam tidak
+// pernah terpanggil (mode:'multiple' butuh onChange sendiri yang menangani array tanggal, bukan
+// cuma selectedDates[0]).
 export function initDatePicker(
   el: HTMLElement | null,
   target: { value: string },
   options: Partial<FlatpickrOptions> = {}
 ) {
   if (!el) return null
+  const { onChange: customOnChange, ...rest } = options
   return flatpickr(el, {
     ...baseOptions(),
-    ...options,
-    onChange: (selectedDates) => {
+    ...rest,
+    onChange: customOnChange ?? ((selectedDates) => {
       const d = selectedDates[0]
       target.value = d ? toYmd(d) : ''
-    }
+    })
   })
 }
