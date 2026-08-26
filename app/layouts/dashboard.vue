@@ -29,15 +29,6 @@ import type { ApiSuccessEnvelope, Role } from '~/types/api'
 
 const isSidebarOpen = ref(true)
 
-// KHUSUS branch `dev`/lingkungan simulasi -- geser sidebar (fixed) & header (sticky)
-// turun sepersis tinggi SimulationBanner.vue supaya tidak ketimpa. Sticky BUTUH digeser
-// lewat margin/padding juga (bukan cuma ganti `top`) -- posisi awal sebelum discroll
-// tetap ditentukan alur dokumen normal, `top` cuma menentukan titik berhenti saat
-// scroll. Tidak berpengaruh sama sekali di build produksi normal (bannerActive selalu
-// false).
-const bannerActive = useSimulationBannerActive()
-const bannerOffsetTop = computed(() => (bannerActive.value ? `${SIMULATION_BANNER_HEIGHT_PX}px` : '0px'))
-
 // Identitas user login asli -- dipakai di widget sapaan header + dropdown profil (dulu
 // hardcode "dr. Budi" / "dr. Amanda Putri" / "amanda.putri@silakes.go.id", beda-beda pula
 // antara dua tempat yang seharusnya sama).
@@ -223,11 +214,11 @@ const {
   markAllRead,
   openNotification,
   isDangerNotif,
-  startPolling
+  startRealtime
 } = useNotifications()
 
 onMounted(loadNotifications)
-onMounted(startPolling)
+onMounted(startRealtime)
 
 // Push notification (FCM) -- daftarkan token sekali per sesi dashboard, no-op kalau config
 // Firebase belum lengkap atau user belum kasih izin notifikasi browser (lihat useFcm.ts).
@@ -330,7 +321,6 @@ onMounted(loadSyncStatus)
 
 <template>
   <div class="min-h-screen bg-slate-50 flex text-slate-800 font-sans theme-transition">
-    <SimulationBanner />
     <AnnouncementInboxModal />
     <ConfirmDialog />
 
@@ -338,7 +328,6 @@ onMounted(loadSyncStatus)
     <aside
       class="fixed inset-y-0 left-0 w-64 bg-accent flex flex-col z-20 transition-transform duration-300 shadow-xl"
       :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full'"
-      :style="{ top: bannerOffsetTop, bottom: '0px' }"
     >
       <!-- Logo Area -->
       <div class="h-16 flex items-center px-6 bg-white shrink-0 border-b border-slate-200 theme-transition">
@@ -392,13 +381,9 @@ onMounted(loadSyncStatus)
     <div
       class="flex-1 flex flex-col min-h-screen min-w-0 transition-all duration-300"
       :class="isSidebarOpen ? 'ml-0 md:ml-64' : 'ml-0'"
-      :style="bannerActive ? { marginTop: bannerOffsetTop } : {}"
     >
       <!-- Header -->
-      <header
-        class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-6 sticky z-40 shadow-sm theme-transition"
-        :style="{ top: bannerOffsetTop }"
-      >
+      <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-6 sticky top-0 z-40 shadow-sm theme-transition">
         <div class="flex items-center gap-4">
           <button @click="toggleSidebar" class="text-slate-500 hover:text-primary transition-colors p-2 rounded-lg hover:bg-slate-50">
             <LucideMenu class="w-5 h-5" />

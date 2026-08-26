@@ -12,14 +12,12 @@ import {
 } from '#components'
 import type { ApiSuccessEnvelope, AppNotification, PaginatedData } from '~/types/api'
 
-// Interval polling bel notifikasi -- keluhan nyata user: sebelum ini loadNotifications() cuma
-// dipanggil sekali saat layout mount, jadi notifikasi baru (termasuk suaranya, lihat
-// playNormal() di bawah) baru muncul kalau user manual refresh/navigasi ulang. 45 detik dipilih
-// sebagai titik tengah "aman" -- cukup sering supaya terasa real-time buat staf yang sedang
-// standby, tapi tidak membebani server dengan polling per beberapa detik (bandingkan dengan
-// auto-sync SiLAKES yang siklusnya per HARI, ini beda kelas kebutuhan -- notifikasi harus terasa
-// langsung, sync data tidak).
-const NOTIF_POLL_INTERVAL_MS = 45_000
+// REVISI (permintaan user, realtime lewat produli-wss) -- bel notifikasi SEBELUMNYA polling
+// 45 detik, sekarang lewat event "notification.new" di topic user:{id} (lihat useRealtime.ts &
+// WebsocketReminderChannel sisi backend), jadi terasa instan begitu backend submit(). Interval
+// di bawah ini SEKARANG cuma jaring pengaman kalau socket gagal connect/putus lama (offline,
+// produli-wss down) -- jauh lebih jarang (5 menit) karena bukan lagi jalur utama.
+const NOTIF_FALLBACK_POLL_INTERVAL_MS = 5 * 60_000
 
 // Diekstrak dari layouts/dashboard.vue supaya bisa dipakai BERSAMA oleh layouts/pwa.vue (kader/
 // nakes) -- sebelumnya PWA sama sekali tidak punya bel notifikasi maupun registrasi FCM. State
@@ -196,14 +194,34 @@ export function useNotifications() {
     await Promise.all(unread.map((n) => markRead(n)))
   }
 
-  // Polling bel notifikasi -- dipanggil eksplisit dari layout (bukan auto-start di dalam
-  // composable ini) supaya halaman lain yang cuma butuh formatNotification()/notifIcon() tidak
-  // ikut memicu timer latar belakang yang tidak perlu. useIntervalFn (VueUse) otomatis berhenti
-  // sendiri saat komponen pemanggil unmount (tryOnScopeDispose) -- tidak perlu cleanup manual di
-  // layout, tapi stopPolling tetap diekspor untuk kasus butuh berhenti lebih awal (mis. logout).
-  const { pause: stopPolling, resume: startPolling } = useIntervalFn(loadNotifications, NOTIF_POLL_INTERVAL_MS, {
+  // Jaring pengaman -- dipanggil eksplisit dari layout (bukan auto-start di dalam composable
+  // ini) supaya halaman lain yang cuma butuh formatNotification()/notifIcon() tidak ikut memicu
+  // timer latar belakang yang tidak perlu. useIntervalFn (VueUse) otomatis berhenti sendiri saat
+  // komponen pemanggil unmount (tryOnScopeDispose).
+  const { pause: stopFallbackPoll, resume: startFallbackPoll } = useIntervalFn(loadNotifications, NOTIF_FALLBACK_POLL_INTERVAL_MS, {
     immediate: false
   })
+
+  let unsubscribeRealtime: (() => void) | null = null
+
+  // Jalur utama (permintaan user) -- subscribe topic user:{id}, event "notification.new" dari
+  // WebsocketReminderChannel (backend). userTopic() null kalau user belum login sama sekali
+  // (harusnya tidak terjadi, layout ini digerbangi middleware auth, tapi tetap dijaga).
+  async function startRealtime() {
+    startFallbackPoll()
+    const { subscribe, userTopic } = useRealtime()
+    const topic = userTopic()
+    if (!topic) return
+    unsubscribeRealtime = await subscribe(topic, 'notification.new', () => {
+      loadNotifications()
+    })
+  }
+
+  function stopRealtime() {
+    stopFallbackPoll()
+    unsubscribeRealtime?.()
+    unsubscribeRealtime = null
+  }
 
   return {
     headerNotifications,
@@ -217,7 +235,7 @@ export function useNotifications() {
     markAllRead,
     openNotification,
     isDangerNotif,
-    startPolling,
-    stopPolling
+    startRealtime,
+    stopRealtime
   }
 }
