@@ -81,6 +81,94 @@ async function loadLabResults() {
   }
 }
 
+// --- Bandingkan Periode (permintaan user, GET /patients/{id}/lab-results-history) -- SELURUH
+// riwayat lab (bukan cuma terbaru per parameter seperti labResults di atas), dipakai bersama
+// riskHistory (SUDAH lengkap, tidak perlu endpoint baru utk sisi risiko) utk hitung "kondisi
+// pasien AS OF bulan X" di klien -- 1x fetch, ganti-ganti periode pembanding tidak perlu
+// panggilan API baru tiap kali (lihat comparisonSnapshot() di bawah).
+const labResultsHistory = ref<LabResult[]>([])
+const isLoadingLabResultsHistory = ref(false)
+
+async function loadLabResultsHistory() {
+  isLoadingLabResultsHistory.value = true
+  try {
+    const api = useApi()
+    const res = await api(`/patients/${route.params.id}/lab-results-history`) as ApiSuccessEnvelope<LabResult[]>
+    labResultsHistory.value = res.data
+  } catch (e) {
+    console.error(e)
+  } finally {
+    isLoadingLabResultsHistory.value = false
+  }
+}
+
+// Y-m lokal (default: bulan ini vs 3 bulan lalu, permintaan user "bandingkan bulan ini dgn 3
+// bulan lalu").
+function monthsAgoPeriod(n: number): string {
+  const d = new Date()
+  d.setDate(1)
+  d.setMonth(d.getMonth() - n)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+const comparePeriodA = ref(monthsAgoPeriod(3))
+const comparePeriodB = ref(monthsAgoPeriod(0))
+
+// Baris TERBARU (risk history: computed_at/assessment_date; lab: tanggal_periksa) yang
+// tanggalnya masih <= akhir bulan `period` -- pola sama persis PatientController::index()/
+// RiskClassificationHistoryService sisi backend ("status AS OF"), cuma dihitung di klien di
+// sini karena datanya sudah lengkap (bukan butuh query baru per periode).
+function endOfMonth(period: string): Date {
+  const [y, m] = period.split('-').map(Number)
+  return new Date(y, m, 0, 23, 59, 59)
+}
+function riskAsOf(period: string): RiskClassificationHistory | null {
+  const cutoff = endOfMonth(period)
+  const candidates = riskHistory.value.filter((r) => {
+    const d = r.assessment_date ?? r.computed_at
+    return d && new Date(d) <= cutoff
+  })
+  // riskHistory sudah terurut TERBARU DULU dari backend -- kandidat pertama = paling dekat cutoff.
+  return candidates[0] ?? null
+}
+function labResultsAsOf(period: string): LabResult[] {
+  const cutoff = endOfMonth(period)
+  const byParameter = new Map<string, LabResult>()
+  // labResultsHistory terurut TERBARU DULU dari backend juga (orderByDesc tanggal_periksa) --
+  // baris PERTAMA yang lolos cutoff per parameter itu yang "terbaru AS OF periode ini".
+  for (const row of labResultsHistory.value) {
+    if (byParameter.has(row.parameter)) continue
+    if (row.tanggal_periksa && new Date(row.tanggal_periksa) <= cutoff) byParameter.set(row.parameter, row)
+  }
+  return [...byParameter.values()].sort((a, b) => a.parameter.localeCompare(b.parameter))
+}
+
+const compareRiskA = computed(() => riskAsOf(comparePeriodA.value))
+const compareRiskB = computed(() => riskAsOf(comparePeriodB.value))
+const compareLabA = computed(() => labResultsAsOf(comparePeriodA.value))
+const compareLabB = computed(() => labResultsAsOf(comparePeriodB.value))
+// Gabungan semua parameter yang muncul di SALAH SATU periode -- supaya parameter yang cuma ada
+// di satu sisi tetap tampil (dgn "-" di sisi lain), bukan cuma irisan keduanya.
+const compareParameters = computed(() => {
+  const names = new Set([...compareLabA.value.map((r) => r.parameter), ...compareLabB.value.map((r) => r.parameter)])
+  return [...names].sort((a, b) => a.localeCompare(b))
+})
+function compareValueFor(parameter: string, side: 'a' | 'b'): LabResult | null {
+  const list = side === 'a' ? compareLabA.value : compareLabB.value
+  return list.find((r) => r.parameter === parameter) ?? null
+}
+// Delta NETRAL (panah naik/turun tanpa warna baik/buruk) -- arah "baik" beda-beda per parameter
+// (mis. HDL naik itu baik, GDP naik itu buruk), tidak ditebak di sini biar tidak menyesatkan.
+function compareDelta(parameter: string): 'up' | 'down' | 'same' | null {
+  const a = compareValueFor(parameter, 'a')
+  const b = compareValueFor(parameter, 'b')
+  const numA = a ? Number(a.value) : null
+  const numB = b ? Number(b.value) : null
+  if (numA === null || numB === null || Number.isNaN(numA) || Number.isNaN(numB)) return null
+  if (numB > numA) return 'up'
+  if (numB < numA) return 'down'
+  return 'same'
+}
+
 // --- Riwayat Kunjungan (GET /patients/{id}/visit-history, revisi Bu Kadis Fase 5) -- kader
 // MAUPUN tenaga_kesehatan, mengisi seksi yang sebelumnya placeholder statis. ------------------
 const visitHistoryList = ref<VisitAssignment[]>([])
@@ -106,6 +194,7 @@ onMounted(() => {
   loadRiskHistory()
   loadVisitHistory()
   loadLabResults()
+  loadLabResultsHistory()
 })
 
 // Reload otomatis begitu sinkronisasi SiLAKES berhasil (dipicu dari sidebar ATAU tombol
@@ -118,6 +207,7 @@ watch(silakesSyncSignal, () => {
   loadUpdateHistory()
   loadRiskHistory()
   loadLabResults()
+  loadLabResultsHistory()
 })
 
 useHead({
@@ -407,6 +497,76 @@ async function openAssignTkModal() {
   }
 }
 
+// --- Tugaskan Kader multi-tanggal (permintaan user, POST /visit-assignments/multi-dates) ---
+// Beda dari bulk-assign di dashboard/kunjungan/index.vue (1 kader -> banyak PASIEN, 1 tanggal):
+// ini 1 pasien + 1 kader -> BANYAK TANGGAL sekaligus, untuk kasus jadwal PMO bulanan yang
+// tanggalnya tidak selalu rapi 7-harian (skip libur, dst) -- cadence otomatis (lihat kartu
+// "Jadwal Kunjungan Mendatang" di template) tetap jalan terpisah untuk kasus mingguan biasa.
+const showAssignKaderModal = ref(false)
+const selectedKaderIdForMultiDate = ref<number | null>(null)
+const multiDates = ref<string[]>([])
+const multiDatesInputRef = ref<HTMLElement | null>(null)
+const multiDatePriority = ref<'ringan' | 'sedang' | 'berat'>('sedang')
+const isAssigningKaderMultiDate = ref(false)
+const assignKaderMultiDateError = ref('')
+
+async function openAssignKaderModal() {
+  showAssignKaderModal.value = true
+  assignKaderMultiDateError.value = ''
+  selectedKaderIdForMultiDate.value = null
+  multiDates.value = []
+  multiDatePriority.value = (patient.value?.risk_level as 'ringan' | 'sedang' | 'berat') || 'sedang'
+  if (!kaderOptions.value.length) {
+    isLoadingKaderOptions.value = true
+    try {
+      const api = useApi()
+      kaderOptions.value = await fetchAllPages((page) => api('/kader', { query: { per_page: 100, page, status_aktif: true } }))
+    } catch (e) {
+      console.error(e)
+    } finally {
+      isLoadingKaderOptions.value = false
+    }
+  }
+  await nextTick()
+  // mode 'multiple' -- flatpickr biarkan user klik beberapa tanggal berbeda di kalender yang
+  // sama (bukan range), pola resmi flatpickr utk kasus "pilih beberapa tanggal lepas". target
+  // param initDatePicker() tidak dipakai di sini (onChange custom di bawah MENANG, lihat
+  // docblock composable) -- objek kosong sekadar memenuhi signature fungsi.
+  initDatePicker(multiDatesInputRef.value, { value: '' }, {
+    mode: 'multiple',
+    minDate: 'today',
+    onChange: (selectedDates: Date[]) => {
+      multiDates.value = selectedDates.map((d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)
+    }
+  })
+}
+
+async function assignKaderMultiDate() {
+  if (!patient.value || !selectedKaderIdForMultiDate.value || multiDates.value.length === 0) return
+  isAssigningKaderMultiDate.value = true
+  assignKaderMultiDateError.value = ''
+  try {
+    const api = useApi()
+    await api('/visit-assignments/multi-dates', {
+      method: 'POST',
+      body: {
+        patient_id: patient.value.id,
+        kader_id: selectedKaderIdForMultiDate.value,
+        scheduled_dates: multiDates.value,
+        priority: multiDatePriority.value
+      }
+    })
+    showAssignKaderModal.value = false
+    toast.add({ title: `${multiDates.value.length} penugasan berhasil dibuat`, icon: 'i-lucide-check-circle-2' })
+    await loadPatient()
+  } catch (e) {
+    const firstFieldError = e instanceof ApiError && e.errors ? Object.values(e.errors)[0]?.[0] : null
+    assignKaderMultiDateError.value = firstFieldError ?? (e instanceof ApiError ? e.message : 'Gagal menugaskan kader.')
+  } finally {
+    isAssigningKaderMultiDate.value = false
+  }
+}
+
 async function assignTenagaKesehatan() {
   if (!patient.value || !selectedTkId.value) return
   isAssigningTk.value = true
@@ -669,6 +829,14 @@ async function triggerSyncFromHistory() {
         <div class="flex items-center gap-2 shrink-0">
           <button
             v-if="canAssignTenagaKesehatan"
+            @click="openAssignKaderModal"
+            class="inline-flex items-center gap-2 py-2.5 px-4 rounded-xl font-bold text-sm text-info bg-info/10 hover:bg-info/20 transition-colors border border-info/20"
+          >
+            <LucideCalendarPlus class="w-4 h-4" />
+            Tugaskan Kader (Multi-Tanggal)
+          </button>
+          <button
+            v-if="canAssignTenagaKesehatan"
             @click="openAssignTkModal"
             class="inline-flex items-center gap-2 py-2.5 px-4 rounded-xl font-bold text-sm text-secondary bg-secondary/10 hover:bg-secondary/20 transition-colors border border-secondary/20"
           >
@@ -683,6 +851,37 @@ async function triggerSyncFromHistory() {
             <LucidePencil class="w-4 h-4" />
             Ajukan Update Data
           </button>
+        </div>
+      </div>
+
+      <!-- Jadwal Kunjungan Mendatang (permintaan user) -- rencana kunjungan berulang
+           (CareAssignment) SEBELUMNYA tidak pernah ditampilkan sama sekali ke admin, padahal
+           cadence-nya sudah jalan otomatis di latar belakang (lihat CareAssignmentCadenceService).
+           upcoming_dates MURNI proyeksi (lihat docblock CareAssignmentResource) -- belum tentu
+           baris VisitAssignment sungguhan sampai scan harian benar-benar membuatnya. -->
+      <div v-if="patient.care_assignments && patient.care_assignments.length > 0" class="bg-white rounded-2xl border border-slate-100 shadow-card p-5">
+        <h3 class="font-bold text-accent text-base flex items-center gap-2 mb-4">
+          <LucideCalendarClock class="w-4 h-4 text-info" />
+          Jadwal Kunjungan Mendatang (Otomatis)
+        </h3>
+        <div class="space-y-3">
+          <div v-for="plan in patient.care_assignments" :key="plan.id" class="bg-slate-50 border border-slate-100 rounded-xl p-4">
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-sm font-bold text-slate-700">
+                {{ plan.worker_type === 'kader' ? 'Kader' : 'Tenaga Kesehatan' }}: {{ plan.worker_name || '-' }}
+                <span class="text-xs font-medium text-slate-400">(tiap {{ plan.cadence_days }} hari)</span>
+              </p>
+              <span v-if="plan.blocked_by_open_visit" class="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-warning/10 text-warning-700 border border-warning/20">
+                Menunggu kunjungan sebelumnya selesai
+              </span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <span v-for="d in plan.upcoming_dates" :key="d" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-info/10 text-info border border-info/20">
+                {{ new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) }}
+              </span>
+              <span v-if="!plan.upcoming_dates || plan.upcoming_dates.length === 0" class="text-xs text-slate-400 italic">Belum ada proyeksi tanggal.</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -956,6 +1155,78 @@ async function triggerSyncFromHistory() {
         </div>
       </div>
 
+      <!-- Bandingkan Periode (permintaan user) -- risiko & hasil lab AS OF 2 bulan yang dipilih
+           berdampingan, dihitung dari riskHistory/labResultsHistory yang SUDAH lengkap
+           (lihat comparisonSnapshot-style functions di script) -- ganti periode TIDAK memicu
+           panggilan API baru. -->
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-card p-5">
+        <h3 class="font-bold text-accent text-base flex items-center gap-2 mb-1">
+          <LucideCalendarClock class="w-4 h-4 text-info" />
+          Bandingkan Periode
+        </h3>
+        <p class="text-sm text-slate-500 mb-4">Bandingkan kondisi pasien di 2 bulan berbeda untuk evaluasi tren.</p>
+
+        <div class="flex flex-wrap gap-3 mb-5">
+          <div class="flex-1 min-w-[160px]">
+            <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Periode A</label>
+            <input v-model="comparePeriodA" type="month" :max="comparePeriodB" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" />
+          </div>
+          <div class="flex-1 min-w-[160px]">
+            <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Periode B</label>
+            <input v-model="comparePeriodB" type="month" :min="comparePeriodA" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" />
+          </div>
+        </div>
+
+        <div v-if="isLoadingLabResultsHistory" class="py-10 text-center text-slate-400 text-sm">Memuat riwayat...</div>
+        <template v-else>
+          <div class="grid grid-cols-2 gap-4 mb-5">
+            <div class="bg-slate-50 border border-slate-100 rounded-xl p-4 text-center">
+              <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Risiko {{ comparePeriodA }}</p>
+              <span v-if="compareRiskA" class="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider" :class="getRiskColor(compareRiskA.level)">{{ getRiskLabel(compareRiskA.level) }}</span>
+              <span v-else class="text-sm text-slate-300 italic">Belum ada data</span>
+            </div>
+            <div class="bg-slate-50 border border-slate-100 rounded-xl p-4 text-center">
+              <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Risiko {{ comparePeriodB }}</p>
+              <span v-if="compareRiskB" class="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider" :class="getRiskColor(compareRiskB.level)">{{ getRiskLabel(compareRiskB.level) }}</span>
+              <span v-else class="text-sm text-slate-300 italic">Belum ada data</span>
+            </div>
+          </div>
+
+          <div v-if="compareParameters.length > 0" class="overflow-x-auto">
+            <table class="w-full text-left border-collapse min-w-[480px]">
+              <thead>
+                <tr class="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                  <th class="py-2.5 px-3 font-semibold">Parameter</th>
+                  <th class="py-2.5 px-3 font-semibold text-center">{{ comparePeriodA }}</th>
+                  <th class="py-2.5 px-3 font-semibold text-center">{{ comparePeriodB }}</th>
+                  <th class="py-2.5 px-3 font-semibold text-center">Tren</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr v-for="param in compareParameters" :key="param" class="text-sm">
+                  <td class="py-2.5 px-3 font-semibold text-slate-700">{{ param }}</td>
+                  <td class="py-2.5 px-3 text-center text-slate-600">
+                    <template v-if="compareValueFor(param, 'a')">{{ compareValueFor(param, 'a')!.value }} <span class="text-slate-400 text-xs">{{ compareValueFor(param, 'a')!.satuan }}</span></template>
+                    <span v-else class="text-slate-300">-</span>
+                  </td>
+                  <td class="py-2.5 px-3 text-center text-slate-600">
+                    <template v-if="compareValueFor(param, 'b')">{{ compareValueFor(param, 'b')!.value }} <span class="text-slate-400 text-xs">{{ compareValueFor(param, 'b')!.satuan }}</span></template>
+                    <span v-else class="text-slate-300">-</span>
+                  </td>
+                  <td class="py-2.5 px-3 text-center">
+                    <LucideArrowUp v-if="compareDelta(param) === 'up'" class="w-4 h-4 text-slate-400 inline-block" />
+                    <LucideArrowDown v-else-if="compareDelta(param) === 'down'" class="w-4 h-4 text-slate-400 inline-block" />
+                    <LucideMinus v-else-if="compareDelta(param) === 'same'" class="w-4 h-4 text-slate-300 inline-block" />
+                    <span v-else class="text-slate-300">-</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-else class="text-sm text-slate-400 italic text-center py-6">Belum ada hasil lab di salah satu periode ini.</p>
+        </template>
+      </div>
+
       <!-- Riwayat Pengajuan Perubahan Data -- GET /patients/{id}/update-history, dibaca LIVE
            dari SiLAKES (bukan salinan lokal), cuma tampil untuk role yang boleh mengajukan
            (canProposeUpdate: super_admin/admin_puskesmas/pj_prolanis sepuskesmas). -->
@@ -1034,6 +1305,52 @@ async function triggerSyncFromHistory() {
         </div>
       </div>
     </template>
+
+    <!-- Modal Tugaskan Kader Multi-Tanggal (permintaan user) -- POST /visit-assignments/multi-dates,
+         lihat komentar openAssignKaderModal() di script utk beda fitur ini dgn bulk-assign biasa. -->
+    <div v-if="showAssignKaderModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+      <div class="bg-white rounded-3xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200 max-h-[90vh] flex flex-col">
+        <div class="border-b border-slate-100 px-6 py-4 flex items-center justify-between shrink-0">
+          <h3 class="font-bold text-accent text-lg flex items-center gap-2">
+            <LucideCalendarPlus class="w-5 h-5 text-info" />
+            Tugaskan Kader (Multi-Tanggal)
+          </h3>
+          <button @click="showAssignKaderModal = false" class="text-slate-400 hover:text-slate-600 p-1">
+            <LucideX class="w-5 h-5" />
+          </button>
+        </div>
+        <div class="p-6 space-y-4 overflow-y-auto">
+          <p class="text-xs text-slate-500 leading-relaxed">Pilih beberapa tanggal kunjungan sekaligus di kalender di bawah -- setiap tanggal jadi penugasan terpisah untuk kader yang sama.</p>
+          <p v-if="assignKaderMultiDateError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ assignKaderMultiDateError }}</p>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kader</label>
+            <select v-model.number="selectedKaderIdForMultiDate" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
+              <option :value="null">{{ isLoadingKaderOptions ? 'Memuat...' : 'Pilih kader...' }}</option>
+              <option v-for="kader in kaderOptions" :key="kader.id" :value="kader.id">{{ kader.user?.name }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Prioritas</label>
+            <select v-model="multiDatePriority" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
+              <option value="ringan">Ringan</option>
+              <option value="sedang">Sedang</option>
+              <option value="berat">Berat</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tanggal Kunjungan ({{ multiDates.length }} dipilih)</label>
+            <input ref="multiDatesInputRef" type="text" placeholder="Pilih tanggal (bisa lebih dari satu)..." readonly class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white cursor-pointer" />
+          </div>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
+          <button @click="showAssignKaderModal = false" class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors">Batal</button>
+          <button @click="assignKaderMultiDate" :disabled="isAssigningKaderMultiDate || !selectedKaderIdForMultiDate || multiDates.length === 0" class="py-2.5 px-6 rounded-xl font-bold text-white bg-info hover:bg-info/90 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm">
+            <LucideLoader2 v-if="isAssigningKaderMultiDate" class="w-4 h-4 animate-spin" />
+            Tugaskan ({{ multiDates.length }})
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- Modal Tugaskan Tenaga Kesehatan -- POST /care-assignments (revisi Bu Kadis). Ini
          SELALU menugaskan tenaga kesehatan BARU (rencana kunjungan berulang) -- kalau pasien

@@ -184,7 +184,26 @@ export interface Patient {
   // RiskClassificationService::evaluateEarlyDetection() di backend.
   early_detection_flag?: boolean
   early_detection_reason?: EarlyDetectionReason[] | null
+  // Fitur periode bulanan (permintaan user) -- cuma terisi kalau GET /patients dipanggil dgn
+  // ?period=YYYY-MM (lihat PatientController::index()), risk_level/risk_computed_at di atas
+  // TETAP status terkini, tidak berubah.
+  period_risk_level?: PatientRiskLevel | null
+  period_risk_computed_at?: string | null
+  // Jadwal kunjungan berulang (permintaan user) -- cuma terisi di GET /patients/{id} (bukan
+  // daftar), lihat CareAssignmentResource sisi backend.
+  care_assignments?: CareAssignmentPreview[]
   last_synced_at: string | null
+}
+
+export interface CareAssignmentPreview {
+  id: number
+  worker_type: 'kader' | 'tenaga_kesehatan'
+  worker_name: string | null
+  status: string
+  cadence_days: number
+  last_triggered_at: string | null
+  blocked_by_open_visit: boolean
+  upcoming_dates: string[]
 }
 
 // early_detection_reason -- array heterogen, field selain type/message spesifik per tipe.

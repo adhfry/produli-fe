@@ -41,6 +41,16 @@ const filterPuskesmasId = ref<number | null>(null)
 // (early_detection_flag di latestRiskClassification, sudah dipakai ikon peringatan di tabel
 // sebelumnya, sekarang jadi filter cepat juga).
 const filterEarlyDetectionOnly = ref(false)
+// Fitur periode bulanan (permintaan user) -- default bulan SAAT INI (format 'YYYY-MM', native
+// <input type="month"> sudah pas utk granularitas ini, tidak perlu flatpickr yang dirancang utk
+// tanggal harian). Riwayat/evaluasi lintas puskesmas: lihat kondisi pasien di bulan lalu/3 bulan
+// lalu dibanding sekarang -- lihat badge risiko tabel & PatientController::index() sisi backend.
+// Y-m lokal (BUKAN toISOString -- itu UTC, bisa mundur ke bulan sebelumnya utk WIB di jam-jam
+// pertama tanggal 1, sama alasannya dgn useFlatpickr.ts::toYmd()).
+const nowLocal = new Date()
+const currentPeriod = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}`
+const filterPeriod = ref(currentPeriod)
+const isCurrentPeriod = computed(() => filterPeriod.value === currentPeriod)
 
 // Header tabel yang bisa diklik utk sort asc/desc (revisi Bu Kadis) -- 'nama' default asc (sama
 // perilaku sebelum fitur ini ada, backend juga default ke ini kalau sort_by tidak dikirim).
@@ -118,6 +128,10 @@ async function loadPatients(page = 1) {
         // BUKAN string "true" (yang dihasilkan query serializer kalau dikirim boolean literal).
         ...(filterEarlyDetectionOnly.value ? { early_detection_only: 1 } : {}),
         ...(searchQuery.value.trim() ? { search: searchQuery.value.trim() } : {}),
+        // Bulan SEKARANG sengaja TIDAK dikirim (perilaku sama seperti sebelum fitur periode ada
+        // -- period_risk_level di response toh identik dgn risk_level utk bulan berjalan, kirim
+        // param cuma menambah kerja server tanpa nilai tambah).
+        ...(!isCurrentPeriod.value ? { period: filterPeriod.value } : {}),
         sort_by: sortBy.value,
         sort_direction: sortDirection.value
       }
@@ -158,6 +172,7 @@ watch(filterWilayahStatus, () => loadPatients(1))
 watch(filterKecamatanId, () => loadPatients(1))
 watch(filterPuskesmasId, () => loadPatients(1))
 watch(filterEarlyDetectionOnly, () => loadPatients(1))
+watch(filterPeriod, () => loadPatients(1))
 watch([sortBy, sortDirection], () => loadPatients(1))
 
 // Debounce pencarian nama/no. registrasi -- SERVER-SIDE sekarang, jangan panggil API di setiap
@@ -515,7 +530,21 @@ function closeNikNotFoundModal() {
             <LucideAlertTriangle class="w-3.5 h-3.5 shrink-0" />
             Deteksi Dini Aktif
           </label>
+          <!-- Fitur periode bulanan (permintaan user) -- default bulan berjalan, badge risiko di
+               tabel otomatis pindah ke status HISTORIS begitu periode diganti (lihat
+               period_risk_level di komputasi tabel & PatientResource sisi backend). -->
+          <label
+            class="flex items-center gap-2 py-2.5 px-3 rounded-xl border text-sm font-semibold shrink-0"
+            :class="!isCurrentPeriod ? 'border-info bg-info/10 text-info' : 'border-slate-200 text-slate-600'"
+          >
+            <LucideCalendarClock class="w-3.5 h-3.5 shrink-0" />
+            <input v-model="filterPeriod" type="month" :max="currentPeriod" class="bg-transparent outline-none text-sm font-semibold" />
+          </label>
         </div>
+        <p v-if="!isCurrentPeriod" class="text-xs font-semibold text-info mt-2 flex items-center gap-1.5">
+          <LucideInfo class="w-3.5 h-3.5" />
+          Menampilkan status risiko pasien seperti kondisinya di bulan yang dipilih (data historis), bukan status terkini.
+        </p>
       </div>
 
       <!-- Ringkasan hasil filter -- selalu tampil, kalimatnya menyesuaikan filter apa saja yang
@@ -619,11 +648,16 @@ function closeNikNotFoundModal() {
                </td>
                <td class="py-4 px-5">
                   <div class="flex items-center gap-1.5">
-                     <span class="px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider" :class="getRiskColor(patient.risk_level)">
-                        {{ getRiskLabel(patient.risk_level) }}
+                     <!-- period_risk_level (bukan risk_level) begitu periode BUKAN bulan berjalan --
+                          lihat filterPeriod di script, keduanya identik utk bulan ini. -->
+                     <span class="px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider" :class="getRiskColor(isCurrentPeriod ? patient.risk_level : patient.period_risk_level)">
+                        {{ getRiskLabel(isCurrentPeriod ? patient.risk_level : patient.period_risk_level) }}
                      </span>
+                     <!-- Deteksi dini SELALU status TERKINI (backend tidak merekonstruksinya
+                          historis) -- disembunyikan saat lihat periode lampau supaya tidak
+                          terkesan menempel ke status historis di sebelahnya. -->
                      <AppTooltip
-                        v-if="patient.early_detection_flag"
+                        v-if="isCurrentPeriod && patient.early_detection_flag"
                         :text="`Deteksi Dini: berpotensi memburuk ke Berat — ${getEarlyDetectionTooltip(patient)}`"
                      >
                         <LucideAlertTriangle class="w-3.5 h-3.5 text-danger shrink-0" />
