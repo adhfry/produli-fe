@@ -102,16 +102,68 @@ async function loadLabResultsHistory() {
   }
 }
 
-// Y-m lokal (default: bulan ini vs 3 bulan lalu, permintaan user "bandingkan bulan ini dgn 3
-// bulan lalu").
+// Y-m lokal.
 function monthsAgoPeriod(n: number): string {
   const d = new Date()
   d.setDate(1)
   d.setMonth(d.getMonth() - n)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
-const comparePeriodA = ref(monthsAgoPeriod(3))
-const comparePeriodB = ref(monthsAgoPeriod(0))
+
+// Periode B nullable (permintaan user, temuan lapangan A. Jazili id 9976) -- default LAMA
+// selalu "3 bulan lalu vs bulan ini" TANPA peduli apakah datanya benar-benar ada di situ. Kalau
+// pasien terakhir diperiksa Mei dan sekarang Agustus tanpa data baru, "3 bulan lalu" dan
+// "bulan ini" SAMA-SAMA jatuh ke snapshot Mei yang sama (labResultsAsOf/riskAsOf mengambil
+// data TERAKHIR yang <= cutoff) -- perbandingan jadi menampilkan "tidak berubah" yang
+// menyesatkan, padahal itu cuma 1 titik data yang sama dibandingkan dengan dirinya sendiri,
+// bukan dua kondisi nyata yang beda waktu.
+const comparePeriodA = ref<string | null>(null)
+const comparePeriodB = ref<string | null>(null)
+let compareDefaultsApplied = false
+
+// Ambil bulan-bulan (Y-m) DISTINCT dalam 1 tahun terakhir yang benar-benar punya data (risk
+// history ATAU lab), diurutkan kronologis lama->baru -- dasar "smart" default di bawah.
+function distinctRecentPeriods(): string[] {
+  const oneYearAgo = new Date()
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
+  const toPeriod = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  const periods = new Set<string>()
+  for (const r of riskHistory.value) {
+    const raw = r.assessment_date ?? r.computed_at
+    if (!raw) continue
+    const d = new Date(raw)
+    if (d >= oneYearAgo) periods.add(toPeriod(d))
+  }
+  for (const r of labResultsHistory.value) {
+    if (!r.tanggal_periksa) continue
+    const d = new Date(r.tanggal_periksa)
+    if (d >= oneYearAgo) periods.add(toPeriod(d))
+  }
+  return [...periods].sort()
+}
+
+// Default "pintar" (permintaan user) -- dipanggil SEKALI setelah riskHistory & labResultsHistory
+// termuat (lihat onMounted). >=2 periode berbeda dalam setahun terakhir -> A = periode kedua
+// terbaru, B = periode TERBARU (2 titik data NYATA, bukan tebakan "3 bulan lalu"). Tepat 1
+// periode -> A = periode itu, B DIKOSONGKAN (tidak ada pembanding kedua yang jujur, lebih baik
+// kosong daripada diam-diam menduplikasi titik yang sama). 0 periode (pasien belum py riwayat
+// sama sekali) -> fallback lama sekadar supaya date-picker tidak kosong total, B tetap kosong.
+function applySmartCompareDefaults() {
+  if (compareDefaultsApplied) return
+  compareDefaultsApplied = true
+
+  const periods = distinctRecentPeriods()
+  if (periods.length >= 2) {
+    comparePeriodA.value = periods[periods.length - 2]
+    comparePeriodB.value = periods[periods.length - 1]
+  } else if (periods.length === 1) {
+    comparePeriodA.value = periods[0]
+    comparePeriodB.value = null
+  } else {
+    comparePeriodA.value = monthsAgoPeriod(3)
+    comparePeriodB.value = null
+  }
+}
 
 // Baris TERBARU (risk history: computed_at/assessment_date; lab: tanggal_periksa) yang
 // tanggalnya masih <= akhir bulan `period` -- pola sama persis PatientController::index()/
@@ -121,7 +173,8 @@ function endOfMonth(period: string): Date {
   const [y, m] = period.split('-').map(Number)
   return new Date(y, m, 0, 23, 59, 59)
 }
-function riskAsOf(period: string): RiskClassificationHistory | null {
+function riskAsOf(period: string | null): RiskClassificationHistory | null {
+  if (!period) return null
   const cutoff = endOfMonth(period)
   const candidates = riskHistory.value.filter((r) => {
     const d = r.assessment_date ?? r.computed_at
@@ -130,7 +183,8 @@ function riskAsOf(period: string): RiskClassificationHistory | null {
   // riskHistory sudah terurut TERBARU DULU dari backend -- kandidat pertama = paling dekat cutoff.
   return candidates[0] ?? null
 }
-function labResultsAsOf(period: string): LabResult[] {
+function labResultsAsOf(period: string | null): LabResult[] {
+  if (!period) return []
   const cutoff = endOfMonth(period)
   const byParameter = new Map<string, LabResult>()
   // labResultsHistory terurut TERBARU DULU dari backend juga (orderByDesc tanggal_periksa) --
@@ -189,12 +243,14 @@ async function loadVisitHistory() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadPatient()
-  loadRiskHistory()
   loadVisitHistory()
   loadLabResults()
-  loadLabResultsHistory()
+  // Ditunggu (bukan fire-and-forget spt yang lain) -- applySmartCompareDefaults() butuh
+  // riskHistory & labResultsHistory SUDAH terisi supaya distinctRecentPeriods() akurat.
+  await Promise.all([loadRiskHistory(), loadLabResultsHistory()])
+  applySmartCompareDefaults()
 })
 
 // Reload otomatis begitu sinkronisasi SiLAKES berhasil (dipicu dari sidebar ATAU tombol
@@ -1245,14 +1301,20 @@ async function triggerSyncFromHistory() {
         </h3>
         <p class="text-sm text-slate-500 mb-4">Bandingkan kondisi pasien di 2 bulan berbeda untuk evaluasi tren.</p>
 
+        <!-- Periode dipilihkan OTOMATIS dari riwayat nyata pasien (permintaan user, temuan
+             lapangan A. Jazili id 9976) -- lihat applySmartCompareDefaults() di script. Periode B
+             SENGAJA boleh kosong (bukan dipaksa "bulan ini") kalau pasien cuma punya 1 riwayat
+             dalam setahun terakhir -- membandingkan 1 titik data dengan dirinya sendiri cuma
+             menampilkan "tidak berubah" yang menyesatkan, lebih jujur dikosongkan. -->
         <div class="flex flex-wrap gap-3 mb-5">
           <div class="flex-1 min-w-[160px]">
             <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Periode A</label>
-            <input v-model="comparePeriodA" type="month" :max="comparePeriodB" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" />
+            <input v-model="comparePeriodA" type="month" :max="comparePeriodB ?? undefined" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" />
           </div>
           <div class="flex-1 min-w-[160px]">
             <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Periode B</label>
-            <input v-model="comparePeriodB" type="month" :min="comparePeriodA" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" />
+            <input v-model="comparePeriodB" type="month" :min="comparePeriodA ?? undefined" placeholder="Pilih periode..." class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" />
+            <p v-if="!comparePeriodB" class="text-[11px] text-slate-400 mt-1">Belum ada riwayat lain dalam setahun terakhir untuk dibandingkan -- pilih manual kalau perlu.</p>
           </div>
         </div>
 
@@ -1260,12 +1322,12 @@ async function triggerSyncFromHistory() {
         <template v-else>
           <div class="grid grid-cols-2 gap-4 mb-5">
             <div class="bg-slate-50 border border-slate-100 rounded-xl p-4 text-center">
-              <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Risiko {{ comparePeriodA }}</p>
+              <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Risiko {{ comparePeriodA ?? '-' }}</p>
               <span v-if="compareRiskA" class="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider" :class="getRiskColor(compareRiskA.level)">{{ getRiskLabel(compareRiskA.level) }}</span>
               <span v-else class="text-sm text-slate-300 italic">Belum ada data</span>
             </div>
             <div class="bg-slate-50 border border-slate-100 rounded-xl p-4 text-center">
-              <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Risiko {{ comparePeriodB }}</p>
+              <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{{ comparePeriodB ? `Risiko ${comparePeriodB}` : 'Periode B' }}</p>
               <span v-if="compareRiskB" class="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider" :class="getRiskColor(compareRiskB.level)">{{ getRiskLabel(compareRiskB.level) }}</span>
               <span v-else class="text-sm text-slate-300 italic">Belum ada data</span>
             </div>
@@ -1276,8 +1338,8 @@ async function triggerSyncFromHistory() {
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                   <th class="py-2.5 px-3 font-semibold">Parameter</th>
-                  <th class="py-2.5 px-3 font-semibold text-center">{{ comparePeriodA }}</th>
-                  <th class="py-2.5 px-3 font-semibold text-center">{{ comparePeriodB }}</th>
+                  <th class="py-2.5 px-3 font-semibold text-center">{{ comparePeriodA ?? '-' }}</th>
+                  <th class="py-2.5 px-3 font-semibold text-center">{{ comparePeriodB ?? '-' }}</th>
                   <th class="py-2.5 px-3 font-semibold text-center">Tren</th>
                 </tr>
               </thead>
