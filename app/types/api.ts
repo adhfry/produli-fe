@@ -544,10 +544,27 @@ export interface Rujukan {
   cara_rujukan: CaraRujukan | null
   rujukan_status: RujukanStatus | null
   created_at: string | null
+  // Permintaan user -- siapa & kapan keputusan konfirmasi/pembatalan diambil (bukan cuma
+  // status akhirnya).
+  confirmed_at: string | null
+  confirmed_by: { id: number, name: string } | null
+  // Tindak lanjut puskesmas (permintaan user) -- HANYA terisi setelah rujukan_status=
+  // 'dikonfirmasi', lihat tombol "Input Tindakan Lanjutan" di dashboard/rujukan.
+  tindakan_puskesmas: TindakanPuskesmas[] | null
+  catatan_tindakan_puskesmas: string | null
+  tindakan_puskesmas_at: string | null
+  tindakan_puskesmas_by: { id: number, name: string } | null
 }
+
+export type TindakanPuskesmas = 'rawat_inap' | 'edukasi' | 'obat_tambahan' | 'lainnya'
 
 export interface ConfirmRujukanPayload {
   status: 'dikonfirmasi' | 'dibatalkan'
+}
+
+export interface TindakanLanjutanRujukanPayload {
+  tindakan_puskesmas: TindakanPuskesmas[]
+  catatan?: string | null
 }
 
 // PATCH /validasi-laporan/{visitReport} (ValidateVisitReportRequest) -- super_admin saja.
