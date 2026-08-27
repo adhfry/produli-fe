@@ -122,6 +122,22 @@ function setPickedLocation(lng: number, lat: number) {
   editForm.value.longitude = Number(lng.toFixed(7))
 }
 
+// Drawer input manual lat/long (permintaan user) -- tersembunyi di belakang link "Input Detail
+// Latitude dan Longitude" di bawah peta, buat kasus staf sudah PUNYA koordinat presisi (mis.
+// dari GPS device lapangan) dan tidak mau menerka via klik peta. Tetap sinkron DUA ARAH dengan
+// picker peta: ubah manual di sini ikut menggeser marker (syncMarkerFromManualInput), ubah lewat
+// peta tetap update angka di drawer ini juga (v-model ke editForm yang sama).
+const showLatLngDrawer = ref(false)
+
+function syncMarkerFromManualInput() {
+  const lat = editForm.value.latitude
+  const lng = editForm.value.longitude
+  if (lat == null || lng == null || Number.isNaN(lat) || Number.isNaN(lng)) return
+  if (!pickerMapInstance || !pickerMarker) return
+  pickerMarker.setLngLat([lng, lat])
+  pickerMapInstance.flyTo({ center: [lng, lat] })
+}
+
 function loadMapLibreScript(): Promise<void> {
   return new Promise((resolve) => {
     if ((window as any).maplibregl) {
@@ -201,6 +217,7 @@ function openEditModal(p: Puskesmas) {
   }
   saveError.value = ''
   fieldErrors.value = {}
+  showLatLngDrawer.value = false
   showEditModal.value = true
   nextTick(() => initMapPicker())
 }
@@ -506,6 +523,41 @@ async function saveEdit() {
                 </p>
                 <p v-if="fieldErrors.latitude" class="text-xs text-danger mt-1">{{ fieldErrors.latitude[0] }}</p>
                 <p v-if="fieldErrors.longitude" class="text-xs text-danger mt-1">{{ fieldErrors.longitude[0] }}</p>
+
+                <!-- Drawer input manual (permintaan user) -- opsi kedua di belakang link ini
+                     untuk staf yang sudah punya koordinat presisi sendiri, tidak perlu klik peta. -->
+                <button
+                   type="button"
+                   @click="showLatLngDrawer = !showLatLngDrawer"
+                   class="mt-3 inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline"
+                >
+                   <LucideChevronDown class="w-3.5 h-3.5 transition-transform" :class="showLatLngDrawer ? 'rotate-180' : ''" />
+                   Input Detail Latitude dan Longitude
+                </button>
+                <div v-if="showLatLngDrawer" class="mt-2 grid grid-cols-2 gap-3 bg-slate-50 border border-slate-100 rounded-xl p-3">
+                   <div>
+                      <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wide">Latitude</label>
+                      <input
+                         v-model.number="editForm.latitude"
+                         @change="syncMarkerFromManualInput"
+                         type="number"
+                         step="any"
+                         placeholder="-7.0123456"
+                         class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                      />
+                   </div>
+                   <div>
+                      <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wide">Longitude</label>
+                      <input
+                         v-model.number="editForm.longitude"
+                         @change="syncMarkerFromManualInput"
+                         type="number"
+                         step="any"
+                         placeholder="113.8765432"
+                         class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                      />
+                   </div>
+                </div>
              </div>
 
              <div>
