@@ -132,6 +132,13 @@ export function useNotifications() {
         desc: n.data.reason ? `Dibatalkan: ${n.data.reason}` : 'Salah satu penugasan kunjunganmu dibatalkan.'
       }
     }
+    if (n.type === 'visit_summary_tomorrow') {
+      const count = Number(n.data.count ?? 0)
+      return {
+        title: 'Ringkasan Kunjungan Besok',
+        desc: `${count} kunjungan dijadwalkan besok (${n.data.date ?? '-'}) di wilayah Anda.`
+      }
+    }
     if (n.type === 'rujukan_dikonfirmasi') {
       const dikonfirmasi = n.data.rujukan_status === 'dikonfirmasi'
       return {
@@ -159,6 +166,7 @@ export function useNotifications() {
     if (type === 'visit_report_submitted') return LucideClipboardList
     if (type === 'pasien_dirujuk') return LucideSiren
     if (type === 'visit_assigned') return LucideCalendarPlus
+    if (type === 'visit_summary_tomorrow') return LucideClipboardList
     if (type === 'visit_assignment_cancelled') return LucideCalendarX
     if (type === 'rujukan_dikonfirmasi') return LucideCircleCheck
     return LucideCalendarClock

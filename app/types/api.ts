@@ -824,6 +824,7 @@ export type NotificationType =
   | 'visit_assigned'
   | 'visit_assignment_cancelled'
   | 'rujukan_dikonfirmasi'
+  | 'visit_summary_tomorrow'
   | string
 
 export interface AppNotification {

@@ -280,14 +280,45 @@ const scheduledDate = ref('')
 const scheduledDateInputRef = ref(null)
 const priority = ref('berat')
 
+// Mode tanggal (permintaan user) -- 'single' (default, banyak PASIEN 1 tanggal, alur lama tidak
+// berubah) vs 'multiple' (1 PASIEN banyak tanggal, POST /visit-assignments/multi-dates yang
+// SEBELUMNYA cuma bisa diakses dari halaman detail pasien -- lihat openAssignKaderModal() di
+// dashboard/pasien/[id].vue, sekarang juga muncul di sini supaya ketemu di tempat yang paling
+// sering dicek). Cuma untuk kader (endpoint multi-dates tidak punya padanan tenaga_kesehatan).
+const dateMode = ref('single') // 'single' | 'multiple'
+const multiDates = ref([])
+
+// Instance flatpickr disimpan (BEDA dari komentar lama di bawah) -- toggle dateMode terjadi
+// SELAGI modal ini terbuka (bukan re-mount), jadi instance lama WAJIB di-destroy dulu sebelum
+// re-init dgn opsi mode yang beda, kalau tidak dua kalender numpuk di elemen yang sama.
+let scheduledDatePickerInstance = null
+
 // Flatpickr (mirror pola dashboard/index.vue initDateRangePicker) -- dateFormat 'Y-m-d' PERSIS
 // yang diterima Laravel ('date' validation rule), altInput tampilkan format manusiawi terpisah
 // supaya v-model (scheduledDate) tidak pernah bergantung ke parsing string flatpickr baliknya.
-// Modal ini v-if (unmount total saat ditutup) -- setiap kali dibuka DOM input-nya baru, jadi
-// re-init aman tanpa perlu destroy instance lama.
 function initScheduledDatePicker() {
   if (!scheduledDateInputRef.value) return
-  flatpickr(scheduledDateInputRef.value, {
+  scheduledDatePickerInstance?.destroy()
+
+  if (dateMode.value === 'multiple') {
+    // mode 'multiple' -- pola sama persis openAssignKaderModal() di dashboard/pasien/[id].vue,
+    // onChange custom MENANG (bukan default single-date) karena user boleh klik banyak tanggal
+    // lepas di kalender yang sama (bukan range).
+    scheduledDatePickerInstance = flatpickr(scheduledDateInputRef.value, {
+      locale: Indonesian,
+      dateFormat: 'Y-m-d',
+      altInput: true,
+      altFormat: 'j F Y',
+      minDate: 'today',
+      mode: 'multiple',
+      onChange: (selectedDates) => {
+        multiDates.value = selectedDates.map((d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)
+      }
+    })
+    return
+  }
+
+  scheduledDatePickerInstance = flatpickr(scheduledDateInputRef.value, {
     locale: Indonesian,
     dateFormat: 'Y-m-d',
     altInput: true,
@@ -301,6 +332,28 @@ function initScheduledDatePicker() {
     }
   })
 }
+
+// Ganti mode tanggal -- reset input tanggal lama (dua mode tidak kompatibel satu sama lain) dan
+// persempit ke 1 pasien kalau sebelumnya sudah pilih lebih dari 1 (endpoint multi-dates cuma
+// terima 1 patient_id).
+function setDateMode(mode) {
+  if (dateMode.value === mode) return
+  dateMode.value = mode
+  scheduledDate.value = ''
+  multiDates.value = []
+  if (mode === 'multiple' && selectedPatientIds.value.length > 1) {
+    selectedPatientIds.value = [selectedPatientIds.value[0]]
+  }
+  nextTick(() => initScheduledDatePicker())
+}
+
+// tenaga_kesehatan tidak punya padanan multi-dates -- paksa balik ke mode 'single' kalau user
+// pindah jenis petugas selagi mode 'multiple' aktif.
+watch(petugasType, (newVal) => {
+  if (newVal === 'tenaga_kesehatan' && dateMode.value === 'multiple') {
+    setDateMode('single')
+  }
+})
 
 const showConfirmModal = ref(false)
 const isSubmittingBulk = ref(false)
@@ -415,6 +468,8 @@ function closeAssignFlow() {
   selectedTenagaKesehatanId.value = null
   selectedNakesKaderCompanionId.value = null
   scheduledDate.value = ''
+  dateMode.value = 'single'
+  multiDates.value = []
   priority.value = 'berat'
   kecamatanFilter.value = ''
   desaFilter.value = ''
@@ -476,6 +531,12 @@ function isPatientAssigned(patientId) {
 
 function togglePatientSelection(patientId) {
   if (isPatientAssigned(patientId)) return
+  // Mode 'multiple' -- radio-like (endpoint multi-dates cuma terima 1 patient_id), bukan
+  // checkbox biasa spt mode 'single'.
+  if (dateMode.value === 'multiple') {
+    selectedPatientIds.value = selectedPatientIds.value.includes(patientId) ? [] : [patientId]
+    return
+  }
   const idx = selectedPatientIds.value.indexOf(patientId)
   if (idx === -1) selectedPatientIds.value.push(patientId)
   else selectedPatientIds.value.splice(idx, 1)
@@ -492,7 +553,11 @@ const selectedPatients = computed(() =>
 )
 
 const canProceedToConfirm = computed(() => {
-  if (selectedPatientIds.value.length === 0 || !scheduledDate.value) return false
+  if (selectedPatientIds.value.length === 0) return false
+  if (dateMode.value === 'multiple') {
+    return petugasType.value === 'kader' && !!selectedKaderId.value && multiDates.value.length > 0 && selectedPatientIds.value.length === 1
+  }
+  if (!scheduledDate.value) return false
   if (petugasType.value === 'tenaga_kesehatan') return !!selectedTenagaKesehatanId.value
   return !!selectedKaderId.value && !!priority.value
 })
@@ -538,7 +603,23 @@ async function submitBulkAssignment() {
   bulkError.value = ''
   try {
     let resultData
-    if (petugasType.value === 'tenaga_kesehatan') {
+    if (dateMode.value === 'multiple') {
+      // POST /visit-assignments/multi-dates -- ALL-OR-NOTHING (beda dari /bulk yang partial
+      // success per pasien), jadi kegagalan otomatis lompat ke catch block di bawah (bulkError),
+      // bukan masuk ke resultData.failed. Sukses -> bungkus jadi bentuk {created, failed: []}
+      // yang SAMA dgn respons /bulk supaya template konfirmasi di bawah tetap satu jalur.
+      const api = useApi()
+      const res = await api('/visit-assignments/multi-dates', {
+        method: 'POST',
+        body: {
+          patient_id: selectedPatientIds.value[0],
+          kader_id: selectedKaderId.value,
+          scheduled_dates: multiDates.value,
+          priority: priority.value
+        }
+      })
+      resultData = { created: res.data, failed: [] }
+    } else if (petugasType.value === 'tenaga_kesehatan') {
       resultData = await assignTenagaKesehatanBatch()
     } else {
       const api = useApi()
@@ -1433,6 +1514,7 @@ async function confirmReassign() {
                 <div class="flex items-center justify-between mb-2">
                    <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">Pilih Pasien</label>
                    <button
+                      v-if="dateMode !== 'multiple'"
                       @click="selectAllUnassigned"
                       :disabled="isLoadingCandidates || filteredCandidates.length === 0"
                       type="button"
@@ -1441,6 +1523,10 @@ async function confirmReassign() {
                       Pilih Semua yang Belum Ditugaskan
                    </button>
                 </div>
+                <!-- Mode 'multiple' (permintaan user) -- endpoint /visit-assignments/multi-dates
+                     cuma terima 1 patient_id, beda dimensi dari mode 'single' yang banyak pasien
+                     1 tanggal. -->
+                <p v-if="dateMode === 'multiple'" class="text-[11px] text-info font-semibold mb-2">Mode banyak tanggal cuma untuk 1 pasien sekaligus -- pilih 1 pasien di bawah.</p>
 
                 <div v-if="isLoadingCandidates" class="py-8 flex items-center justify-center text-slate-400 gap-2 border border-slate-100 rounded-xl">
                    <LucideLoader2 class="w-4 h-4 animate-spin" /> Memuat daftar pasien...
@@ -1511,6 +1597,30 @@ async function confirmReassign() {
                 </div>
              </div>
 
+             <!-- Mode Tanggal (permintaan user) -- cuma untuk kader, endpoint multi-dates tidak
+                  punya padanan tenaga_kesehatan (lihat docblock dateMode di script). -->
+             <div v-if="petugasType === 'kader'">
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Mode Tanggal</label>
+                <div class="grid grid-cols-2 gap-3">
+                   <button
+                      type="button"
+                      @click="setDateMode('single')"
+                      class="py-2.5 px-4 rounded-xl border-2 text-sm font-bold transition-all flex items-center justify-center gap-2"
+                      :class="dateMode === 'single' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-500 hover:border-slate-300'"
+                   >
+                      Banyak Pasien, 1 Tanggal
+                   </button>
+                   <button
+                      type="button"
+                      @click="setDateMode('multiple')"
+                      class="py-2.5 px-4 rounded-xl border-2 text-sm font-bold transition-all flex items-center justify-center gap-2"
+                      :class="dateMode === 'multiple' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-500 hover:border-slate-300'"
+                   >
+                      1 Pasien, Banyak Tanggal
+                   </button>
+                </div>
+             </div>
+
              <!-- Kader Tujuan + Prioritas (jenis petugas: kader) -->
              <div v-if="petugasType === 'kader'" class="grid grid-cols-2 gap-4">
                 <div>
@@ -1545,8 +1655,9 @@ async function confirmReassign() {
              </div>
 
              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tanggal Kunjungan (berlaku untuk semua pasien terpilih)</label>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">{{ dateMode === 'multiple' ? 'Tanggal Kunjungan (bisa pilih beberapa)' : 'Tanggal Kunjungan (berlaku untuk semua pasien terpilih)' }}</label>
                 <input ref="scheduledDateInputRef" type="text" placeholder="Pilih tanggal..." readonly class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white cursor-pointer" />
+                <p v-if="dateMode === 'multiple' && multiDates.length > 0" class="text-[11px] text-slate-500 mt-1.5">{{ multiDates.length }} tanggal dipilih: {{ multiDates.join(', ') }}</p>
              </div>
 
              <!-- Kader Pendamping (opsional) -- kunjungan berombongan (docs/planning/02 §16) kalau
@@ -1619,7 +1730,8 @@ async function confirmReassign() {
                    <p><span class="text-slate-500">Tenaga Kesehatan:</span> <b class="text-slate-800">{{ tenagaKesehatanList.find(tk => tk.id === selectedTenagaKesehatanId)?.user?.name }}</b></p>
                    <p v-if="selectedNakesKaderCompanionId"><span class="text-slate-500">Kader Pendamping:</span> <b class="text-slate-800">{{ kaderList.find(k => k.id === selectedNakesKaderCompanionId)?.user?.name }}</b></p>
                 </template>
-                <p><span class="text-slate-500">Tanggal:</span> <b class="text-slate-800">{{ scheduledDate }}</b></p>
+                <p v-if="dateMode === 'multiple'"><span class="text-slate-500">Tanggal ({{ multiDates.length }}):</span> <b class="text-slate-800">{{ multiDates.join(', ') }}</b></p>
+                <p v-else><span class="text-slate-500">Tanggal:</span> <b class="text-slate-800">{{ scheduledDate }}</b></p>
              </div>
 
              <div>

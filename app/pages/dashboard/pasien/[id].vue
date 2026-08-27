@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, Desa, Kader, Kecamatan, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem, TenagaKesehatan, RiskClassificationHistory, RiskCriteriaSnapshotItem, VisitAssignment, PatientRiskLevel, LabResult } from '~/types/api'
+import type { ApiSuccessEnvelope, CareAssignmentPreview, Desa, Kader, Kecamatan, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem, TenagaKesehatan, RiskClassificationHistory, RiskCriteriaSnapshotItem, VisitAssignment, PatientRiskLevel, LabResult } from '~/types/api'
 import { Line } from 'vue-chartjs'
 import { Chart as ChartJS, Title, Tooltip, Legend, LineElement, CategoryScale, LinearScale, PointElement } from 'chart.js'
 
@@ -591,6 +591,50 @@ async function assignTenagaKesehatan() {
   }
 }
 
+// --- Atur Ulang Jadwal Cadence (permintaan user, PATCH /care-assignments/{id}/reschedule) ---
+// Geser last_triggered_at di backend supaya upcoming_dates[0] jatuh persis di tanggal terpilih --
+// hanya 1 plan yang boleh dalam mode edit sekaligus (rescheduleOpenPlanId), popover ringan inline
+// di kartu "Jadwal Kunjungan Mendatang" (bukan modal terpisah, aksinya kecil & 1 field saja).
+const rescheduleOpenPlanId = ref<number | null>(null)
+const rescheduleDate = ref('')
+const rescheduleDateInputRef = ref<HTMLElement | null>(null)
+const isRescheduling = ref(false)
+const rescheduleError = ref('')
+
+async function openReschedule(plan: CareAssignmentPreview) {
+  rescheduleOpenPlanId.value = plan.id
+  rescheduleDate.value = ''
+  rescheduleError.value = ''
+  await nextTick()
+  initDatePicker(rescheduleDateInputRef.value, rescheduleDate, { minDate: 'today' })
+}
+
+function closeReschedule() {
+  rescheduleOpenPlanId.value = null
+  rescheduleError.value = ''
+}
+
+async function submitReschedule(plan: CareAssignmentPreview) {
+  if (!rescheduleDate.value) return
+  isRescheduling.value = true
+  rescheduleError.value = ''
+  try {
+    const api = useApi()
+    await api(`/care-assignments/${plan.id}/reschedule`, {
+      method: 'PATCH',
+      body: { next_date: rescheduleDate.value }
+    })
+    rescheduleOpenPlanId.value = null
+    toast.add({ title: 'Jadwal berhasil diatur ulang', icon: 'i-lucide-check-circle-2' })
+    await loadPatient()
+  } catch (e) {
+    const firstFieldError = e instanceof ApiError && e.errors ? Object.values(e.errors)[0]?.[0] : null
+    rescheduleError.value = firstFieldError ?? (e instanceof ApiError ? e.message : 'Gagal mengatur ulang jadwal.')
+  } finally {
+    isRescheduling.value = false
+  }
+}
+
 const showUpdateModal = ref(false)
 const updateForm = ref<PatientFieldUpdates>({})
 const isSavingUpdate = ref(false)
@@ -866,20 +910,55 @@ async function triggerSyncFromHistory() {
         </h3>
         <div class="space-y-3">
           <div v-for="plan in patient.care_assignments" :key="plan.id" class="bg-slate-50 border border-slate-100 rounded-xl p-4">
-            <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center justify-between mb-2 gap-2">
               <p class="text-sm font-bold text-slate-700">
                 {{ plan.worker_type === 'kader' ? 'Kader' : 'Tenaga Kesehatan' }}: {{ plan.worker_name || '-' }}
                 <span class="text-xs font-medium text-slate-400">(tiap {{ plan.cadence_days }} hari)</span>
               </p>
-              <span v-if="plan.blocked_by_open_visit" class="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-warning/10 text-warning-700 border border-warning/20">
-                Menunggu kunjungan sebelumnya selesai
-              </span>
+              <div class="flex items-center gap-2 shrink-0">
+                <span v-if="plan.blocked_by_open_visit" class="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-warning/10 text-warning-700 border border-warning/20">
+                  Menunggu kunjungan sebelumnya selesai
+                </span>
+                <!-- Atur Ulang Jadwal (permintaan user) -- geser last_triggered_at supaya
+                     upcoming_dates[0] jatuh persis di tanggal terpilih, lihat submitReschedule().
+                     Disabled selagi blocked_by_open_visit (backend juga menolak, ini cuma
+                     mencegah percobaan sia-sia + jelaskan kenapa lewat tooltip). -->
+                <AppTooltip v-if="plan.blocked_by_open_visit" text="Selesaikan atau batalkan kunjungan yang sedang berjalan dulu sebelum mengatur ulang jadwal.">
+                  <button type="button" disabled class="inline-flex items-center gap-1 text-xs font-bold text-slate-300 cursor-not-allowed px-2 py-1">
+                    <LucideCalendarCog class="w-3.5 h-3.5" /> Atur Ulang
+                  </button>
+                </AppTooltip>
+                <button
+                  v-else-if="canAssignTenagaKesehatan"
+                  type="button"
+                  @click="openReschedule(plan)"
+                  class="inline-flex items-center gap-1 text-xs font-bold text-info hover:underline px-2 py-1"
+                >
+                  <LucideCalendarCog class="w-3.5 h-3.5" /> Atur Ulang
+                </button>
+              </div>
             </div>
             <div class="flex flex-wrap gap-2">
               <span v-for="d in plan.upcoming_dates" :key="d" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-info/10 text-info border border-info/20">
                 {{ new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) }}
               </span>
               <span v-if="!plan.upcoming_dates || plan.upcoming_dates.length === 0" class="text-xs text-slate-400 italic">Belum ada proyeksi tanggal.</span>
+            </div>
+
+            <!-- Popover inline atur ulang -- 1 field tanggal, aksi kecil, tidak perlu modal
+                 terpisah spt Tugaskan Kader/Tenaga Kesehatan yang datanya lebih banyak. -->
+            <div v-if="rescheduleOpenPlanId === plan.id" class="mt-3 pt-3 border-t border-slate-200 flex items-end gap-2 flex-wrap">
+              <div class="flex-1 min-w-[160px]">
+                <label class="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Kunjungan Berikutnya Jadi Tanggal</label>
+                <input ref="rescheduleDateInputRef" type="text" readonly placeholder="Pilih tanggal..." class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer" />
+              </div>
+              <button type="button" @click="submitReschedule(plan)" :disabled="!rescheduleDate || isRescheduling" class="py-2 px-4 rounded-lg font-bold text-xs text-white bg-info hover:bg-info/90 disabled:opacity-50 transition-colors">
+                {{ isRescheduling ? 'Menyimpan...' : 'Simpan' }}
+              </button>
+              <button type="button" @click="closeReschedule" class="py-2 px-3 rounded-lg font-bold text-xs text-slate-500 hover:bg-slate-100 transition-colors">
+                Batal
+              </button>
+              <p v-if="rescheduleError" class="w-full text-xs text-danger font-semibold">{{ rescheduleError }}</p>
             </div>
           </div>
         </div>
