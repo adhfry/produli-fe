@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import type { ApiSuccessEnvelope, PaginatedData, Patient, SearchPatientByNikPayload, Kecamatan, Puskesmas } from '~/types/api'
+import flatpickr from 'flatpickr'
+import 'flatpickr/dist/flatpickr.css'
+import monthSelectPlugin from 'flatpickr/dist/plugins/monthSelect'
+import 'flatpickr/dist/plugins/monthSelect/style.css'
+import { Indonesian } from 'flatpickr/dist/l10n/id.js'
 
 definePageMeta({
   layout: 'dashboard',
@@ -41,16 +46,38 @@ const filterPuskesmasId = ref<number | null>(null)
 // (early_detection_flag di latestRiskClassification, sudah dipakai ikon peringatan di tabel
 // sebelumnya, sekarang jadi filter cepat juga).
 const filterEarlyDetectionOnly = ref(false)
-// Fitur periode bulanan (permintaan user) -- default bulan SAAT INI (format 'YYYY-MM', native
-// <input type="month"> sudah pas utk granularitas ini, tidak perlu flatpickr yang dirancang utk
-// tanggal harian). Riwayat/evaluasi lintas puskesmas: lihat kondisi pasien di bulan lalu/3 bulan
-// lalu dibanding sekarang -- lihat badge risiko tabel & PatientController::index() sisi backend.
+// Fitur periode bulanan (permintaan user) -- default bulan SAAT INI (format 'YYYY-MM'). Riwayat/
+// evaluasi lintas puskesmas: lihat kondisi pasien di bulan lalu/3 bulan lalu dibanding sekarang --
+// lihat badge risiko tabel & PatientController::index() sisi backend.
 // Y-m lokal (BUKAN toISOString -- itu UTC, bisa mundur ke bulan sebelumnya utk WIB di jam-jam
 // pertama tanggal 1, sama alasannya dgn useFlatpickr.ts::toYmd()).
 const nowLocal = new Date()
 const currentPeriod = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}`
 const filterPeriod = ref(currentPeriod)
 const isCurrentPeriod = computed(() => filterPeriod.value === currentPeriod)
+
+// flatpickr + plugin monthSelect (permintaan user, sebelumnya native <input type="month">) --
+// paket flatpickr yang sudah terpasang di app ini sudah menyertakan plugin ini, dipakai di sini
+// (bukan diintegrasikan ke useFlatpickr.ts yang dirancang utk granularitas HARI) supaya input
+// tanggal terasa konsisten dgn input tanggal lain di app tanpa mengubah composable bersama utk
+// kasus bulan-saja yang cuma dipakai di sini. maxDate dikunci ke bulan berjalan -- pola sama
+// dgn :max="currentPeriod" native sebelumnya, tidak boleh pilih periode masa depan (data
+// risiko/kunjungan belum ada).
+const filterPeriodInputRef = ref<HTMLInputElement | null>(null)
+function initPeriodPicker() {
+  if (!filterPeriodInputRef.value) return
+  flatpickr(filterPeriodInputRef.value, {
+    locale: Indonesian,
+    plugins: [monthSelectPlugin({ shorthand: true, dateFormat: 'Y-m', theme: 'light' })],
+    maxDate: `${currentPeriod}-01`,
+    defaultDate: `${filterPeriod.value}-01`,
+    onChange: (selectedDates) => {
+      const d = selectedDates[0]
+      if (!d) return
+      filterPeriod.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    }
+  })
+}
 
 // Header tabel yang bisa diklik utk sort asc/desc (revisi Bu Kadis) -- 'nama' default asc (sama
 // perilaku sebelum fitur ini ada, backend juga default ke ini kalau sort_by tidak dikirim).
@@ -156,6 +183,7 @@ onMounted(() => {
   loadPatients()
   lockKecamatanToOwnPuskesmas()
   loadPuskesmasList()
+  initPeriodPicker()
 })
 
 // Reload otomatis begitu sinkronisasi SiLAKES berhasil -- tetap di halaman & filter yang
@@ -474,24 +502,13 @@ function closeNikNotFoundModal() {
     <!-- Filters & Table Card -->
     <div class="bg-white rounded-2xl border border-slate-100 shadow-card flex flex-col overflow-hidden">
 
-      <!-- Toolbar -->
-      <div class="p-5 border-b border-slate-100 flex flex-col md:flex-row gap-4 items-center justify-between bg-slate-50/50">
-        <div class="relative w-full md:w-80">
-          <LucideSearch class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            v-model="searchQuery"
-            type="text"
-            inputmode="text"
-            maxlength="16"
-            placeholder="Cari nama, no. registrasi, no. BPJS, atau NIK (16 digit)..."
-            class="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-white"
-          />
-          <p v-if="/^\d+$/.test(searchQuery.trim()) && searchQuery.trim().length > 0 && searchQuery.trim().length < 16" class="absolute -bottom-5 left-1 text-[11px] font-semibold text-slate-400">
-            Mendeteksi NIK — {{ searchQuery.trim().length }}/16 digit
-          </p>
-        </div>
-
-        <div class="flex items-center gap-3 w-full md:w-auto">
+      <!-- Toolbar -- filter di baris atas, pencarian di baris TERSENDIRI di bawahnya (permintaan
+           user: pada layar 'lg' filter+pencarian sebelumnya berbagi satu flex row, pencarian
+           (w-80 tanpa shrink-0) ikut menyempit tergencet 5 kontrol filter yang berebut ruang di
+           lebar itu, isinya jadi tidak kebaca). Dipisah 2 baris supaya pencarian SELALU dapat
+           lebar penuh, tidak lagi ikut kompetisi ruang dgn filter. -->
+      <div class="p-5 border-b border-slate-100 flex flex-col gap-4 bg-slate-50/50">
+        <div class="flex flex-wrap items-center gap-3">
           <select v-model="filterRisk" class="flex-1 md:w-40 py-2.5 px-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white">
             <option value="">Semua Risiko</option>
             <option value="berat">Risiko Berat</option>
@@ -538,9 +555,25 @@ function closeNikNotFoundModal() {
             :class="!isCurrentPeriod ? 'border-info bg-info/10 text-info' : 'border-slate-200 text-slate-600'"
           >
             <LucideCalendarClock class="w-3.5 h-3.5 shrink-0" />
-            <input v-model="filterPeriod" type="month" :max="currentPeriod" class="bg-transparent outline-none text-sm font-semibold" />
+            <input ref="filterPeriodInputRef" type="text" readonly class="bg-transparent outline-none text-sm font-semibold w-24 cursor-pointer" />
           </label>
         </div>
+
+        <div class="relative w-full">
+          <LucideSearch class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            v-model="searchQuery"
+            type="text"
+            inputmode="text"
+            maxlength="16"
+            placeholder="Cari nama, no. registrasi, no. BPJS, atau NIK (16 digit)..."
+            class="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-white"
+          />
+          <p v-if="/^\d+$/.test(searchQuery.trim()) && searchQuery.trim().length > 0 && searchQuery.trim().length < 16" class="absolute -bottom-5 left-1 text-[11px] font-semibold text-slate-400">
+            Mendeteksi NIK — {{ searchQuery.trim().length }}/16 digit
+          </p>
+        </div>
+
         <p v-if="!isCurrentPeriod" class="text-xs font-semibold text-info mt-2 flex items-center gap-1.5">
           <LucideInfo class="w-3.5 h-3.5" />
           Menampilkan status risiko pasien seperti kondisinya di bulan yang dipilih (data historis), bukan status terkini.
