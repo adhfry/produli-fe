@@ -1399,7 +1399,7 @@ async function triggerSyncFromHistory() {
           </button>
         </div>
         <div class="p-6 space-y-4 overflow-y-auto">
-          <p class="text-xs text-slate-500 leading-relaxed">Pilih beberapa tanggal kunjungan sekaligus di kalender di bawah -- setiap tanggal jadi penugasan terpisah untuk kader yang sama.</p>
+          <p class="text-xs text-slate-500 leading-relaxed">Pilih beberapa tanggal kunjungan sekaligus di kalender di bawah, setiap tanggal jadi penugasan terpisah untuk kader yang sama.</p>
           <p v-if="assignKaderMultiDateError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ assignKaderMultiDateError }}</p>
           <div>
             <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kader</label>
@@ -1467,7 +1467,7 @@ async function triggerSyncFromHistory() {
               <option :value="null">{{ isLoadingKaderOptions ? 'Memuat...' : 'Tanpa kader (nakes sendirian)' }}</option>
               <option v-for="kader in kaderOptions" :key="kader.id" :value="kader.id">{{ kader.user?.name }}</option>
             </select>
-            <p class="text-xs text-slate-400 mt-1.5">Kunjungan hari pertama biasanya kader ikut mendampingi -- pilih kadernya di sini supaya rencana kunjungan mingguan kader ini langsung aktif juga.</p>
+            <p class="text-xs text-slate-400 mt-1.5">Kunjungan hari pertama biasanya kader ikut mendampingi, pilih kadernya di sini supaya rencana kunjungan mingguan kader ini langsung aktif juga.</p>
           </div>
         </div>
         <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">

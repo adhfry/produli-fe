@@ -623,7 +623,7 @@ async function confirmResetPassword() {
                   <button
                     v-if="staff.id !== authStore.user?.id"
                     @click="requestDelete(staff)"
-                    title="Hapus permanen (tidak bisa kalau sudah punya riwayat penugasan -- nonaktifkan saja)"
+                    title="Hapus permanen (tidak bisa kalau sudah punya riwayat penugasan, nonaktifkan saja)"
                     class="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 text-slate-500 hover:bg-danger/5 hover:text-danger hover:border-danger/30 transition-colors"
                   >
                     <LucideTrash2 class="w-3.5 h-3.5" />
@@ -890,7 +890,7 @@ async function confirmResetPassword() {
           </div>
 
           <p class="text-[11px] text-slate-400">
-            Peran (role) dan puskesmas tidak bisa diubah di sini -- hapus staf
+            Peran (role) dan puskesmas tidak bisa diubah di sini. Hapus staf
             ini lalu daftarkan ulang kalau perlu pindah peran/puskesmas.
           </p>
         </div>

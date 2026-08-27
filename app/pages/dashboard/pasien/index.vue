@@ -617,7 +617,7 @@ function closeNikNotFoundModal() {
                <td class="py-4 px-5 text-sm font-medium text-slate-600">{{ patient.no_reg || '-' }}</td>
                <td class="py-4 px-5 text-sm font-medium">
                   <span :class="isNoBpjsSuspicious(patient) ? 'text-danger' : 'text-slate-600'">{{ patient.no_bpjs || '-' }}</span>
-                  <AppTooltip v-if="isNoBpjsSuspicious(patient)" text="No BPJS sama persis dengan No. Registrasi -- kemungkinan salah input (copas) oleh staf, bukan No BPJS asli.">
+                  <AppTooltip v-if="isNoBpjsSuspicious(patient)" text="No BPJS sama persis dengan No. Registrasi: kemungkinan salah input (copas) oleh staf, bukan No BPJS asli.">
                      <LucideAlertTriangle class="w-3.5 h-3.5 text-danger inline-block ml-1" />
                   </AppTooltip>
                </td>

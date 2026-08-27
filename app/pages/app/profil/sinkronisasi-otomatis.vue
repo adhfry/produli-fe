@@ -69,7 +69,7 @@ async function runManualSync() {
   const result = await syncNow()
   manualSyncResult.value = result.ok
     ? `Berhasil, ${result.patientsSynced} riwayat pasien diperbarui.`
-    : 'Gagal sinkron -- pastikan Anda online.'
+    : 'Gagal sinkron. Pastikan Anda online.'
 }
 </script>
 
@@ -127,7 +127,7 @@ async function runManualSync() {
             {{ opt.label }}
           </button>
         </div>
-        <p class="text-xs text-slate-400 mb-4">Disarankan 5 menit -- cukup segar tanpa boros baterai/kuota.</p>
+        <p class="text-xs text-slate-400 mb-4">Disarankan 5 menit, cukup segar tanpa boros baterai/kuota.</p>
 
         <div class="flex items-center justify-between border-t border-slate-100 dark:border-slate-700 pt-4">
           <div>

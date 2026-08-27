@@ -296,10 +296,10 @@ async function saveEdit() {
 
        <label class="flex items-center gap-2 mt-4 text-xs font-medium text-slate-600 cursor-pointer">
           <input v-model="overwriteExistingCoords" type="checkbox" class="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary/30" />
-          Timpa juga puskesmas yang sudah punya koordinat (biasanya cukup dilewati -- default aman)
+          Timpa juga puskesmas yang sudah punya koordinat (biasanya cukup dilewati, default aman)
        </label>
 
-       <p v-if="isGeocodingAll" class="text-xs text-slate-500 mt-3">Mohon tunggu, ~1 detik per puskesmas (batas kebijakan pemakaian OpenStreetMap Nominatim) -- bisa sampai satu menit untuk seluruh Sumenep.</p>
+       <p v-if="isGeocodingAll" class="text-xs text-slate-500 mt-3">Mohon tunggu, ~1 detik per puskesmas (batas kebijakan pemakaian OpenStreetMap Nominatim), bisa sampai satu menit untuk seluruh Sumenep.</p>
        <p v-if="geocodeError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2 mt-3">{{ geocodeError }}</p>
 
        <div v-if="geocodeResult" class="mt-4 border-t border-slate-100 pt-4">
@@ -519,7 +519,7 @@ async function saveEdit() {
                    <template v-if="editForm.latitude != null && editForm.longitude != null">
                       Koordinat: {{ editForm.latitude }}, {{ editForm.longitude }}
                    </template>
-                   <template v-else>Belum ada titik lokasi -- klik di peta untuk menandai.</template>
+                   <template v-else>Belum ada titik lokasi. Klik di peta untuk menandai.</template>
                 </p>
                 <p v-if="fieldErrors.latitude" class="text-xs text-danger mt-1">{{ fieldErrors.latitude[0] }}</p>
                 <p v-if="fieldErrors.longitude" class="text-xs text-danger mt-1">{{ fieldErrors.longitude[0] }}</p>

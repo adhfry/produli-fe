@@ -1341,7 +1341,7 @@ async function submitData() {
           alt="Bukti foto kunjungan"
           class="rounded-2xl border border-slate-200 dark:border-slate-700 w-full"
         />
-        <p v-else class="text-base text-slate-400 italic">Foto tidak tersedia (tautan sementara sudah kedaluwarsa -- muat ulang halaman).</p>
+        <p v-else class="text-base text-slate-400 italic">Foto tidak tersedia (tautan sementara sudah kedaluwarsa, muat ulang halaman).</p>
       </div>
 
       <!-- Hasil Pemeriksaan & Tindakan -->
@@ -1497,7 +1497,7 @@ async function submitData() {
           <span class="flex-1">
             <span class="block text-base font-bold text-slate-800 dark:text-slate-200">Saya benar-benar berada di lokasi rumah pasien</span>
             <span class="block text-sm text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
-              Membantu memperbarui data lokasi pasien di sistem<template v-if="patient?.geo_status !== 'verified'"> -- data lokasi pasien ini <b>belum pasti</b>, konfirmasi Anda sangat membantu</template>.
+              Membantu memperbarui data lokasi pasien di sistem<template v-if="patient?.geo_status !== 'verified'">, data lokasi pasien ini <b>belum pasti</b>, konfirmasi Anda sangat membantu</template>.
             </span>
           </span>
         </button>

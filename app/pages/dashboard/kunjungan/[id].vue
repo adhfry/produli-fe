@@ -215,7 +215,7 @@ async function confirmCancel() {
                 <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">No. BPJS</p>
                 <p class="font-semibold flex items-center gap-1" :class="isNoBpjsSuspicious ? 'text-danger' : 'text-slate-700'">
                   {{ patient.no_bpjs ?? '-' }}
-                  <AppTooltip v-if="isNoBpjsSuspicious" text="Sama persis dengan No. Registrasi -- kemungkinan salah input, bukan No BPJS asli.">
+                  <AppTooltip v-if="isNoBpjsSuspicious" text="Sama persis dengan No. Registrasi: kemungkinan salah input, bukan No BPJS asli.">
                     <LucideAlertTriangle class="w-3.5 h-3.5 text-danger" />
                   </AppTooltip>
                 </p>
@@ -294,7 +294,7 @@ async function confirmCancel() {
               alt="Bukti foto kunjungan"
               class="rounded-xl border border-slate-200 max-h-[420px] w-auto mx-auto shadow-sm"
             />
-            <p v-else class="text-sm text-slate-400 italic text-center py-6">Foto tidak tersedia (belum diunggah, atau tautan sudah kedaluwarsa -- muat ulang halaman).</p>
+            <p v-else class="text-sm text-slate-400 italic text-center py-6">Foto tidak tersedia (belum diunggah, atau tautan sudah kedaluwarsa, muat ulang halaman).</p>
           </div>
         </div>
 
@@ -421,7 +421,7 @@ async function confirmCancel() {
             akan diberi tahu bahwa penugasan kunjungan ke
             <span class="font-bold text-slate-700">{{ assignment.patient?.nama }}</span>
             tanggal {{ assignment.scheduled_date }} dibatalkan. Tindakan ini tidak bisa
-            dibatalkan (undo) -- kalau salah batal, buat penugasan baru dari awal.
+            dibatalkan (undo). Kalau salah batal, buat penugasan baru dari awal.
           </p>
           <label class="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-1.5">Alasan (opsional, disertakan di notifikasi)</label>
           <textarea

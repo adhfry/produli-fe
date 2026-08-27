@@ -1526,7 +1526,7 @@ async function confirmReassign() {
                 <!-- Mode 'multiple' (permintaan user) -- endpoint /visit-assignments/multi-dates
                      cuma terima 1 patient_id, beda dimensi dari mode 'single' yang banyak pasien
                      1 tanggal. -->
-                <p v-if="dateMode === 'multiple'" class="text-[11px] text-info font-semibold mb-2">Mode banyak tanggal cuma untuk 1 pasien sekaligus -- pilih 1 pasien di bawah.</p>
+                <p v-if="dateMode === 'multiple'" class="text-[11px] text-info font-semibold mb-2">Mode banyak tanggal cuma untuk 1 pasien sekaligus. Pilih 1 pasien di bawah.</p>
 
                 <div v-if="isLoadingCandidates" class="py-8 flex items-center justify-center text-slate-400 gap-2 border border-slate-100 rounded-xl">
                    <LucideLoader2 class="w-4 h-4 animate-spin" /> Memuat daftar pasien...
@@ -1682,7 +1682,7 @@ async function confirmReassign() {
              </div>
              <div v-else>
                 <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kader Pendamping (Opsional)</label>
-                <p class="text-[11px] text-slate-400 mb-2">Kunjungan hari pertama biasanya kader ikut mendampingi -- pilih kadernya di sini supaya rencana kunjungan mingguan kader ini langsung aktif juga (berlaku ke semua pasien di batch ini).</p>
+                <p class="text-[11px] text-slate-400 mb-2">Kunjungan hari pertama biasanya kader ikut mendampingi, pilih kadernya di sini supaya rencana kunjungan mingguan kader ini langsung aktif juga (berlaku ke semua pasien di batch ini).</p>
                 <select v-model="selectedNakesKaderCompanionId" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white" :disabled="isLoadingKader">
                    <option :value="null">{{ isLoadingKader ? 'Memuat...' : 'Tanpa kader (nakes sendirian)' }}</option>
                    <option v-for="k in kaderList" :key="k.id" :value="k.id">{{ k.user?.name ?? `Kader #${k.id}` }}</option>
@@ -2037,7 +2037,7 @@ async function confirmReassign() {
             akan diberi tahu bahwa penugasan kunjungan ke
             <span class="font-bold text-slate-700">{{ visitToCancel.patient?.nama }}</span>
             tanggal {{ visitToCancel.scheduled_date }} dibatalkan. Tindakan ini tidak bisa
-            dibatalkan (undo) -- kalau salah batal, buat penugasan baru dari awal.
+            dibatalkan (undo). Kalau salah batal, buat penugasan baru dari awal.
           </p>
           <label class="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-1.5">Alasan (opsional, disertakan di notifikasi)</label>
           <textarea
@@ -2085,7 +2085,7 @@ async function confirmReassign() {
           <p class="text-sm text-slate-500 leading-relaxed mb-4">
             Kunjungan ke <span class="font-bold text-slate-700">{{ visitToDelete.patient?.nama }}</span>
             tanggal {{ visitToDelete.scheduled_date }} (petugas {{ petugasName(visitToDelete) }}) beserta
-            laporannya akan hilang dari SELURUH daftar &amp; riwayat -- gunakan ini HANYA untuk
+            laporannya akan hilang dari SELURUH daftar &amp; riwayat. Gunakan ini HANYA untuk
             kunjungan yang benar-benar salah (mis. salah pasien, data uji coba). Untuk pembatalan
             biasa, pakai "Batalkan Penugasan", bukan ini.
           </p>

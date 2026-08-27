@@ -352,6 +352,14 @@ const dateRangeLabel = computed(() => {
   return `${fmt(dateRangeFrom.value)} - ${fmt(dateRangeTo.value)}`
 })
 
+// "Lihat Selengkapnya" widget "Top 5 Puskesmas Kinerja Terbaik" (permintaan user, tombol
+// sebelumnya dead) -- bawa periode yang sedang aktif di dashboard ke halaman detailnya, supaya
+// konteksnya konsisten (bukan reset ke "Semua Tanggal").
+const kinerjaPuskesmasLink = computed(() => ({
+  path: '/dashboard/kinerja-puskesmas',
+  query: dateRangeFrom.value && dateRangeTo.value ? { date_from: dateRangeFrom.value, date_to: dateRangeTo.value } : {}
+}))
+
 function initDateRangePicker() {
   if (!dateRangeInputRef.value) return
   flatpickr(dateRangeInputRef.value, {
@@ -1309,9 +1317,9 @@ const initMap = () => {
              </div>
           </div>
           
-          <button class="w-full text-center text-sm font-semibold text-primary hover:text-primary-600 mt-auto pt-4 border-t border-slate-100 flex items-center justify-center gap-1 transition-colors">
+          <NuxtLink to="/dashboard/pasien" class="w-full text-center text-sm font-semibold text-primary hover:text-primary-600 mt-auto pt-4 border-t border-slate-100 flex items-center justify-center gap-1 transition-colors">
             Lihat Selengkapnya <span aria-hidden="true">&rarr;</span>
-          </button>
+          </NuxtLink>
         </div>
       </div>
 
@@ -1387,9 +1395,9 @@ const initMap = () => {
           <p v-if="!topDistricts.length" class="text-sm text-slate-400 text-center py-6">Belum ada data risiko per kecamatan.</p>
         </div>
 
-        <button class="w-full text-center text-sm font-semibold text-primary hover:text-primary-600 mt-4 pt-4 border-t border-slate-100 flex items-center justify-center gap-1 transition-colors">
+        <NuxtLink to="/dashboard/kecamatan-risiko" class="w-full text-center text-sm font-semibold text-primary hover:text-primary-600 mt-4 pt-4 border-t border-slate-100 flex items-center justify-center gap-1 transition-colors">
           Lihat Selengkapnya <span aria-hidden="true">&rarr;</span>
-        </button>
+        </NuxtLink>
       </div>
 
       <!-- Kanan: Top 5 Puskesmas Kinerja Terbaik -- skor gabungan (final_score, 0-100) dari
@@ -1431,9 +1439,9 @@ const initMap = () => {
           <p v-if="!puskesmasPerformanceRows.length" class="text-sm text-slate-400 text-center py-6">Belum ada transisi risiko dengan kunjungan tervalidasi pada periode ini.</p>
         </div>
 
-        <button class="w-full text-center text-sm font-semibold text-primary hover:text-primary-600 mt-4 pt-4 border-t border-slate-100 flex items-center justify-center gap-1 transition-colors">
+        <NuxtLink :to="kinerjaPuskesmasLink" class="w-full text-center text-sm font-semibold text-primary hover:text-primary-600 mt-4 pt-4 border-t border-slate-100 flex items-center justify-center gap-1 transition-colors">
           Lihat Selengkapnya <span aria-hidden="true">&rarr;</span>
-        </button>
+        </NuxtLink>
       </div>
     </div>
 
