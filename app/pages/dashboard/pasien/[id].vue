@@ -391,6 +391,165 @@ const trendChartOptions = {
   }
 }
 
+// --- Tren Hasil Pemeriksaan (permintaan user) -- grafik % terhadap ambang risiko
+// (risk_thresholds), BUKAN nilai mentah lintas-satuan yang tidak sebanding (Cholesterol 213 vs
+// Creatinine 0.9 dalam 1 sumbu Y sama, terlihat kacau). Sumber data: labResultsHistory (SUDAH
+// di-fetch utk Bandingkan Periode, nol panggilan API tambahan) -- filter ke baris
+// percent_of_reference!==null (otomatis cuma parameter berambang aktif: Cholesterol/Creatinine/
+// Gula Darah Puasa/LDL/Trigliserida/Urea, lihat LabParameterReferenceService backend). Parameter
+// TANPA ambang terkonfigurasi (HDL/Microalbumin/HbA1c) SENGAJA dikecualikan -- bukan diarang
+// ambangnya, cuma tidak relevan utk grafik relatif ini (tetap tampil apa adanya di "Hasil
+// Pemeriksaan Terakhir"/"Bandingkan Periode" yang sudah ada). --------------------------------
+const ZONE_COLOR: Record<string, string> = { normal: '#16a34a', waspada: '#d97706', tinggi: '#dc2626' }
+const ZONE_LABEL: Record<string, string> = { normal: 'Dalam rujukan', waspada: 'Mendekati batas', tinggi: 'Di atas rujukan' }
+const PARAMETER_LINE_COLORS = ['#0d9488', '#2563eb', '#7c3aed', '#db2777', '#ea580c', '#0891b2']
+
+const chartMode = ref<'relatif' | 'aktual'>('relatif')
+const selectedActualParameter = ref<string | null>(null)
+
+const chartableParameters = computed(() => {
+  const names = new Set(labResultsHistory.value.filter((r) => r.percent_of_reference !== null).map((r) => r.parameter))
+  return [...names].sort()
+})
+
+// Default pilihan mode "Nilai Aktual" -- parameter pertama yang tersedia, sekali saja begitu
+// datanya termuat (tidak menimpa pilihan manual user di reload berikutnya).
+watch(chartableParameters, (params) => {
+  if (!selectedActualParameter.value && params.length > 0) selectedActualParameter.value = params[0]
+}, { immediate: true })
+
+// Sumbu X BERSAMA -- gabungan semua tanggal_periksa distinct dari parameter berambang,
+// kronologis lama->baru. Tiap dataset parameter map ke label ini, null di tanggal yang
+// parameter itu tidak diperiksa (spanGaps:true di dataset supaya garis tetap nyambung).
+const relativeChartLabels = computed(() => {
+  const dates = new Set(
+    labResultsHistory.value.filter((r) => r.percent_of_reference !== null && r.tanggal_periksa).map((r) => r.tanggal_periksa as string)
+  )
+  return [...dates].sort()
+})
+
+const relativeChartData = computed(() => {
+  const labels = relativeChartLabels.value
+  const byParameter = new Map<string, LabResult[]>()
+  for (const row of labResultsHistory.value) {
+    if (row.percent_of_reference === null || !row.tanggal_periksa) continue
+    if (!byParameter.has(row.parameter)) byParameter.set(row.parameter, [])
+    byParameter.get(row.parameter)!.push(row)
+  }
+
+  const datasets = chartableParameters.value.map((parameter, idx) => {
+    const rowsByDate = new Map(byParameter.get(parameter)?.map((r) => [r.tanggal_periksa as string, r]) ?? [])
+    const color = PARAMETER_LINE_COLORS[idx % PARAMETER_LINE_COLORS.length]
+    return {
+      label: parameter,
+      data: labels.map((d) => rowsByDate.get(d)?.percent_of_reference ?? null),
+      borderColor: color,
+      backgroundColor: color,
+      pointBackgroundColor: labels.map((d) => ZONE_COLOR[rowsByDate.get(d)?.zone ?? ''] ?? color),
+      pointRadius: labels.map((d) => (rowsByDate.has(d) ? 5 : 0)),
+      spanGaps: true,
+      tension: 0.15
+    }
+  })
+
+  // Garis putus-putus datar di Y=100 ("Batas Rujukan") -- dataset tambahan sederhana, BUKAN
+  // plugin chartjs-annotation (belum terpasang di project, tidak menambah dependency baru).
+  datasets.push({
+    label: 'Batas Rujukan',
+    data: labels.map(() => 100),
+    borderColor: '#94a3b8',
+    backgroundColor: '#94a3b8',
+    borderDash: [6, 4],
+    pointRadius: 0,
+    borderWidth: 1.5,
+    tension: 0
+  })
+
+  return { labels: labels.map((d) => formatCriteriaDate(d)), datasets }
+})
+
+const relativeChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    // Legend DIAKTIFKAN (beda dari trendChartOptions chart risiko yang mematikannya) -- klik
+    // nama parameter utk show/hide dataset itu, MENGGANTIKAN checkbox filter custom (built-in
+    // Chart.js, tidak perlu UI tambahan).
+    legend: { display: true, position: 'bottom' as const },
+    tooltip: {
+      callbacks: {
+        label: (ctx: { dataset: { label?: string }, raw: number | null, dataIndex: number }) => {
+          if (ctx.dataset.label === 'Batas Rujukan' || ctx.raw === null) return undefined
+          const parameter = ctx.dataset.label ?? ''
+          const row = labResultsHistory.value.find(
+            (r) => r.parameter === parameter && r.tanggal_periksa === relativeChartLabels.value[ctx.dataIndex]
+          )
+          if (!row) return `${parameter}: ${ctx.raw}%`
+          return [
+            `${parameter}: ${row.value} ${row.satuan ?? ''}`,
+            `Rujukan: ${row.reference_boundary} ${row.satuan ?? ''}`,
+            `${ctx.raw}% dari batas -- ${ZONE_LABEL[row.zone ?? ''] ?? '-'}`
+          ]
+        }
+      }
+    }
+  },
+  scales: {
+    y: { min: 0, ticks: { callback: (v: number) => `${v}%` } }
+  }
+}
+
+// Mode "Nilai Aktual" -- 1 parameter dipilih manual, nilai mentah (satuan asli) SENDIRIAN --
+// menghindari masalah skala campur (usulan awal user sendiri minta ini dihindari eksplisit,
+// bukan overlay banyak satuan sekaligus dalam 1 sumbu Y).
+const actualChartData = computed(() => {
+  if (!selectedActualParameter.value) return { labels: [] as string[], datasets: [] as any[] }
+  const rows = [...labResultsHistory.value]
+    .filter((r) => r.parameter === selectedActualParameter.value && r.tanggal_periksa)
+    .sort((a, b) => (a.tanggal_periksa as string).localeCompare(b.tanggal_periksa as string))
+
+  return {
+    labels: rows.map((r) => formatCriteriaDate(r.tanggal_periksa)),
+    datasets: [{
+      label: selectedActualParameter.value,
+      data: rows.map((r) => Number(r.value)),
+      borderColor: '#0d9488',
+      backgroundColor: '#0d9488',
+      pointBackgroundColor: rows.map((r) => ZONE_COLOR[r.zone ?? ''] ?? '#0d9488'),
+      pointRadius: 5,
+      tension: 0.15
+    }]
+  }
+})
+const actualChartOptions = computed(() => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: { legend: { display: false } },
+  scales: {
+    y: {
+      title: {
+        display: true,
+        text: labResultsHistory.value.find((r) => r.parameter === selectedActualParameter.value)?.satuan ?? ''
+      }
+    }
+  }
+}))
+
+// Kartu "Status Pemeriksaan Terakhir" -- hitung dari labResults (data TERBARU per parameter,
+// endpoint /lab-results, SUDAH di-fetch loadLabResults()), BUKAN labResultsHistory (riwayat
+// lengkap) -- ini murni status HARI INI, bukan tren.
+const lastExamStatusCounts = computed(() => {
+  const counts = { normal: 0, waspada: 0, tinggi: 0 }
+  for (const r of labResults.value) {
+    if (r.zone && r.zone in counts) counts[r.zone as keyof typeof counts]++
+  }
+  return counts
+})
+const lastExamDate = computed(() => {
+  const dates = labResults.value.map((r) => r.tanggal_periksa).filter((d): d is string => !!d)
+  return dates.length ? [...dates].sort().at(-1) : null
+})
+
 // --- Riwayat Kunjungan -- kader ATAU tenaga_kesehatan, mutually exclusive per assignment. ----
 const VISIT_STATUS_LABELS: Record<string, string> = {
   pending: 'Terjadwal', in_progress: 'Sedang Berlangsung', completed: 'Selesai Dikunjungi', cancelled: 'Dibatalkan'
@@ -1287,6 +1446,77 @@ async function triggerSyncFromHistory() {
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- Tren Hasil Pemeriksaan (permintaan user) -- grafik % terhadap ambang risiko
+           (risk_thresholds), BUKAN nilai mentah lintas-satuan (lihat docblock lengkap di
+           script). Kartu TERPISAH dari "Riwayat & Tren Kondisi" di atas -- jawab pertanyaan
+           beda: level risiko keseluruhan vs parameter lab spesifik mana yang bergerak. -->
+      <div v-if="chartableParameters.length > 0" class="bg-white rounded-2xl border border-slate-100 shadow-card p-5">
+        <div class="flex items-center justify-between mb-1 flex-wrap gap-3">
+          <h3 class="font-bold text-accent text-base flex items-center gap-2">
+            <LucideActivity class="w-4 h-4 text-info" />
+            Tren Hasil Pemeriksaan
+          </h3>
+          <div class="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
+            <button
+              type="button"
+              @click="chartMode = 'relatif'"
+              class="px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+              :class="chartMode === 'relatif' ? 'bg-white text-primary shadow-sm' : 'text-slate-500'"
+            >
+              Status Rujukan
+            </button>
+            <button
+              type="button"
+              @click="chartMode = 'aktual'"
+              class="px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+              :class="chartMode === 'aktual' ? 'bg-white text-primary shadow-sm' : 'text-slate-500'"
+            >
+              Nilai Aktual
+            </button>
+          </div>
+        </div>
+        <p class="text-sm text-slate-500 mb-5">
+          {{ chartMode === 'relatif' ? 'Posisi tiap parameter terhadap batas rujukan (100% = mulai berisiko) -- klik nama parameter di bawah grafik untuk menyembunyikan/menampilkan.' : 'Nilai mentah 1 parameter dalam satuan aslinya.' }}
+        </p>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <div class="lg:col-span-2">
+            <template v-if="chartMode === 'relatif'">
+              <div class="h-72">
+                <Line :data="relativeChartData" :options="relativeChartOptions" />
+              </div>
+            </template>
+            <template v-else>
+              <select v-model="selectedActualParameter" class="mb-3 px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/20">
+                <option v-for="p in chartableParameters" :key="p" :value="p">{{ p }}</option>
+              </select>
+              <div class="h-64">
+                <Line :data="actualChartData" :options="actualChartOptions" />
+              </div>
+            </template>
+          </div>
+
+          <!-- Status Pemeriksaan Terakhir (permintaan user) -- dari data TERBARU per parameter
+               (labResults, endpoint /lab-results), bukan riwayat lengkap. -->
+          <div class="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex flex-col gap-3 h-fit">
+            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Kondisi Pemeriksaan Terakhir</p>
+            <div class="flex items-center gap-2.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-danger shrink-0"></span>
+              <span class="text-sm font-semibold text-slate-700">{{ lastExamStatusCounts.tinggi }} Di atas rujukan</span>
+            </div>
+            <div class="flex items-center gap-2.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-warning shrink-0"></span>
+              <span class="text-sm font-semibold text-slate-700">{{ lastExamStatusCounts.waspada }} Mendekati batas</span>
+            </div>
+            <div class="flex items-center gap-2.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-success shrink-0"></span>
+              <span class="text-sm font-semibold text-slate-700">{{ lastExamStatusCounts.normal }} Dalam rujukan</span>
+            </div>
+            <p class="text-[11px] text-slate-400 pt-2 border-t border-slate-200 mt-1">Diperiksa: {{ formatCriteriaDate(lastExamDate) }}</p>
+          </div>
         </div>
       </div>
 

@@ -266,6 +266,13 @@ export interface LabResult {
   class_hasil: string | null
   validation_status: string | null
   tanggal_periksa: string | null
+  // Posisi terhadap risk_thresholds PRODULI (ambang tunggal, BUKAN nilai_rujukan SiLAKES di
+  // atas -- beda sumber, lihat docblock LabResultResource backend). null di ketiganya =
+  // parameter ini tidak punya ambang risiko terkonfigurasi (mis. HDL/Microalbumin/HbA1c),
+  // dikecualikan dari grafik "Tren Hasil Pemeriksaan" (% terhadap rujukan).
+  reference_boundary: number | null
+  percent_of_reference: number | null
+  zone: 'normal' | 'waspada' | 'tinggi' | null
 }
 
 // POST /patients/search-nik (SearchPatientByNikRequest) -- PRODULI TIDAK PERNAH menyimpan NIK
