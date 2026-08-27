@@ -7,9 +7,14 @@
 // klik/tap yang sudah ada (klik tetap jalan lewat update:open bawaan Popover mode="click" --
 // termasuk tutup otomatis saat tap di luar/Escape, tidak perlu ditulis ulang). Span pembungkus
 // `contents` supaya tidak menambah node layout apa pun -- cuma tempat menempelkan listener hover.
-defineProps<{
+// multiline (permintaan user, tooltip riwayat kunjungan dashboard/pasien -- list "- tanggal
+// nama - TIPE" per baris) -- default false, PERILAKU LAMA semua pemanggil existing TIDAK
+// berubah (whitespace-normal, \n dikolaps jadi spasi). true = whitespace-pre-line, \n di `text`
+// jadi baris baru sungguhan.
+withDefaults(defineProps<{
   text: string
-}>()
+  multiline?: boolean
+}>(), { multiline: false })
 
 // BUG: tooltip muncul di pojok kiri atas viewport, bukan di dekat elemen yang di-hover.
 // Akar masalah: UPopover.Trigger dipasang `as-child` (Popover.vue Nuxt UI), jadi Floating UI
@@ -56,7 +61,7 @@ function handleMouseLeave() {
     :reference="anchorEl"
     :content="{ side: 'top' }"
     :ui="{
-      content: 'max-w-xs bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg px-3 py-2 shadow-lg ring-0 whitespace-normal text-left leading-relaxed z-[200]',
+      content: `max-w-xs bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg px-3 py-2 shadow-lg ring-0 ${multiline ? 'whitespace-pre-line' : 'whitespace-normal'} text-left leading-relaxed z-[200]`,
       arrow: 'fill-slate-800 dark:fill-slate-700'
     }"
   >

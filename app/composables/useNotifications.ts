@@ -139,6 +139,13 @@ export function useNotifications() {
         desc: `${count} kunjungan dijadwalkan besok (${n.data.date ?? '-'}) di wilayah Anda.`
       }
     }
+    if (n.type === 'prolanis_schedule_reminder') {
+      const count = Number(n.data.count ?? 0)
+      return {
+        title: 'Pengingat Jadwal Prolanis Minggu Depan',
+        desc: `${count} pasien perlu periksa Prolanis pada ${n.data.scheduled_date ?? '-'}.`
+      }
+    }
     if (n.type === 'rujukan_dikonfirmasi') {
       const dikonfirmasi = n.data.rujukan_status === 'dikonfirmasi'
       return {
@@ -164,6 +171,7 @@ export function useNotifications() {
     if (type === 'patient_updated') return LucidePencil
     if (type === 'care_visit_adhoc') return LucideStethoscope
     if (type === 'visit_report_submitted') return LucideClipboardList
+    if (type === 'prolanis_schedule_reminder') return LucideCalendarClock
     if (type === 'pasien_dirujuk') return LucideSiren
     if (type === 'visit_assigned') return LucideCalendarPlus
     if (type === 'visit_summary_tomorrow') return LucideClipboardList

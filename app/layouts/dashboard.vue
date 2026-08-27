@@ -23,7 +23,8 @@ import {
   LucideAlertTriangle,
   LucideSmartphone,
   LucideStethoscope,
-  LucideAmbulance
+  LucideAmbulance,
+  LucideCalendarClock
 } from "#components"
 import type { ApiSuccessEnvelope, Role } from '~/types/api'
 
@@ -129,6 +130,9 @@ const menuGroups = ref([
       // Fase 3 (docs plan) -- rujukan dari kader/nakes, digerbangi VisitReportPolicy::viewAnyRujukan
       // (super_admin/admin_puskesmas/pj_prolanis, scope puskesmas ditegakkan di backend).
       { name: 'Rujukan', icon: LucideAmbulance, to: '/dashboard/rujukan', roles: ['admin_puskesmas', 'pj_prolanis', 'super_admin'] },
+      // Permintaan user -- kalender jadwal kegiatan Prolanis otomatis (ProlanisScheduleController),
+      // gerbang sama dgn Rujukan (ProlanisSchedulePolicy::viewAny).
+      { name: 'Jadwal Prolanis', icon: LucideCalendarClock, to: '/dashboard/jadwal-prolanis', roles: ['admin_puskesmas', 'pj_prolanis', 'super_admin'] },
     ]
   },
   {

@@ -307,6 +307,21 @@ const getWilayahLabel = (status) => {
   return 'Tidak Diketahui'
 }
 
+// Kolom "Nx dikunjungi" + tooltip riwayat (permintaan user) -- daftar tanggal/jam/pelapor per
+// baris, format persis diminta "- 1/08/2026 11.00 [nama] - KADER/NAKES". id-ID locale SUDAH
+// pakai titik sbg pemisah jam:menit secara default (bukan titik dua), sengaja tidak diubah
+// supaya konsisten dgn contoh yang diminta.
+function visitTooltipText(patient: Patient): string {
+  if (!patient.visits || patient.visits.length === 0) return 'Belum pernah dikunjungi.'
+
+  return patient.visits.map((v) => {
+    const tanggal = v.tanggal
+      ? new Date(v.tanggal).toLocaleString('id-ID', { day: 'numeric', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : '-'
+    return `- ${tanggal} ${v.nama ?? 'Petugas tidak diketahui'} - ${v.tipe === 'kader' ? 'KADER' : 'NAKES'}`
+  }).join('\n')
+}
+
 // jenis_prolanis BISA null walau is_prolanis=true (SiLAKES cuma tahu pasien ikut Prolanis,
 // jenisnya belum tercatat) -- ditangani sebagai "Belum Diketahui" secara eksplisit, BUKAN
 // dikosongkan begitu saja, supaya jelas bedanya dari data yang genuinely tidak ada vs field
@@ -615,6 +630,7 @@ function closeNikNotFoundModal() {
               <th class="py-4 px-5 font-semibold">Alamat & Lokasi</th>
               <th class="py-4 px-5 font-semibold">Puskesmas</th>
               <th class="py-4 px-5 font-semibold">Status Prolanis</th>
+              <th class="py-4 px-5 font-semibold text-center">Kunjungan</th>
               <th class="py-4 px-5 font-semibold">
                 <button type="button" @click="toggleSort('risk_level')" class="flex items-center gap-1 hover:text-primary transition-colors">
                   Tingkat Risiko
@@ -629,7 +645,7 @@ function closeNikNotFoundModal() {
           </thead>
           <tbody class="divide-y divide-slate-100">
             <tr v-if="isLoading">
-               <td colspan="10" class="py-12 text-center text-slate-400">
+               <td colspan="11" class="py-12 text-center text-slate-400">
                   <LucideLoader2 class="w-6 h-6 mx-auto mb-2 animate-spin" />
                   Memuat data pasien...
                </td>
@@ -679,6 +695,17 @@ function closeNikNotFoundModal() {
                      {{ getProlanisLabel(patient.jenis_prolanis) }}
                   </span>
                </td>
+               <td class="py-4 px-5 text-center">
+                  <!-- Permintaan user: "Nx dikunjungi" + tooltip list tanggal/jam/pelapor. -->
+                  <AppTooltip :text="visitTooltipText(patient)" multiline>
+                     <span
+                        class="px-2.5 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider inline-block cursor-help"
+                        :class="(patient.visit_count ?? 0) > 0 ? 'bg-info/10 text-info border border-info/20' : 'bg-slate-100 text-slate-400 border border-slate-200'"
+                     >
+                        {{ patient.visit_count ?? 0 }}x dikunjungi
+                     </span>
+                  </AppTooltip>
+               </td>
                <td class="py-4 px-5">
                   <div class="flex items-center gap-1.5">
                      <!-- period_risk_level (bukan risk_level) begitu periode BUKAN bulan berjalan --
@@ -709,7 +736,7 @@ function closeNikNotFoundModal() {
                </td>
             </tr>
             <tr v-if="!isLoading && patients.length === 0">
-               <td colspan="10" class="py-12 text-center">
+               <td colspan="11" class="py-12 text-center">
                  <div class="flex flex-col items-center justify-center text-slate-400">
                     <LucideSearchX class="w-10 h-10 mb-3 text-slate-300" />
                     <p class="font-medium">Tidak ada data pasien yang ditemukan.</p>

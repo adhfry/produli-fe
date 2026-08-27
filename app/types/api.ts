@@ -193,6 +193,17 @@ export interface Patient {
   // daftar), lihat CareAssignmentResource sisi backend.
   care_assignments?: CareAssignmentPreview[]
   last_synced_at: string | null
+  // Ringkasan kunjungan (permintaan user, kolom "Nx dikunjungi" + tooltip) -- gabungan kader &
+  // tenaga_kesehatan, SELALU terisi di GET /patients (bukan whenLoaded kondisional spt
+  // care_assignments), lihat PatientController::index().
+  visit_count?: number
+  visits?: PatientVisitSummaryItem[]
+}
+
+export interface PatientVisitSummaryItem {
+  tanggal: string | null
+  nama: string | null
+  tipe: 'kader' | 'nakes'
 }
 
 export interface CareAssignmentPreview {
@@ -558,6 +569,23 @@ export interface Rujukan {
 
 export type TindakanPuskesmas = 'rawat_inap' | 'edukasi' | 'obat_tambahan' | 'lainnya'
 
+// --- Jadwal Prolanis (permintaan user, /dashboard/jadwal-prolanis) ---
+
+export type ProlanisScheduleStatus = 'terjadwal' | 'selesai' | 'dibatalkan'
+
+export interface ProlanisSchedule {
+  id: number
+  patient: { id: number, nama: string } | null
+  puskesmas: { id: number, nama: string } | null
+  jenis_prolanis: string | null
+  source_lab_date: string | null
+  scheduled_date: string
+  is_manual_override: boolean
+  status: ProlanisScheduleStatus
+  notified_at: string | null
+  updated_by: { id: number, name: string } | null
+}
+
 export interface ConfirmRujukanPayload {
   status: 'dikonfirmasi' | 'dibatalkan'
 }
@@ -849,6 +877,7 @@ export type NotificationType =
   | 'visit_assignment_cancelled'
   | 'rujukan_dikonfirmasi'
   | 'visit_summary_tomorrow'
+  | 'prolanis_schedule_reminder'
   | string
 
 export interface AppNotification {
