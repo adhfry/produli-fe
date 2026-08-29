@@ -43,6 +43,16 @@ onMounted(() => {
 // antar-navigasi internal), jadi fetch di sini cukup.
 const assignmentStore = useAssignmentStore()
 onMounted(() => assignmentStore.fetchAll())
+
+// Pengantar sampel MURNI (modul Kirim Data Prolanis ke Labkesda, Fase C) tidak punya tugas
+// kunjungan sama sekali -- link "Tugas" di bottom nav dialihkan ke /app/pengiriman untuk role
+// ini. Dual-role (mis. pj_prolanis+pengantar_sampel) TIDAK lewat sini sama sekali (MOBILE_ONLY_
+// ROLES di stores/auth.ts cuma aktif utk role tunggal, dual-role selalu mendarat di /dashboard).
+const authStore = useAuthStore()
+const isPengantarSampelOnly = computed(() => {
+  const roles = authStore.roles ?? []
+  return roles.length === 1 && roles[0] === 'pengantar_sampel'
+})
 </script>
 
 <template>
@@ -131,7 +141,11 @@ onMounted(() => assignmentStore.fetchAll())
           <LucideHome class="w-6 h-6 text-slate-400 dark:text-slate-500 group-[.text-primary]:text-primary dark:group-[.text-primary]:text-primary group-[.text-primary]:fill-primary/10 transition-colors" />
           <span class="text-base font-bold text-slate-400 dark:text-slate-500 group-[.text-primary]:text-primary dark:group-[.text-primary]:text-primary transition-colors">Beranda</span>
         </NuxtLink>
-        <NuxtLink to="/app/tugas" class="flex flex-col items-center gap-1.5 transition-colors group relative" active-class="text-primary">
+        <NuxtLink v-if="isPengantarSampelOnly" to="/app/pengiriman" class="flex flex-col items-center gap-1.5 transition-colors group" active-class="text-primary">
+          <LucideTruck class="w-6 h-6 text-slate-400 dark:text-slate-500 group-[.text-primary]:text-primary dark:group-[.text-primary]:text-primary group-[.text-primary]:fill-primary/10 transition-colors" />
+          <span class="text-base font-bold text-slate-400 dark:text-slate-500 group-[.text-primary]:text-primary dark:group-[.text-primary]:text-primary transition-colors">Antar Sampel</span>
+        </NuxtLink>
+        <NuxtLink v-else to="/app/tugas" class="flex flex-col items-center gap-1.5 transition-colors group relative" active-class="text-primary">
           <div v-if="assignmentStore.hasUrgentTasks" class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-danger rounded-full ring-2 ring-white dark:ring-slate-900 animate-pulse transition-colors"></div>
           <LucideClipboardList class="w-6 h-6 text-slate-400 dark:text-slate-500 group-[.text-primary]:text-primary dark:group-[.text-primary]:text-primary group-[.text-primary]:fill-primary/10 transition-colors" />
           <span class="text-base font-bold text-slate-400 dark:text-slate-500 group-[.text-primary]:text-primary dark:group-[.text-primary]:text-primary transition-colors">Tugas</span>

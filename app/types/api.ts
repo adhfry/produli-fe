@@ -84,7 +84,7 @@ export interface MeResponse {
   roles: Role[]
 }
 
-export type Role = 'super_admin' | 'admin_puskesmas' | 'pj_prolanis' | 'kader' | 'tenaga_kesehatan'
+export type Role = 'super_admin' | 'admin_puskesmas' | 'pj_prolanis' | 'kader' | 'tenaga_kesehatan' | 'pengantar_sampel'
 
 export interface LoginPayload {
   email: string
@@ -286,6 +286,18 @@ export interface LabResult {
   zone: 'normal' | 'waspada' | 'tinggi' | null
 }
 
+// GET /patients/{id}/lab-documents (modul "Kirim Data Prolanis ke Labkesda Sumenep", permintaan
+// user 2026-08-29) -- daftar hasil pemeriksaan Prolanis SIAP DIUNDUH (completed+approved di
+// SiLAKES), dibaca LIVE (PRODULI tidak menyimpan salinan) lewat layer API PRODULI sendiri.
+// PDF-nya diunduh lewat GET /patients/{id}/lab-documents/{surat_hasil_lab_id}/pdf terpisah.
+export interface LabDocument {
+  surat_hasil_lab_id: number
+  tanggal: string | null
+  jenis_spesimen: string | null
+  is_kunjungan_prolanis: boolean
+  tgl_konfirmasi: string | null
+}
+
 // POST /patients/search-nik (SearchPatientByNikRequest) -- PRODULI TIDAK PERNAH menyimpan NIK
 // asli (patients_cache cuma punya nik_hash HMAC dari SiLAKES, docs/planning/04) -- endpoint ini
 // cuma cocokkan hash-vs-hash, TIDAK PERNAH bisa menampilkan digit NIK asli di mana pun. POST
@@ -380,6 +392,114 @@ export interface UpdateTenagaKesehatanPayload {
   gender?: 'L' | 'P' | null
   tgl_lahir?: string | null
   pj_id?: number | null
+}
+
+// --- Pengantar Sampel (modul Kirim Data Prolanis ke Labkesda, Fase A,
+// app/Http/Controllers/Api/V1/PengantarSampelController.php) -- kurir yang ditugaskan
+// admin_puskesmas/pj_prolanis mengantar sampel fisik+data pasien Prolanis ke Labkesda. Struktur
+// dipangkas dari TenagaKesehatan -- murni identitas kontak, tidak ada alamat/gender/tgl_lahir/
+// pj_id (kurir tidak jadi subjek pemeriksaan atau butuh supervisi PJ perorangan).
+
+export interface PengantarSampel {
+  id: number
+  status_aktif: boolean
+  no_hp: string
+  no_wa: string | null
+  user?: { id: number, name: string, email: string }
+  puskesmas?: { id: number, nama: string }
+  created_at: string
+}
+
+export interface CreatePengantarSampelPayload {
+  name: string
+  email: string
+  no_hp: string
+  no_wa?: string | null
+  puskesmas_id?: number | null
+}
+
+// PATCH /pengantar-sampel/{id} (UpdatePengantarSampelRequest).
+export interface UpdatePengantarSampelPayload {
+  name?: string
+  email?: string
+  no_hp?: string
+  no_wa?: string | null
+}
+
+// --- Pengiriman Sampel (modul Kirim Data Prolanis ke Labkesda, Fase B, penyusun antrian --
+// murni dalam PRODULI, belum ada pengiriman sungguhan ke SiLAKES,
+// app/Http/Controllers/Api/V1/PengirimanSampelController.php) ---
+
+export type PengirimanSampelStatus =
+  | 'draft'
+  | 'terkunci'
+  | 'ditugaskan'
+  | 'otw'
+  | 'tiba_labkesda'
+  | 'dikonfirmasi_labkesda'
+  | 'dibatalkan'
+
+export interface PengirimanSampelPasien {
+  id: number
+  urutan: number
+  external_patient_id: number | null
+  nama_snapshot: string
+  jenis_prolanis_snapshot: 'DM' | 'HT' | 'DM_HT' | null
+  is_pasien_baru: boolean
+  registration_proposal_ref: number | null
+}
+
+export interface PengirimanSampel {
+  id: number
+  status: PengirimanSampelStatus
+  puskesmas?: { id: number, nama: string }
+  dibuat_oleh?: { id: number, name: string } | null
+  dikunci_at: string | null
+  pengantar_sampel?: { id: number, nama: string | null } | null
+  jumlah_pasien?: number
+  pasien?: PengirimanSampelPasien[]
+  catatan: string | null
+  created_at: string
+}
+
+// POST /pengiriman-sampel/{id}/pasien -- dua jalur, lihat AddPatientToPengirimanSampelRequest.
+export interface AddPasienExistingPayload {
+  external_patient_id: number
+}
+export interface AddPasienBaruPayload {
+  name: string
+  nik: string
+  gender: 'L' | 'P'
+  tempat_lahir: string
+  tgl_lahir: string
+  phone: string
+  alamat: string
+  rt_rw?: string | null
+  kel_desa?: string | null
+  kecamatan?: string | null
+  no_bpjs?: string | null
+  jenis_prolanis?: 'DM' | 'HT' | 'DM_HT' | null
+}
+
+// GET /pengiriman-sampel/patient-candidates.
+export interface PatientCandidate {
+  id: number
+  external_patient_id: number
+  nama: string
+  jenis_prolanis: 'DM' | 'HT' | 'DM_HT' | null
+  kel_desa_raw: string | null
+  kecamatan_raw: string | null
+  tanggal_lab_terakhir: string | null
+}
+
+// --- Fase C (kurir, GPS, foto) ---
+
+// GET /pengiriman-sampel/{id}/lokasi.
+export interface PengirimanSampelLokasi {
+  latitude: number
+  longitude: number
+  accuracy: number | null
+  recorded_at: string
 }
 
 // GET /kader/pj-options?puskesmas_id= -- dropdown pilihan PJ Prolanis saat registrasi kader

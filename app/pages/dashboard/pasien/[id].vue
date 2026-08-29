@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, CareAssignmentPreview, Desa, Kader, Kecamatan, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem, TenagaKesehatan, RiskClassificationHistory, RiskCriteriaSnapshotItem, VisitAssignment, PatientRiskLevel, LabResult } from '~/types/api'
+import type { ApiSuccessEnvelope, CareAssignmentPreview, Desa, Kader, Kecamatan, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem, TenagaKesehatan, RiskClassificationHistory, RiskCriteriaSnapshotItem, VisitAssignment, PatientRiskLevel, LabResult, LabDocument } from '~/types/api'
 import { Line } from 'vue-chartjs'
 import { Chart as ChartJS, Title, Tooltip, Legend, LineElement, CategoryScale, LinearScale, PointElement } from 'chart.js'
 
@@ -78,6 +78,55 @@ async function loadLabResults() {
     labResultsError.value = e instanceof ApiError ? e.message : 'Gagal memuat hasil pemeriksaan lab.'
   } finally {
     isLoadingLabResults.value = false
+  }
+}
+
+// --- Riwayat Hasil Pemeriksaan Prolanis, unduh PDF (modul "Kirim Data Prolanis ke Labkesda
+// Sumenep", permintaan user 2026-08-29) -- GET /patients/{id}/lab-documents dibaca LIVE dari
+// SiLAKES lewat layer API PRODULI sendiri (browser TIDAK PERNAH memanggil SiLAKES langsung,
+// permintaan keamanan eksplisit). PDF per baris diunduh lewat downloadLabDocument() di bawah,
+// pola blob-download SAMA PERSIS exportPdf() di dashboard/pasien/index.vue. -------------------
+const labDocuments = ref<LabDocument[]>([])
+const isLoadingLabDocuments = ref(false)
+const labDocumentsError = ref('')
+
+async function loadLabDocuments() {
+  isLoadingLabDocuments.value = true
+  labDocumentsError.value = ''
+  try {
+    const api = useApi()
+    const res = await api(`/patients/${route.params.id}/lab-documents`) as ApiSuccessEnvelope<LabDocument[]>
+    labDocuments.value = res.data
+  } catch (e) {
+    labDocumentsError.value = e instanceof ApiError ? e.message : 'Gagal memuat riwayat hasil pemeriksaan Prolanis.'
+  } finally {
+    isLoadingLabDocuments.value = false
+  }
+}
+
+const downloadingLabDocumentId = ref<number | null>(null)
+const labDocumentDownloadError = ref('')
+
+async function downloadLabDocument(suratHasilLabId: number) {
+  downloadingLabDocumentId.value = suratHasilLabId
+  labDocumentDownloadError.value = ''
+  try {
+    const api = useApi()
+    const blob = await api(`/patients/${route.params.id}/lab-documents/${suratHasilLabId}/pdf`, {
+      responseType: 'blob'
+    }) as Blob
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `hasil-pemeriksaan-prolanis-${suratHasilLabId}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    labDocumentDownloadError.value = e instanceof ApiError ? e.message : 'Gagal mengunduh PDF hasil pemeriksaan.'
+  } finally {
+    downloadingLabDocumentId.value = null
   }
 }
 
@@ -247,6 +296,7 @@ onMounted(async () => {
   loadPatient()
   loadVisitHistory()
   loadLabResults()
+  loadLabDocuments()
   // Ditunggu (bukan fire-and-forget spt yang lain) -- applySmartCompareDefaults() butuh
   // riskHistory & labResultsHistory SUDAH terisi supaya distinctRecentPeriods() akurat.
   await Promise.all([loadRiskHistory(), loadLabResultsHistory()])
@@ -264,6 +314,7 @@ watch(silakesSyncSignal, () => {
   loadRiskHistory()
   loadLabResults()
   loadLabResultsHistory()
+  loadLabDocuments()
 })
 
 useHead({
@@ -1275,6 +1326,42 @@ async function triggerSyncFromHistory() {
                     :class="item.class_hasil.toLowerCase().includes('normal') ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'"
                   >{{ item.class_hasil }}</span>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Riwayat Hasil Pemeriksaan Prolanis, unduh PDF (modul "Kirim Data Prolanis ke
+               Labkesda Sumenep", permintaan user 2026-08-29) -- GET /patients/{id}/lab-documents,
+               dibaca LIVE dari SiLAKES lewat layer API PRODULI sendiri. Cuma tampil kalau ada
+               isinya ATAU sedang dimuat/error -- pasien non-Prolanis/belum pernah dikirim ke
+               Labkesda TIDAK PERLU kartu kosong menambah kepadatan halaman. -->
+          <div v-if="isLoadingLabDocuments || labDocumentsError || labDocuments.length > 0" class="bg-white rounded-2xl border border-slate-100 shadow-card p-5">
+            <h3 class="font-bold text-accent text-base mb-4 flex items-center gap-2 border-b border-slate-100 pb-4">
+              <LucideFileText class="w-4 h-4 text-primary" />
+              Riwayat Hasil Pemeriksaan Prolanis
+            </h3>
+            <div v-if="isLoadingLabDocuments" class="py-8 text-center text-slate-400">
+              <LucideLoader2 class="w-5 h-5 mx-auto mb-2 animate-spin" />
+              Memuat riwayat hasil pemeriksaan...
+            </div>
+            <p v-else-if="labDocumentsError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ labDocumentsError }}</p>
+            <div v-else class="space-y-3">
+              <p v-if="labDocumentDownloadError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ labDocumentDownloadError }}</p>
+              <div v-for="doc in labDocuments" :key="doc.surat_hasil_lab_id" class="flex items-center justify-between gap-3 pb-3 border-b border-slate-50 last:border-0 last:pb-0">
+                <div>
+                  <p class="text-sm font-bold text-slate-800">{{ doc.tanggal ? formatCriteriaDate(doc.tanggal) : 'Tanggal tidak tercatat' }}</p>
+                  <p class="text-[11px] text-slate-500 mt-0.5">{{ doc.jenis_spesimen ?? 'Sampel Darah dan Urine' }}</p>
+                </div>
+                <button
+                  type="button"
+                  class="shrink-0 flex items-center gap-1.5 bg-primary/10 text-primary hover:bg-primary/20 px-3 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                  :disabled="downloadingLabDocumentId === doc.surat_hasil_lab_id"
+                  @click="downloadLabDocument(doc.surat_hasil_lab_id)"
+                >
+                  <LucideLoader2 v-if="downloadingLabDocumentId === doc.surat_hasil_lab_id" class="w-3.5 h-3.5 animate-spin" />
+                  <LucideDownload v-else class="w-3.5 h-3.5" />
+                  Unduh PDF
+                </button>
               </div>
             </div>
           </div>

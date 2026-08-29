@@ -8,7 +8,8 @@ export const ROLE_LABELS: Record<Role, string> = {
   admin_puskesmas: 'Admin Puskesmas',
   pj_prolanis: 'PJ Prolanis',
   tenaga_kesehatan: 'Tenaga Kesehatan',
-  kader: 'Kader'
+  kader: 'Kader',
+  pengantar_sampel: 'Pengantar Sampel'
 }
 
 export function resolveRoleLabel(role: string): string {

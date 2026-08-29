@@ -143,6 +143,12 @@ const menuGroups = ref([
       // TenagaKesehatanPolicy::viewAny -- gerbang sama persis dengan Manajemen Kader di atas
       // (revisi Bu Kadis, peran baru pemeriksaan lanjutan di rumah pasien).
       { name: 'Manajemen Tenaga Kesehatan', icon: LucideStethoscope, to: '/dashboard/tenaga-kesehatan', roles: ['pj_prolanis', 'admin_puskesmas', 'super_admin'] },
+      // PengantarSampelPolicy::viewAny -- gerbang sama persis dengan Manajemen Kader/Tenaga
+      // Kesehatan di atas (modul Kirim Data Prolanis ke Labkesda, Fase A).
+      { name: 'Manajemen Pengantar Sampel', icon: LucideTruck, to: '/dashboard/pengantar-sampel', roles: ['pj_prolanis', 'admin_puskesmas', 'super_admin'] },
+      // PengirimanSampelPolicy::viewAny -- gerbang sama (modul Kirim Data Prolanis ke Labkesda,
+      // Fase B, penyusun antrian).
+      { name: 'Pengiriman Sampel ke Labkesda', icon: LucideSend, to: '/dashboard/pengiriman-sampel', roles: ['pj_prolanis', 'admin_puskesmas', 'super_admin'] },
       // StaffController::index -- super_admin/admin_puskesmas/pj_prolanis boleh LIHAT (pj_prolanis
       // sebelumnya 403 total, sekarang boleh lihat staf puskesmasnya sendiri); store() (daftarkan
       // staf baru) TETAP super_admin/admin_puskesmas saja, digerbangi terpisah di halamannya sendiri.

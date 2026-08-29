@@ -146,6 +146,24 @@ export function useNotifications() {
         desc: `${count} pasien perlu periksa Prolanis pada ${n.data.scheduled_date ?? '-'}.`
       }
     }
+    if (n.type === 'sampel_ditugaskan') {
+      return {
+        title: 'Penugasan Antar Sampel',
+        desc: 'Anda ditugaskan mengantar sampel Prolanis ke Labkesda Sumenep.'
+      }
+    }
+    if (n.type === 'sampel_otw') {
+      return {
+        title: 'Pengantar Sampel Berangkat',
+        desc: 'Pengantar sampel sudah berangkat menuju Labkesda Sumenep.'
+      }
+    }
+    if (n.type === 'sampel_tiba') {
+      return {
+        title: 'Sampel Tiba di Labkesda',
+        desc: 'Sampel sudah diserahkan dan diterima petugas di Labkesda Sumenep.'
+      }
+    }
     if (n.type === 'rujukan_dikonfirmasi') {
       const dikonfirmasi = n.data.rujukan_status === 'dikonfirmasi'
       return {
@@ -177,6 +195,9 @@ export function useNotifications() {
     if (type === 'visit_summary_tomorrow') return LucideClipboardList
     if (type === 'visit_assignment_cancelled') return LucideCalendarX
     if (type === 'rujukan_dikonfirmasi') return LucideCircleCheck
+    if (type === 'sampel_ditugaskan') return LucideTruck
+    if (type === 'sampel_otw') return LucideNavigation
+    if (type === 'sampel_tiba') return LucideCircleCheck
     return LucideCalendarClock
   }
 

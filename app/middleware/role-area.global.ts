@@ -1,9 +1,10 @@
 // .global.ts -- jalan otomatis di SETIAP navigasi client-side (pola sama dengan
-// onboarding.global.ts). Kader dan tenaga_kesehatan murni (tanpa role lain) cuma pengguna
-// mobile-first (/app/**) -- SEBELUMNYA cuma homeRoute yang mengarahkan ke /app saat login/
-// onboarding, tapi navigasi langsung ke URL /dashboard/** sesudahnya tetap tembus (middleware
-// 'auth' di halaman dashboard cuma cek isAuthenticated, tidak cek role). Gate ini menutup celah
-// itu supaya tenaga_kesehatan benar-benar tidak bisa masuk /dashboard sama sekali.
+// onboarding.global.ts). Kader, tenaga_kesehatan, dan pengantar_sampel murni (tanpa role lain)
+// cuma pengguna mobile-first (/app/**) -- SEBELUMNYA cuma homeRoute yang mengarahkan ke /app saat
+// login/onboarding, tapi navigasi langsung ke URL /dashboard/** sesudahnya tetap tembus
+// (middleware 'auth' di halaman dashboard cuma cek isAuthenticated, tidak cek role). Gate ini
+// menutup celah itu supaya role mobile-only murni benar-benar tidak bisa masuk /dashboard sama
+// sekali.
 // docs/planning/12: kondisi allow-through SAMA persis dengan middleware/auth.ts (mode
 // network-unknown pakai lastKnownProfile.roles buat cek isMobileOnly, karena authStore.roles
 // sendiri kosong tanpa sesi live).
@@ -15,7 +16,7 @@ export default defineNuxtRouteMiddleware((to) => {
     isMobileOnly = authStore.isMobileOnly
   } else if (authStore.restoreStatus === 'network-unknown' && authStore.lastKnownProfile) {
     const roles = authStore.lastKnownProfile.roles
-    isMobileOnly = roles.length === 1 && (roles[0] === 'kader' || roles[0] === 'tenaga_kesehatan')
+    isMobileOnly = roles.length === 1 && (roles[0] === 'kader' || roles[0] === 'tenaga_kesehatan' || roles[0] === 'pengantar_sampel')
   } else {
     return
   }

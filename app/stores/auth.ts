@@ -34,11 +34,11 @@ export const useAuthStore = defineStore(
 
     const isAuthenticated = computed(() => !!accessToken.value && !!user.value)
 
-    // Kader ATAU tenaga_kesehatan murni (tanpa role lain) -> /app -- keduanya pengguna lapangan
-    // dengan UI mobile-first yang sama (bottom nav Beranda/Tugas/Profil di layout 'pwa'), bukan
+    // Kader/tenaga_kesehatan/pengantar_sampel murni (tanpa role lain) -> /app -- ketiganya
+    // pengguna lapangan dengan UI mobile-first yang sama (bottom nav di layout 'pwa'), bukan
     // pengguna dashboard. Role apa pun selain itu, termasuk kombinasi dual-role (mis.
     // pj_prolanis+kader) -> /dashboard (dashboard yang menyediakan entry point ke mode kader).
-    const MOBILE_ONLY_ROLES: Role[] = ['kader', 'tenaga_kesehatan']
+    const MOBILE_ONLY_ROLES: Role[] = ['kader', 'tenaga_kesehatan', 'pengantar_sampel']
     const isMobileOnly = computed(() => {
       const r = roles.value ?? []
       return r.length === 1 && MOBILE_ONLY_ROLES.includes(r[0] as Role)

@@ -771,6 +771,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  unsubscribeCourierRealtime?.()
+  if (courierPollTimer) clearInterval(courierPollTimer)
   if (mapInstance) {
     mapInstance.remove()
   }
@@ -1029,12 +1031,91 @@ const initMap = () => {
     mapInstance.on('mouseleave', 'puskesmas-circles', () => {
       mapInstance.getCanvas().style.cursor = '';
     });
+
+    // Modul Kirim Data Prolanis ke Labkesda, Fase C -- pengantar sampel yang sedang OTW,
+    // super_admin saja (lihat docblock loadActiveCouriers()/subscribeCourierRealtime() di
+    // bawah initMap()).
+    if (isSuperAdmin.value) {
+      loadActiveCouriers()
+      subscribeCourierRealtime()
+    }
   });
 
   // Fallback resize if the container was loaded hidden/zero-sized
   setTimeout(() => {
     if (mapInstance) mapInstance.resize();
   }, 1000);
+}
+
+// === Modul Kirim Data Prolanis ke Labkesda, Fase C -- peta live pengantar sampel OTW ===
+// TIDAK ADA preseden multi-marker LIVE sebelumnya di peta ini (kecamatan/desa/puskesmas semua
+// GeoJSON source statis, dibangun sekali). Marker per batch OTW dikelola manual lewat Map<id,
+// Marker>, posisi diperbarui lewat fetch REST kecil setelah sinyal realtime -- payload
+// broadcast SENGAJA tidak membawa koordinat sendiri (lihat docblock RealtimeBroadcastService/
+// PengirimanSampelLokasiService), ini konsumen pertama pola "sinyal saja" itu di sisi peta.
+const courierMarkers = new Map<number, any>()
+let unsubscribeCourierRealtime: (() => void) | null = null
+let courierPollTimer: ReturnType<typeof setInterval> | null = null
+
+async function refreshCourierMarker(pengirimanSampelId: number, puskesmasNama?: string) {
+  const maplibregl = (window as any).maplibregl
+  if (!maplibregl || !mapInstance) return
+  try {
+    const api = useApi()
+    const res = await api(`/pengiriman-sampel/${pengirimanSampelId}/lokasi`) as { data: { latitude: number, longitude: number, recorded_at: string } | null }
+    if (!res.data) return
+
+    let marker = courierMarkers.get(pengirimanSampelId)
+    if (!marker) {
+      const el = document.createElement('div')
+      el.className = 'w-8 h-8 rounded-full bg-warning border-2 border-white shadow-lg flex items-center justify-center text-white'
+      el.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></svg>'
+      marker = new maplibregl.Marker({ element: el })
+        .setLngLat([res.data.longitude, res.data.latitude])
+        .setPopup(new maplibregl.Popup({ offset: 14 }).setHTML(`<div class="text-xs font-bold">${puskesmasNama ?? 'Pengantar sampel'}</div><div class="text-[11px] text-slate-500">Menuju Labkesda Sumenep</div>`))
+        .addTo(mapInstance)
+      courierMarkers.set(pengirimanSampelId, marker)
+    } else {
+      marker.setLngLat([res.data.longitude, res.data.latitude])
+    }
+  } catch (e) {
+    console.error('Gagal refresh posisi pengantar sampel', e)
+  }
+}
+
+function removeCourierMarker(pengirimanSampelId: number) {
+  const marker = courierMarkers.get(pengirimanSampelId)
+  if (marker) {
+    marker.remove()
+    courierMarkers.delete(pengirimanSampelId)
+  }
+}
+
+async function loadActiveCouriers() {
+  try {
+    const api = useApi()
+    const batches = await fetchAllPages((page) => api('/pengiriman-sampel', { query: { status: 'otw', per_page: 100, page } }))
+    for (const batch of batches as any[]) {
+      refreshCourierMarker(batch.id, batch.puskesmas?.nama)
+    }
+  } catch (e) {
+    console.error('Gagal memuat daftar pengantar sampel OTW', e)
+  }
+}
+
+async function subscribeCourierRealtime() {
+  const { subscribe } = useRealtime()
+  const unsubs = await Promise.all([
+    subscribe('role:super_admin', 'sampel.otw', (payload: any) => refreshCourierMarker(payload.pengiriman_sampel_id)),
+    subscribe('role:super_admin', 'sampel.lokasi_berubah', (payload: any) => refreshCourierMarker(payload.pengiriman_sampel_id)),
+    subscribe('role:super_admin', 'sampel.tiba', (payload: any) => removeCourierMarker(payload.pengiriman_sampel_id)),
+    subscribe('role:super_admin', 'sampel.ditugaskan', () => {}),
+  ])
+  unsubscribeCourierRealtime = () => unsubs.forEach((fn) => fn())
+
+  // Fallback polling (permintaan pola sama dashboard/rujukan/index.vue) -- realtime tetap
+  // channel utama, ini murni jaring pengaman kalau sinyal terlewat.
+  courierPollTimer = setInterval(loadActiveCouriers, 60_000)
 }
 </script>
 
