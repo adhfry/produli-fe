@@ -418,6 +418,49 @@ async function exportPdf() {
   }
 }
 
+// --- "Download Hasil" (permintaan user 2026-09-01) -- tabel pasien terfilter + kolom DINAMIS
+// per parameter pemeriksaan (GDP/CHOLESTEROL/TRIGLISERIDA/dst), 2 format lewat 1 tombol
+// dropdown. Filter QUERY PARAM SAMA PERSIS exportPdf() di atas (backend endpoint beda,
+// PatientController::exportHasilPdf()/exportHasilExcel()). --------------------------------
+const showHasilMenu = ref(false)
+const isExportingHasil = ref(false)
+const exportHasilError = ref('')
+
+function hasilExportQuery() {
+  return {
+    ...(filterRisk.value ? { risk_level: filterRisk.value } : {}),
+    ...(filterWilayahStatus.value ? { wilayah_status: filterWilayahStatus.value } : {}),
+    ...(filterKecamatanId.value ? { kecamatan_id: filterKecamatanId.value } : {}),
+    ...(filterPuskesmasId.value ? { puskesmas_id: filterPuskesmasId.value } : {}),
+    ...(filterEarlyDetectionOnly.value ? { early_detection_only: 1 } : {}),
+    ...(searchQuery.value.trim() ? { search: searchQuery.value.trim() } : {})
+  }
+}
+
+async function exportHasil(format: 'pdf' | 'excel') {
+  showHasilMenu.value = false
+  isExportingHasil.value = true
+  exportHasilError.value = ''
+  try {
+    const api = useApi()
+    const endpoint = format === 'pdf' ? '/patients/export-hasil-pdf' : '/patients/export-hasil-excel'
+    const extension = format === 'pdf' ? 'pdf' : 'xlsx'
+    const blob = await api(endpoint, { query: hasilExportQuery(), responseType: 'blob' }) as Blob
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `hasil-pemeriksaan-prolanis-${new Date().toISOString().slice(0, 10)}.${extension}`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    exportHasilError.value = e instanceof ApiError ? e.message : `Gagal mengunduh hasil pemeriksaan (${format.toUpperCase()}).`
+  } finally {
+    isExportingHasil.value = false
+  }
+}
+
 // --- Pencarian by NIK (POST /patients/search-nik) -----------------------------------------
 // PRODULI tidak pernah menyimpan NIK asli (patients_cache cuma punya nik_hash HMAC dari
 // SiLAKES) -- pencarian ini cuma cocokkan hash-vs-hash di server, TIDAK PERNAH bisa
@@ -501,17 +544,46 @@ function closeNikNotFoundModal() {
              manual di sini. -->
         <p v-if="loadError" class="text-xs font-semibold text-danger mt-1">{{ loadError }}</p>
         <p v-if="exportPdfError" class="text-xs font-semibold text-danger mt-1">{{ exportPdfError }}</p>
+        <p v-if="exportHasilError" class="text-xs font-semibold text-danger mt-1">{{ exportHasilError }}</p>
       </div>
-      <button
-        type="button"
-        @click="exportPdf"
-        :disabled="isExportingPdf"
-        class="inline-flex items-center gap-2 py-2.5 px-4 rounded-xl font-bold text-sm text-white bg-primary hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm shrink-0"
-      >
-        <LucideLoader2 v-if="isExportingPdf" class="w-4 h-4 animate-spin" />
-        <LucideDownload v-else class="w-4 h-4" />
-        {{ isExportingPdf ? 'Menyiapkan PDF...' : 'Unduh Laporan PDF' }}
-      </button>
+      <div class="flex items-center gap-2 shrink-0">
+        <button
+          type="button"
+          @click="exportPdf"
+          :disabled="isExportingPdf"
+          class="inline-flex items-center gap-2 py-2.5 px-4 rounded-xl font-bold text-sm text-white bg-primary hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm shrink-0"
+        >
+          <LucideLoader2 v-if="isExportingPdf" class="w-4 h-4 animate-spin" />
+          <LucideDownload v-else class="w-4 h-4" />
+          {{ isExportingPdf ? 'Menyiapkan PDF...' : 'Unduh Laporan PDF' }}
+        </button>
+
+        <!-- "Download Hasil" (permintaan user) -- dropdown ringan pola sama dgn modal lain di
+             halaman ini (overlay transparan full-screen buat tutup saat klik di luar, BUKAN
+             library dropdown terpisah). -->
+        <div class="relative shrink-0">
+          <button
+            type="button"
+            @click="showHasilMenu = !showHasilMenu"
+            :disabled="isExportingHasil"
+            class="inline-flex items-center gap-2 py-2.5 px-4 rounded-xl font-bold text-sm text-white bg-secondary hover:bg-secondary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+          >
+            <LucideLoader2 v-if="isExportingHasil" class="w-4 h-4 animate-spin" />
+            <LucideFileSpreadsheet v-else class="w-4 h-4" />
+            {{ isExportingHasil ? 'Menyiapkan...' : 'Download Hasil' }}
+            <LucideChevronDown class="w-3.5 h-3.5" />
+          </button>
+          <div v-if="showHasilMenu" class="fixed inset-0 z-10" @click="showHasilMenu = false"></div>
+          <div v-if="showHasilMenu" class="absolute right-0 mt-2 w-52 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-20">
+            <button type="button" @click="exportHasil('pdf')" class="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+              <LucideFileText class="w-4 h-4 text-danger" /> Unduh PDF
+            </button>
+            <button type="button" @click="exportHasil('excel')" class="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+              <LucideFileSpreadsheet class="w-4 h-4 text-success" /> Unduh Excel
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Filters & Table Card -->
