@@ -153,6 +153,9 @@ export interface Patient {
   // Selalu sudah di-mask backend (App\Support\NikDisplay::resolve()) -- penuh kalau NIK diawali
   // kode wilayah Sumenep (3529), selain itu string literal "Tidak Diketahui". Tidak pernah null.
   nik: string
+  // true bila NIK di SiLAKES kosong/"-"/berisi no. reg -- form usulan menampilkan isian koreksi
+  // NIK hanya untuk pasien ini (App\Support\NikKoreksi, permintaan Kepala Dinas).
+  nik_bisa_dikoreksi: boolean
   nama: string
   gender: 'L' | 'P' | null
   tgl_lahir: string | null
@@ -738,6 +741,8 @@ export interface VisitAssignment {
     nama: string
     alamat: string | null
     phone: string | null
+    // Isian koreksi NIK di form laporan kunjungan (App\Support\NikKoreksi).
+    nik_bisa_dikoreksi?: boolean
     latitude: number | null
     longitude: number | null
     geo_status: string
@@ -1049,6 +1054,8 @@ export interface PatientFieldUpdates {
   no_bpjs?: string
   jenis_prolanis?: string
   jenis_perokok?: string
+  // Hanya untuk pasien ber-NIK kosong/"-"/berisi no. reg (nik_bisa_dikoreksi), 16 digit.
+  nik?: string
 }
 
 // GET /kader/update-requests -- riwayat pengajuan pembaruan data pasien milik KADER SENDIRI

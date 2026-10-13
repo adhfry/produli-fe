@@ -961,7 +961,9 @@ function openUpdateModal() {
     kecamatan: patient.value?.kecamatan_raw ?? '',
     phone: patient.value?.phone ?? '',
     jenis_prolanis: patient.value?.jenis_prolanis ?? '',
-    jenis_perokok: patient.value?.jenis_perokok ?? ''
+    jenis_perokok: patient.value?.jenis_perokok ?? '',
+    // Kosong = tidak diajukan. Isian ini hanya tampil bila patient.nik_bisa_dikoreksi.
+    nik: ''
   }
   updateError.value = ''
   // Coba pre-select kecamatan kalau nilai lama (teks bebas dari SiLAKES) kebetulan cocok
@@ -981,6 +983,11 @@ async function submitProposeUpdate() {
     updateError.value = 'Isi minimal satu field yang ingin diajukan perubahannya.'
     return
   }
+  const nik = (updateForm.value.nik ?? '').trim()
+  if (nik !== '' && !/^\d{16}$/.test(nik)) {
+    updateError.value = 'NIK harus 16 digit angka sesuai KTP.'
+    return
+  }
   isSavingUpdate.value = true
   updateError.value = ''
   try {
@@ -997,7 +1004,9 @@ async function submitProposeUpdate() {
     // langsung terlihat, bukan menunggu reload halaman manual.
     loadUpdateHistory()
   } catch (e) {
-    updateError.value = e instanceof ApiError ? e.message : 'Gagal mengajukan usulan perubahan.'
+    updateError.value = e instanceof ApiError
+      ? (e.errors?.nik?.[0] ?? e.message)
+      : 'Gagal mengajukan usulan perubahan.'
   } finally {
     isSavingUpdate.value = false
   }
@@ -1876,6 +1885,26 @@ async function triggerSyncFromHistory() {
         <div class="p-6 space-y-4 overflow-y-auto">
           <p class="text-sm text-slate-500">Isi apa yang Anda ketahui akurat tentang pasien ini — boleh sebagian saja. Usulan ini dikirim ke SiLAKES untuk ditinjau, tidak langsung diterapkan.</p>
           <p v-if="updateError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ updateError }}</p>
+
+          <!-- Koreksi NIK: hanya pasien yang NIK-nya di SiLAKES kosong/"-"/berisi no. reg
+               (permintaan Kepala Dinas). Pasien ber-NIK lain dikoreksi langsung di SiLAKES. -->
+          <div v-if="patient?.nik_bisa_dikoreksi" class="rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <label for="usulan-koreksi-nik" class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Koreksi NIK</label>
+            <input
+              id="usulan-koreksi-nik"
+              v-model="updateForm.nik"
+              type="text"
+              inputmode="numeric"
+              maxlength="16"
+              autocomplete="off"
+              placeholder="16 digit sesuai KTP"
+              aria-describedby="usulan-koreksi-nik-info"
+              class="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm tracking-wider focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+            />
+            <p id="usulan-koreksi-nik-info" class="mt-1.5 text-xs text-slate-700">
+              NIK pasien ini di SiLAKES belum terisi dengan benar (kosong, "-", atau berisi nomor registrasi). Isi bila Anda mengetahui NIK dari KTP pasien.
+            </p>
+          </div>
 
           <div>
             <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Alamat Lengkap</label>

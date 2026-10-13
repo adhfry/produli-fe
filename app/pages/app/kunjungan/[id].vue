@@ -254,7 +254,10 @@ const openUpdateModal = async () => {
   updateForm.value = {
     alamat: patient.value?.alamat ?? "",
     phone: patient.value?.phone ?? "",
+    // Kosong = tidak diajukan. Isian hanya tampil bila patient.nik_bisa_dikoreksi.
+    nik: "",
   };
+  nikError.value = "";
   // Coba pre-select kecamatan & kel/desa kalau nilai existing (teks bebas dari SiLAKES)
   // kebetulan cocok dengan nama kanonik -- kalau tidak cocok, biarkan kosong (kader pilih
   // ulang lewat dropdown, otomatis jadi kanonik).
@@ -274,7 +277,16 @@ const openUpdateModal = async () => {
   showUpdateModal.value = true;
 };
 
+// Format NIK dicek DI SINI (bukan di server): NIK yang salah tidak boleh membuat laporan
+// kunjungan ditolak -- server cuma membuang usulan NIK yang tidak layak.
+const nikError = ref("");
 const submitUpdate = () => {
+  const nik = (updateForm.value.nik ?? "").trim();
+  if (nik !== "" && !/^\d{16}$/.test(nik)) {
+    nikError.value = "NIK harus 16 digit angka sesuai KTP.";
+    return;
+  }
+  nikError.value = "";
   hasPatientUpdate.value = true;
   showUpdateModal.value = false;
 };
@@ -955,6 +967,7 @@ function buildPatientFieldUpdates(): Record<string, string | boolean> | null {
     "alamat", "kel_desa", "kecamatan", "rt_rw", "phone", "pekerjaan",
     "status_perkawinan", "golongan_darah", "agama", "no_bpjs", "jenis_prolanis", "jenis_perokok",
   ];
+  if (patient.value?.nik_bisa_dikoreksi) stringFields.push("nik");
   for (const key of stringFields) {
     const value = updateForm.value[key];
     if (typeof value === "string" && value.trim() !== "") out[key] = value.trim();
@@ -2062,6 +2075,27 @@ async function submitData() {
           <p class="text-base text-slate-500 dark:text-slate-400 mb-4">Isi apa yang sempat Anda gali saat kunjungan — boleh sebagian saja. Data ini dikirim bersama laporan kunjungan untuk divalidasi Puskesmas/SiLAKES, tidak langsung diterapkan.</p>
 
           <div class="flex-1 overflow-y-auto no-scrollbar space-y-4 pb-4">
+            <!-- Koreksi NIK: hanya pasien ber-NIK kosong/"-"/berisi no. reg (permintaan Kepala Dinas). -->
+            <div v-if="patient?.nik_bisa_dikoreksi" class="rounded-xl border-2 border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 p-3">
+              <label for="kader-koreksi-nik" class="block text-sm font-bold text-slate-800 dark:text-white mb-1">NIK Pasien (dari KTP)</label>
+              <input
+                id="kader-koreksi-nik"
+                v-model="updateForm.nik"
+                type="text"
+                inputmode="numeric"
+                maxlength="16"
+                autocomplete="off"
+                placeholder="16 digit angka"
+                aria-describedby="kader-koreksi-nik-info"
+                :aria-invalid="!!nikError"
+                class="w-full bg-white dark:bg-slate-800 border-2 rounded-lg px-3 py-3 text-base font-semibold tracking-wider text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none"
+                :class="nikError ? 'border-danger' : 'border-slate-200 dark:border-slate-700'"
+              />
+              <p v-if="nikError" class="mt-1 text-sm font-semibold text-danger" role="alert">{{ nikError }}</p>
+              <p id="kader-koreksi-nik-info" class="mt-1 text-sm text-slate-700 dark:text-slate-300">
+                NIK pasien ini belum tercatat dengan benar. Isi bila Anda melihat KTP pasien.
+              </p>
+            </div>
             <div>
               <label class="block text-xs md:text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Alamat Lengkap</label>
               <textarea v-model="updateForm.alamat" rows="2" placeholder="Jl. ..." class="w-full bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 dark:text-white focus:border-primary focus:ring-0 outline-none resize-none"></textarea>
