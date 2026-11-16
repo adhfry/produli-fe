@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { VueDraggable } from 'vue-draggable-plus'
-import type { AddPasienBaruPayload, ApiSuccessEnvelope, PatientCandidate, PengantarSampel, PengirimanSampel, PengirimanSampelPasien } from '~/types/api'
+import type { PatientFormState } from '~/utils/patient-form'
+import type { AddPasienBaruPayload, ApiSuccessEnvelope, KtpScanResult, PatientCandidate, PengantarSampel, PengirimanSampel, PengirimanSampelPasien } from '~/types/api'
 
 definePageMeta({
   layout: 'dashboard',
@@ -234,46 +235,134 @@ async function addSelectedCandidates() {
 }
 
 // --- Tambah pasien baru (belum ada di SiLAKES sama sekali) ---
+// Revisi 2026-11-16: isian lengkap seperti registrasi SiLAKES + scan KTP + verifikasi NIK
+// (komponen PatientDataFields, aturan sama dengan backend AddPatientToPengirimanSampelRequest).
 const showNewPatientModal = ref(false)
 const isSavingNewPatient = ref(false)
 const newPatientError = ref('')
 const newPatientFieldErrors = ref<Record<string, string[]>>({})
-const emptyNewPatientForm = (): AddPasienBaruPayload => ({
-  name: '', nik: '', gender: 'L', tempat_lahir: '', tgl_lahir: '', phone: '', alamat: '',
-  rt_rw: '', kel_desa: '', kecamatan: '', no_bpjs: '', jenis_prolanis: null
-})
-const newPatientForm = ref<AddPasienBaruPayload>(emptyNewPatientForm())
-const newPatientTglLahirInputRef = ref<HTMLElement | null>(null)
-const newPatientTglLahirTarget = {
-  get value() { return newPatientForm.value.tgl_lahir ?? '' },
-  set value(v: string) { newPatientForm.value.tgl_lahir = v }
+const newPatientForm = ref<PatientFormState>(emptyPatientForm())
+const newPatientKtpScanId = ref<number | null>(null)
+const newPatientSudahTerdaftar = ref(false)
+const newPatientFieldsRef = ref<{ setWilayahDariTeks: (kec: string | null | undefined, desa: string | null | undefined) => Promise<void> } | null>(null)
+
+function formPasienBaruAwal(): PatientFormState {
+  const f = emptyPatientForm()
+  // FKTP pasien yang dikirim puskesmas biasanya puskesmas itu sendiri -- tetap bisa diganti.
+  const namaPuskesmas = batch.value?.puskesmas?.nama ?? ''
+  if ((FKTP_PUSKESMAS as readonly string[]).includes(namaPuskesmas)) f.fktp_pilihan = namaPuskesmas
+  return f
 }
 
-async function openNewPatientModal() {
-  newPatientForm.value = emptyNewPatientForm()
+function openNewPatientModal() {
+  newPatientForm.value = formPasienBaruAwal()
+  newPatientKtpScanId.value = null
+  newPatientSudahTerdaftar.value = false
   newPatientError.value = ''
   newPatientFieldErrors.value = {}
   showNewPatientModal.value = true
-  await nextTick()
-  initDatePicker(newPatientTglLahirInputRef.value, newPatientTglLahirTarget, { maxDate: 'today' })
+}
+
+function closeNewPatientModal() {
+  if (!isSavingNewPatient.value) showNewPatientModal.value = false
+}
+onKeyStroke('Escape', () => {
+  if (showNewPatientModal.value) closeNewPatientModal()
+})
+
+async function onNewPatientKtpScanned(result: KtpScanResult) {
+  newPatientKtpScanId.value = result.id
+  newPatientSudahTerdaftar.value = result.existing_patient_id !== null
+  if (!result.fields) return
+  applyKtpFields(newPatientForm.value, result.fields)
+  if (result.fields.kecamatan || result.fields.kel_desa) {
+    await newPatientFieldsRef.value?.setWilayahDariTeks(result.fields.kecamatan, result.fields.kel_desa)
+  }
+}
+
+function onNewPatientKtpRemoved() {
+  newPatientKtpScanId.value = null
+  newPatientSudahTerdaftar.value = false
+}
+
+// Cek di browser dulu supaya petugas langsung tahu isian mana yang kurang, tanpa bolak-balik
+// ke server. Server tetap memvalidasi ulang dengan aturan yang sama.
+function periksaPasienBaru(): Record<string, string[]> {
+  const f = newPatientForm.value
+  const galat: Record<string, string[]> = {}
+  const wajib: Array<[keyof PatientFormState, string]> = [
+    ['nik', 'NIK wajib diisi.'], ['name', 'Nama wajib diisi.'], ['tempat_lahir', 'Tempat lahir wajib diisi.'],
+    ['tgl_lahir', 'Tanggal lahir wajib diisi.'], ['gender', 'Pilih jenis kelamin.'], ['phone', 'Nomor HP wajib diisi.'],
+    ['alamat', 'Alamat wajib diisi.']
+  ]
+  for (const [key, pesan] of wajib) {
+    if (String(f[key] ?? '').trim() === '') galat[key] = [pesan]
+  }
+  if (!galat.nik) {
+    const nik = parseNik(f.nik)
+    if (!nik.valid) galat.nik = [nik.alasan ?? 'NIK tidak valid.']
+  }
+  if (!galat.phone && phoneError(f.phone)) galat.phone = [phoneError(f.phone)!]
+  if (bpjsError(f.no_bpjs)) galat.no_bpjs = [bpjsError(f.no_bpjs)!]
+  if (f.name.trim() !== '' && f.name.trim().length < 3) galat.name = ['Nama minimal 3 huruf.']
+  return galat
 }
 
 async function saveNewPatient() {
-  isSavingNewPatient.value = true
   newPatientError.value = ''
-  newPatientFieldErrors.value = {}
+  const f = newPatientForm.value
+  const galatLokal = periksaPasienBaru()
+  newPatientFieldErrors.value = galatLokal
+  if (Object.keys(galatLokal).length > 0) {
+    newPatientError.value = 'Ada isian yang perlu dilengkapi, lihat pesan merah di form.'
+    return
+  }
+  if (newPatientSudahTerdaftar.value) {
+    newPatientError.value = 'NIK ini sudah terdaftar. Tutup form ini, lalu tambahkan lewat daftar pasien terdaftar.'
+    return
+  }
+  if (Object.keys(nikMismatches(f.nik, f.tgl_lahir, f.gender)).length > 0 && !f.konfirmasi_beda_nik) {
+    newPatientError.value = 'Tanggal lahir atau jenis kelamin tidak sama dengan NIK. Periksa KTP, lalu centang konfirmasi bila memang begitu.'
+    return
+  }
+
+  const kosongJadiNull = (v: string) => (v.trim() === '' ? null : v.trim())
+  const payload: AddPasienBaruPayload = {
+    name: f.name.trim(),
+    nik: f.nik,
+    gender: f.gender as 'L' | 'P',
+    tempat_lahir: f.tempat_lahir.trim(),
+    tgl_lahir: f.tgl_lahir,
+    phone: normalizePhone(f.phone),
+    alamat: f.alamat.trim(),
+    rt_rw: kosongJadiNull(f.rt_rw),
+    kel_desa: kosongJadiNull(f.kel_desa),
+    kecamatan: kosongJadiNull(f.kecamatan),
+    no_bpjs: kosongJadiNull(f.no_bpjs),
+    jenis_prolanis: (kosongJadiNull(f.jenis_prolanis) as AddPasienBaruPayload['jenis_prolanis']) ?? null,
+    email: kosongJadiNull(f.email),
+    agama: kosongJadiNull(f.agama),
+    status_perkawinan: kosongJadiNull(f.status_perkawinan),
+    pekerjaan: kosongJadiNull(f.pekerjaan),
+    golongan_darah: kosongJadiNull(f.golongan_darah),
+    fktp: kosongJadiNull(buildFktpValue(f.fktp_pilihan, f.fktp_tambahan)),
+    ktp_scan_id: newPatientKtpScanId.value,
+    konfirmasi_beda_nik: f.konfirmasi_beda_nik
+  }
+
+  isSavingNewPatient.value = true
   try {
     const api = useApi()
-    await api(`/pengiriman-sampel/${batchId.value}/pasien`, { method: 'POST', body: newPatientForm.value })
+    await api(`/pengiriman-sampel/${batchId.value}/pasien`, { method: 'POST', body: payload })
     showNewPatientModal.value = false
     await loadBatch()
     useToast().add({ title: 'Pasien baru ditambahkan ke antrian', color: 'success' })
   } catch (e) {
     if (e instanceof ApiError) {
-      newPatientError.value = e.message
       newPatientFieldErrors.value = e.errors ?? {}
+      newPatientError.value = e.errors ? 'Ada isian yang perlu diperbaiki, lihat pesan merah di form.' : e.message
     } else {
-      newPatientError.value = 'Gagal menambahkan pasien baru.'
+      newPatientError.value = 'Gagal menambahkan pasien baru. Periksa koneksi lalu coba lagi.'
     }
   } finally {
     isSavingNewPatient.value = false
@@ -510,95 +599,72 @@ async function persistOrder() {
       </div>
     </div>
 
-    <!-- Modal: Tambah Pasien Baru -->
-    <div v-if="showNewPatientModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-      <div class="bg-white rounded-3xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200 max-h-[90vh] flex flex-col">
-        <div class="border-b border-slate-100 px-6 py-4 flex items-center justify-between shrink-0">
-          <h3 class="font-bold text-accent text-lg flex items-center gap-2">
-            <LucideUserRoundPlus class="w-5 h-5 text-primary" /> Tambah Pasien Baru
+    <!-- Modal: Tambah Pasien Baru -- isian lengkap + scan KTP (revisi 2026-11-16). -->
+    <div
+      v-if="showNewPatientModal"
+      class="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 sm:items-center sm:p-4"
+      @click.self="closeNewPatientModal"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="judul-pasien-baru"
+        class="flex max-h-[95vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-xl sm:rounded-3xl"
+      >
+        <div class="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 sm:px-6">
+          <h3 id="judul-pasien-baru" class="flex items-center gap-2 text-lg font-bold text-accent">
+            <LucideUserRoundPlus class="h-5 w-5 text-primary" aria-hidden="true" /> Tambah pasien baru
           </h3>
-          <button @click="showNewPatientModal = false" class="text-slate-400 hover:text-slate-600 p-1"><LucideX class="w-5 h-5" /></button>
-        </div>
-
-        <div class="p-6 space-y-4 overflow-y-auto">
-          <p class="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-            Pasien ini belum terdaftar di Labkesda -- data akan diusulkan dan baru resmi tersimpan setelah diverifikasi petugas Labkesda saat sampel tiba.
-          </p>
-          <p v-if="newPatientError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ newPatientError }}</p>
-
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Nama Lengkap</label>
-            <input v-model="newPatientForm.name" type="text" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
-            <p v-if="newPatientFieldErrors.name" class="text-xs text-danger mt-1">{{ newPatientFieldErrors.name[0] }}</p>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">NIK</label>
-              <input v-model="newPatientForm.nik" type="text" maxlength="16" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
-              <p v-if="newPatientFieldErrors.nik" class="text-xs text-danger mt-1">{{ newPatientFieldErrors.nik[0] }}</p>
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Jenis Kelamin</label>
-              <select v-model="newPatientForm.gender" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
-                <option value="L">Laki-laki</option>
-                <option value="P">Perempuan</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tempat Lahir</label>
-              <input v-model="newPatientForm.tempat_lahir" type="text" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Tanggal Lahir</label>
-              <input ref="newPatientTglLahirInputRef" type="text" placeholder="Pilih tanggal..." readonly class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white cursor-pointer" />
-            </div>
-          </div>
-
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">No. Handphone</label>
-            <input v-model="newPatientForm.phone" type="text" placeholder="08..." class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
-          </div>
-
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Alamat</label>
-            <textarea v-model="newPatientForm.alamat" rows="2" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"></textarea>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kelurahan/Desa</label>
-              <input v-model="newPatientForm.kel_desa" type="text" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kecamatan</label>
-              <input v-model="newPatientForm.kecamatan" type="text" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
-            </div>
-          </div>
-
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Jenis Prolanis</label>
-            <select v-model="newPatientForm.jenis_prolanis" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
-              <option :value="null">Belum diketahui</option>
-              <option value="DM">Diabetes Melitus (DM)</option>
-              <option value="HT">Hipertensi (HT)</option>
-              <option value="DM_HT">DM & HT</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
-          <button @click="showNewPatientModal = false" class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors">Batal</button>
           <button
-            @click="saveNewPatient"
-            :disabled="isSavingNewPatient"
-            class="py-2.5 px-6 rounded-xl font-bold text-white bg-primary hover:bg-primary-600 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm"
+            type="button"
+            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            aria-label="Tutup"
+            @click="closeNewPatientModal"
           >
-            <LucideLoader2 v-if="isSavingNewPatient" class="w-4 h-4 animate-spin" />
-            Tambahkan ke Antrian
+            <LucideX class="h-5 w-5" aria-hidden="true" />
+          </button>
+        </div>
+
+        <div class="space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
+          <p class="text-sm text-slate-600">
+            Untuk pasien yang belum terdaftar di Labkesda. Data diusulkan ke Labkesda dan resmi tersimpan setelah diverifikasi petugas saat sampel tiba. Isian bertanda * wajib.
+          </p>
+          <p v-if="newPatientError" role="alert" class="rounded-xl border border-danger-200 bg-danger-50 px-3 py-2 text-sm font-semibold text-danger-700">{{ newPatientError }}</p>
+
+          <PatientKtpScanPanel @scanned="onNewPatientKtpScanned" @removed="onNewPatientKtpRemoved">
+            <template #setelah-hasil>
+              <p v-if="newPatientSudahTerdaftar" class="mt-2 text-xs font-semibold text-danger-700">
+                NIK di KTP ini sudah terdaftar sebagai pasien. Tutup form ini, lalu tambahkan lewat daftar pasien terdaftar supaya riwayat lab pasien tidak terpecah.
+              </p>
+            </template>
+          </PatientKtpScanPanel>
+
+          <PatientDataFields
+            ref="newPatientFieldsRef"
+            v-model:form="newPatientForm"
+            mode="baru"
+            id-prefix="pasien-baru"
+            :errors="newPatientFieldErrors"
+          />
+        </div>
+
+        <div class="flex shrink-0 gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:justify-end sm:px-6">
+          <button
+            type="button"
+            class="min-h-11 flex-1 rounded-xl px-5 py-2.5 font-semibold text-slate-700 hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:flex-none"
+            :disabled="isSavingNewPatient"
+            @click="closeNewPatientModal"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            class="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-6 py-2.5 font-bold text-white hover:bg-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 disabled:opacity-50 sm:flex-none"
+            :disabled="isSavingNewPatient"
+            @click="saveNewPatient"
+          >
+            <LucideLoader2 v-if="isSavingNewPatient" class="h-4 w-4 animate-spin" aria-hidden="true" />
+            Tambahkan ke antrian
           </button>
         </div>
       </div>

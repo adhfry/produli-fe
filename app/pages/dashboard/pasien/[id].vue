@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { ApiSuccessEnvelope, CareAssignmentPreview, Desa, Kader, Kecamatan, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem, TenagaKesehatan, RiskClassificationHistory, RiskCriteriaSnapshotItem, VisitAssignment, PatientRiskLevel, LabResult, LabDocument } from '~/types/api'
+import type { ApiSuccessEnvelope, CareAssignmentPreview, Kader, KtpScanResult, Patient, PatientFieldUpdates, PatientFieldUpdateHistoryItem, TenagaKesehatan, RiskClassificationHistory, RiskCriteriaSnapshotItem, VisitAssignment, PatientRiskLevel, LabResult, LabDocument } from '~/types/api'
+import type { PatientFormState } from '~/utils/patient-form'
 import { Line } from 'vue-chartjs'
 import { Chart as ChartJS, Title, Tooltip, Legend, LineElement, CategoryScale, LinearScale, PointElement } from 'chart.js'
 
@@ -902,111 +903,156 @@ async function submitReschedule(plan: CareAssignmentPreview) {
 }
 
 const showUpdateModal = ref(false)
-const updateForm = ref<PatientFieldUpdates>({})
 const isSavingUpdate = ref(false)
 const updateError = ref('')
+const updateFieldErrors = ref<Record<string, string[]>>({})
 
-// Typeahead Kel/Desa & Kecamatan (bukan input teks bebas lagi) -- nilai yang diajukan HARUS
-// persis sama (huruf besar/kecil) dengan tabel kecamatan/desa kanonik, supaya WilayahResolver
-// di backend tidak perlu fuzzy-match teks bebas untuk data yang masuk lewat jalur ini.
-const kecamatanList = ref<Kecamatan[]>([])
-const desaList = ref<Desa[]>([])
-const selectedKecamatanId = ref<number | null>(null)
-const isLoadingDesa = ref(false)
+// Form lengkap seperti registrasi SiLAKES (revisi 2026-11-16). Dibuka berisi data sekarang;
+// yang dikirim ke SiLAKES HANYA isian yang berubah dari `awalUpdateForm`, supaya staf Labkesda
+// tidak menerima belasan "usulan" yang nilainya sama dengan data lama.
+const updateForm = ref<PatientFormState>(emptyPatientForm())
+const awalUpdateForm = ref<PatientFormState>(emptyPatientForm())
+const ktpScanId = ref<number | null>(null)
+const nikScanPasienLainId = ref<number | null>(null)
+const dataFieldsRef = ref<{ setWilayahDariTeks: (kec: string | null | undefined, desa: string | null | undefined) => Promise<void> } | null>(null)
 
-async function loadKecamatanList() {
-  try {
-    const api = useApi()
-    const res = await api('/kecamatan') as ApiSuccessEnvelope<Kecamatan[]>
-    kecamatanList.value = res.data
-  } catch {
-    // Non-fatal -- dropdown kecamatan cuma kosong, tidak menghalangi field lain di form.
-  }
-}
-onMounted(loadKecamatanList)
-
-async function loadDesaList(kecamatanId: number) {
-  isLoadingDesa.value = true
-  try {
-    const api = useApi()
-    const res = await api('/desa', { query: { kecamatan_id: kecamatanId } }) as ApiSuccessEnvelope<Desa[]>
-    desaList.value = res.data
-  } catch {
-    desaList.value = []
-  } finally {
-    isLoadingDesa.value = false
-  }
+function formDariPasien(): PatientFormState {
+  const p = patient.value
+  const f = emptyPatientForm()
+  if (!p) return f
+  // NIK yang tampil "Tidak Diketahui" (bukan NIK Sumenep yang sah) dibiarkan kosong untuk diisi.
+  f.nik = parseNik(p.nik).valid ? p.nik : ''
+  f.name = p.nama ?? ''
+  f.tgl_lahir = p.tgl_lahir ?? ''
+  f.gender = p.gender ?? ''
+  f.alamat = p.alamat ?? ''
+  f.rt_rw = p.rt_rw ?? ''
+  f.phone = p.phone ?? ''
+  f.jenis_prolanis = p.jenis_prolanis ?? ''
+  f.jenis_perokok = p.jenis_perokok ?? ''
+  f.no_bpjs = p.no_bpjs ?? ''
+  f.is_bpjs = !!p.no_bpjs
+  return f
 }
 
-const kecamatanSelectItems = computed(() => kecamatanList.value.map((k) => ({ label: k.nama, value: k.id })))
-const desaSelectItems = computed(() => desaList.value.map((d) => ({ label: d.nama, value: d.nama })))
-
-// Dipicu HANYA saat user benar-benar mengganti kecamatan lewat dropdown (bukan pre-select
-// terprogram di openUpdateModal) -- kel_desa lama dikosongkan karena sudah tidak relevan
-// dengan kecamatan baru, supaya tidak keliru submit kombinasi yang tidak nyambung.
-function onKecamatanChange(kecamatanId: number | null) {
-  selectedKecamatanId.value = kecamatanId
-  const kecamatan = kecamatanList.value.find((k) => k.id === kecamatanId)
-  updateForm.value.kecamatan = kecamatan?.nama ?? ''
-  updateForm.value.kel_desa = ''
-  desaList.value = []
-  if (kecamatanId !== null) loadDesaList(kecamatanId)
-}
-
-function openUpdateModal() {
-  updateForm.value = {
-    alamat: patient.value?.alamat ?? '',
-    rt_rw: patient.value?.rt_rw ?? '',
-    kel_desa: patient.value?.kel_desa_raw ?? '',
-    kecamatan: patient.value?.kecamatan_raw ?? '',
-    phone: patient.value?.phone ?? '',
-    jenis_prolanis: patient.value?.jenis_prolanis ?? '',
-    jenis_perokok: patient.value?.jenis_perokok ?? '',
-    // Kosong = tidak diajukan. Isian ini hanya tampil bila patient.nik_bisa_dikoreksi.
-    nik: ''
-  }
+async function openUpdateModal() {
+  updateForm.value = formDariPasien()
+  awalUpdateForm.value = formDariPasien()
+  ktpScanId.value = null
+  nikScanPasienLainId.value = null
   updateError.value = ''
-  // Coba pre-select kecamatan kalau nilai lama (teks bebas dari SiLAKES) kebetulan cocok
-  // dengan salah satu nama kanonik -- kalau tidak cocok, biarkan kosong (user pilih ulang
-  // lewat dropdown, otomatis jadi kanonik).
-  const matchedKecamatan = kecamatanList.value.find(
-    (k) => k.nama.toLowerCase() === (patient.value?.kecamatan_raw ?? '').trim().toLowerCase()
-  )
-  selectedKecamatanId.value = matchedKecamatan?.id ?? null
-  if (matchedKecamatan) loadDesaList(matchedKecamatan.id)
+  updateFieldErrors.value = {}
   showUpdateModal.value = true
+  await nextTick()
+  // Kecamatan/desa lama (teks bebas SiLAKES) dicocokkan ke daftar kanonik; hasilnya juga jadi
+  // nilai awal supaya tidak terhitung sebagai perubahan.
+  await dataFieldsRef.value?.setWilayahDariTeks(patient.value?.kecamatan_raw, patient.value?.kel_desa_raw)
+  awalUpdateForm.value.kecamatan = updateForm.value.kecamatan
+  awalUpdateForm.value.kel_desa = updateForm.value.kel_desa
 }
+
+function closeUpdateModal() {
+  if (!isSavingUpdate.value) showUpdateModal.value = false
+}
+onKeyStroke('Escape', () => {
+  if (showUpdateModal.value) closeUpdateModal()
+})
+
+async function onKtpScanned(result: KtpScanResult) {
+  ktpScanId.value = result.id
+  nikScanPasienLainId.value = result.existing_patient_id !== null && result.existing_patient_id !== patient.value?.id
+    ? result.existing_patient_id
+    : null
+  if (!result.fields) return
+  applyKtpFields(updateForm.value, result.fields)
+  if (result.fields.kecamatan || result.fields.kel_desa) {
+    await dataFieldsRef.value?.setWilayahDariTeks(result.fields.kecamatan, result.fields.kel_desa)
+  }
+}
+
+function onKtpRemoved() {
+  ktpScanId.value = null
+  nikScanPasienLainId.value = null
+}
+
+const FIELD_TEKS_USULAN = [
+  'nik', 'name', 'tempat_lahir', 'tgl_lahir', 'gender', 'alamat', 'rt_rw', 'kecamatan', 'kel_desa',
+  'phone', 'email', 'pekerjaan', 'status_perkawinan', 'golongan_darah', 'agama', 'jenis_prolanis',
+  'jenis_perokok', 'no_bpjs'
+] as const
+
+function bangunUsulan(): PatientFieldUpdates {
+  const f = updateForm.value
+  const a = awalUpdateForm.value
+  const usulan: Record<string, unknown> = {}
+
+  for (const key of FIELD_TEKS_USULAN) {
+    const baru = key === 'phone' ? normalizePhone(f[key]) : String(f[key] ?? '').trim()
+    const lama = key === 'phone' ? normalizePhone(a[key]) : String(a[key] ?? '').trim()
+    if (baru !== '' && baru !== lama) usulan[key] = baru
+  }
+  if (f.is_bpjs !== a.is_bpjs) usulan.is_bpjs = f.is_bpjs
+
+  const fktpBaru = buildFktpValue(f.fktp_pilihan, f.fktp_tambahan)
+  if (fktpBaru !== '' && fktpBaru !== buildFktpValue(a.fktp_pilihan, a.fktp_tambahan)) usulan.fktp = fktpBaru
+
+  if (ktpScanId.value !== null) usulan.ktp_scan_id = ktpScanId.value
+  if (f.konfirmasi_beda_nik) usulan.konfirmasi_beda_nik = true
+
+  return usulan as PatientFieldUpdates
+}
+
+const jumlahPerubahan = computed(() => {
+  const u = bangunUsulan()
+  return Object.keys(u).filter((k) => k !== 'ktp_scan_id' && k !== 'konfirmasi_beda_nik').length
+})
 
 async function submitProposeUpdate() {
-  const hasAnyValue = Object.values(updateForm.value).some((v) => typeof v === 'string' ? v.trim() !== '' : v !== undefined)
-  if (!hasAnyValue) {
-    updateError.value = 'Isi minimal satu field yang ingin diajukan perubahannya.'
-    return
-  }
-  const nik = (updateForm.value.nik ?? '').trim()
-  if (nik !== '' && !/^\d{16}$/.test(nik)) {
-    updateError.value = 'NIK harus 16 digit angka sesuai KTP.'
-    return
-  }
-  isSavingUpdate.value = true
   updateError.value = ''
+  updateFieldErrors.value = {}
+  const usulan = bangunUsulan()
+  const f = updateForm.value
+
+  if (jumlahPerubahan.value === 0 && ktpScanId.value === null) {
+    updateError.value = 'Belum ada isian yang berubah. Ubah data yang salah atau scan KTP pasien.'
+    return
+  }
+  if (usulan.nik && !parseNik(usulan.nik).valid) {
+    updateError.value = parseNik(usulan.nik).alasan ?? 'NIK tidak valid.'
+    return
+  }
+  const galatHp = phoneError(f.phone)
+  if (usulan.phone && galatHp) {
+    updateError.value = galatHp
+    return
+  }
+  const galatBpjs = bpjsError(f.no_bpjs)
+  if (usulan.no_bpjs && galatBpjs) {
+    updateError.value = galatBpjs
+    return
+  }
+  const identitasBerubah = Boolean(usulan.nik || usulan.tgl_lahir || usulan.gender)
+  if (identitasBerubah && Object.keys(nikMismatches(f.nik, f.tgl_lahir, f.gender)).length > 0 && !f.konfirmasi_beda_nik) {
+    updateError.value = 'Tanggal lahir atau jenis kelamin tidak sama dengan NIK. Periksa KTP, lalu centang konfirmasi bila memang begitu.'
+    return
+  }
+
+  isSavingUpdate.value = true
   try {
     const api = useApi()
-    const payload: PatientFieldUpdates = {}
-    for (const [key, value] of Object.entries(updateForm.value)) {
-      if (typeof value === 'string' && value.trim() !== '') (payload as any)[key] = value.trim()
-      else if (typeof value === 'boolean') (payload as any)[key] = value
-    }
-    await api(`/patients/${route.params.id}/propose-update`, { method: 'PATCH', body: payload })
+    await api(`/patients/${route.params.id}/propose-update`, { method: 'PATCH', body: usulan })
     showUpdateModal.value = false
-    toast.add({ title: 'Usulan perubahan data pasien berhasil diajukan', color: 'success' })
+    toast.add({ title: 'Usulan perubahan data pasien terkirim ke Labkesda', color: 'success' })
     // Usulan baru muncul di riwayat dengan status pending_review -- muat ulang supaya
     // langsung terlihat, bukan menunggu reload halaman manual.
     loadUpdateHistory()
   } catch (e) {
-    updateError.value = e instanceof ApiError
-      ? (e.errors?.nik?.[0] ?? e.message)
-      : 'Gagal mengajukan usulan perubahan.'
+    if (e instanceof ApiError) {
+      updateFieldErrors.value = e.errors ?? {}
+      updateError.value = e.errors ? 'Ada isian yang perlu diperbaiki, lihat pesan merah di form.' : e.message
+    } else {
+      updateError.value = 'Gagal mengajukan usulan perubahan. Periksa koneksi lalu coba lagi.'
+    }
   } finally {
     isSavingUpdate.value = false
   }
@@ -1055,7 +1101,8 @@ const HISTORY_KATEGORI_LABELS: Record<string, string> = { geo: 'Titik Lokasi', k
 
 function historyItemLabel(item: PatientFieldUpdateHistoryItem): string {
   if (item.kategori === 'geo') return 'Titik Lokasi Rumah'
-  return item.field_name ?? HISTORY_KATEGORI_LABELS[item.kategori] ?? item.kategori
+  if (item.field_name) return PATIENT_FIELD_LABELS[item.field_name] ?? item.field_name
+  return HISTORY_KATEGORI_LABELS[item.kategori] ?? item.kategori
 }
 
 function formatHistoryDate(iso: string | null): string {
@@ -1868,160 +1915,85 @@ async function triggerSyncFromHistory() {
       </div>
     </div>
 
-    <!-- Modal Ajukan Update Data Pasien -- PATCH /patients/{id}/propose-update, jalur paralel
-         dari usulan kader lewat POST /visit-reports. -->
-    <div v-if="showUpdateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-      <div class="bg-white rounded-3xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
-        <div class="border-b border-slate-100 px-6 py-4 flex items-center justify-between shrink-0">
-          <h3 class="font-bold text-accent text-lg flex items-center gap-2">
-            <LucidePencil class="w-5 h-5 text-primary" />
-            Ajukan Update Data Pasien
-          </h3>
-          <button @click="showUpdateModal = false" class="text-slate-400 hover:text-slate-600 p-1">
-            <LucideX class="w-5 h-5" />
-          </button>
-        </div>
-
-        <div class="p-6 space-y-4 overflow-y-auto">
-          <p class="text-sm text-slate-500">Isi apa yang Anda ketahui akurat tentang pasien ini — boleh sebagian saja. Usulan ini dikirim ke SiLAKES untuk ditinjau, tidak langsung diterapkan.</p>
-          <p v-if="updateError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ updateError }}</p>
-
-          <!-- Koreksi NIK: hanya pasien yang NIK-nya di SiLAKES kosong/"-"/berisi no. reg
-               (permintaan Kepala Dinas). Pasien ber-NIK lain dikoreksi langsung di SiLAKES. -->
-          <div v-if="patient?.nik_bisa_dikoreksi" class="rounded-xl border border-amber-200 bg-amber-50 p-3">
-            <label for="usulan-koreksi-nik" class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Koreksi NIK</label>
-            <input
-              id="usulan-koreksi-nik"
-              v-model="updateForm.nik"
-              type="text"
-              inputmode="numeric"
-              maxlength="16"
-              autocomplete="off"
-              placeholder="16 digit sesuai KTP"
-              aria-describedby="usulan-koreksi-nik-info"
-              class="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm tracking-wider focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-            />
-            <p id="usulan-koreksi-nik-info" class="mt-1.5 text-xs text-slate-700">
-              NIK pasien ini di SiLAKES belum terisi dengan benar (kosong, "-", atau berisi nomor registrasi). Isi bila Anda mengetahui NIK dari KTP pasien.
-            </p>
+    <!-- Modal Ajukan Update Data Pasien: form lengkap seperti registrasi SiLAKES + scan KTP
+         (revisi 2026-11-16). PATCH /patients/{id}/propose-update, jalur paralel dari usulan
+         kader lewat POST /visit-reports. Hanya isian yang berubah yang dikirim. -->
+    <div
+      v-if="showUpdateModal"
+      class="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 sm:items-center sm:p-4"
+      @click.self="closeUpdateModal"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="judul-usulan-pasien"
+        class="flex max-h-[95vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-xl sm:rounded-3xl"
+      >
+        <div class="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 sm:px-6">
+          <div class="min-w-0">
+            <h3 id="judul-usulan-pasien" class="text-lg font-bold text-accent">Ajukan perubahan data pasien</h3>
+            <p class="truncate text-sm text-slate-600">{{ patient?.nama }}</p>
           </div>
-
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Alamat Lengkap</label>
-            <textarea v-model="updateForm.alamat" rows="2" placeholder="Jl. ..." class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-none"></textarea>
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">RT/RW</label>
-              <input type="text" v-model="updateForm.rt_rw" placeholder="002/003" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kecamatan</label>
-              <USelectMenu
-                :model-value="selectedKecamatanId"
-                @update:model-value="onKecamatanChange"
-                :items="kecamatanSelectItems"
-                value-key="value"
-                searchable
-                placeholder="Pilih kecamatan..."
-                class="w-full"
-              />
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Kel/Desa</label>
-              <USelectMenu
-                v-model="updateForm.kel_desa"
-                :items="desaSelectItems"
-                value-key="value"
-                searchable
-                :disabled="!selectedKecamatanId"
-                :loading="isLoadingDesa"
-                :placeholder="selectedKecamatanId ? 'Pilih kel/desa...' : 'Pilih kecamatan dulu'"
-                class="w-full"
-              />
-            </div>
-          </div>
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Nomor Telepon</label>
-            <input type="tel" v-model="updateForm.phone" placeholder="08..." class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
-          </div>
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Pekerjaan</label>
-            <input type="text" v-model="updateForm.pekerjaan" placeholder="Mis. Petani, Pensiunan..." class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Status Perkawinan</label>
-              <select v-model="updateForm.status_perkawinan" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white">
-                <option value="">Pilih...</option>
-                <option value="BELUM KAWIN">Belum Kawin</option>
-                <option value="KAWIN">Kawin</option>
-                <option value="CERAI HIDUP">Cerai Hidup</option>
-                <option value="CERAI MATI">Cerai Mati</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Golongan Darah</label>
-              <select v-model="updateForm.golongan_darah" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white">
-                <option value="">Pilih...</option>
-                <option value="A">A</option>
-                <option value="B">B</option>
-                <option value="AB">AB</option>
-                <option value="O">O</option>
-              </select>
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Agama</label>
-              <select v-model="updateForm.agama" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white">
-                <option value="">Pilih...</option>
-                <option value="ISLAM">Islam</option>
-                <option value="KRISTEN">Kristen</option>
-                <option value="KATOLIK">Katolik</option>
-                <option value="HINDU">Hindu</option>
-                <option value="BUDHA">Budha</option>
-                <option value="KONGHUCU">Konghucu</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Status Perokok</label>
-              <select v-model="updateForm.jenis_perokok" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white">
-                <option value="">Pilih...</option>
-                <option value="AKTIF">Aktif Merokok</option>
-                <option value="PASIF">Pasif / Tidak Merokok</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Jenis Prolanis</label>
-            <select v-model="updateForm.jenis_prolanis" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white">
-              <option value="">Pilih...</option>
-              <option value="DM">Diabetes Mellitus (DM)</option>
-              <option value="HT">Hipertensi (HT)</option>
-              <option value="DM_HT">DM & Hipertensi</option>
-            </select>
-          </div>
-          <div class="flex items-center gap-3 pt-2 border-t border-slate-100">
-            <input type="checkbox" id="pasien_is_bpjs" v-model="updateForm.is_bpjs" class="w-4 h-4 rounded text-primary border-slate-300 focus:ring-primary" />
-            <label for="pasien_is_bpjs" class="text-sm font-bold text-slate-700">Peserta BPJS</label>
-          </div>
-          <div v-if="updateForm.is_bpjs">
-            <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Nomor BPJS</label>
-            <input type="text" v-model="updateForm.no_bpjs" placeholder="0001234567890" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
-          </div>
-        </div>
-
-        <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
-          <button @click="showUpdateModal = false" class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors">Batal</button>
           <button
-            @click="submitProposeUpdate"
-            :disabled="isSavingUpdate"
-            class="py-2.5 px-6 rounded-xl font-bold text-white bg-primary hover:bg-primary-600 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm"
+            type="button"
+            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            aria-label="Tutup"
+            @click="closeUpdateModal"
           >
-            <LucideLoader2 v-if="isSavingUpdate" class="w-4 h-4 animate-spin" />
-            {{ isSavingUpdate ? 'Mengajukan...' : 'Ajukan Perubahan' }}
+            <LucideX class="h-5 w-5" aria-hidden="true" />
           </button>
+        </div>
+
+        <div class="space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
+          <p class="text-sm text-slate-600">
+            Ubah isian yang salah, atau scan KTP supaya terisi otomatis. Data pasien baru berubah setelah Labkesda menyetujui usulan ini.
+          </p>
+          <p v-if="updateError" role="alert" class="rounded-xl border border-danger-200 bg-danger-50 px-3 py-2 text-sm font-semibold text-danger-700">{{ updateError }}</p>
+
+          <PatientKtpScanPanel @scanned="onKtpScanned" @removed="onKtpRemoved">
+            <template #setelah-hasil>
+              <p v-if="nikScanPasienLainId" class="mt-2 text-xs font-semibold text-danger-700">
+                NIK di KTP ini sudah tercatat pada pasien lain di PRODULI.
+                <NuxtLink :to="`/dashboard/pasien/${nikScanPasienLainId}`" target="_blank" class="underline">Buka data pasien itu</NuxtLink>
+                untuk memastikan ini bukan data ganda.
+              </p>
+            </template>
+          </PatientKtpScanPanel>
+
+          <PatientDataFields
+            ref="dataFieldsRef"
+            v-model:form="updateForm"
+            mode="usulan"
+            id-prefix="usulan"
+            :errors="updateFieldErrors"
+          />
+        </div>
+
+        <div class="flex shrink-0 flex-col-reverse gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <p class="text-sm text-slate-600" aria-live="polite">
+            <template v-if="jumlahPerubahan > 0">{{ jumlahPerubahan }} isian berubah<template v-if="ktpScanId"> + foto KTP</template></template>
+            <template v-else-if="ktpScanId">Foto KTP saja</template>
+            <template v-else>Belum ada perubahan</template>
+          </p>
+          <div class="flex gap-3">
+            <button
+              type="button"
+              class="min-h-11 flex-1 rounded-xl px-5 py-2.5 font-semibold text-slate-700 hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:flex-none"
+              :disabled="isSavingUpdate"
+              @click="closeUpdateModal"
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              class="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-6 py-2.5 font-bold text-white hover:bg-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 disabled:opacity-50 sm:flex-none"
+              :disabled="isSavingUpdate || (jumlahPerubahan === 0 && !ktpScanId)"
+              @click="submitProposeUpdate"
+            >
+              <LucideLoader2 v-if="isSavingUpdate" class="h-4 w-4 animate-spin" aria-hidden="true" />
+              {{ isSavingUpdate ? 'Mengirim...' : 'Kirim ke Labkesda' }}
+            </button>
+          </div>
         </div>
       </div>
     </div>

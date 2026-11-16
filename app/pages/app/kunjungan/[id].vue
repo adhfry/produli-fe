@@ -254,7 +254,7 @@ const openUpdateModal = async () => {
   updateForm.value = {
     alamat: patient.value?.alamat ?? "",
     phone: patient.value?.phone ?? "",
-    // Kosong = tidak diajukan. Isian hanya tampil bila patient.nik_bisa_dikoreksi.
+    // Kosong = tidak diajukan.
     nik: "",
   };
   nikError.value = "";
@@ -2075,7 +2075,7 @@ async function submitData() {
           <p class="text-base text-slate-500 dark:text-slate-400 mb-4">Isi apa yang sempat Anda gali saat kunjungan — boleh sebagian saja. Data ini dikirim bersama laporan kunjungan untuk divalidasi Puskesmas/SiLAKES, tidak langsung diterapkan.</p>
 
           <div class="flex-1 overflow-y-auto no-scrollbar space-y-4 pb-4">
-            <!-- Koreksi NIK: hanya pasien ber-NIK kosong/"-"/berisi no. reg (permintaan Kepala Dinas). -->
+            <!-- Usulan NIK: terbuka untuk semua pasien (revisi 2026-11-16), tetap diverifikasi Labkesda. -->
             <div v-if="patient?.nik_bisa_dikoreksi" class="rounded-xl border-2 border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 p-3">
               <label for="kader-koreksi-nik" class="block text-sm font-bold text-slate-800 dark:text-white mb-1">NIK Pasien (dari KTP)</label>
               <input
@@ -2093,7 +2093,7 @@ async function submitData() {
               />
               <p v-if="nikError" class="mt-1 text-sm font-semibold text-danger" role="alert">{{ nikError }}</p>
               <p id="kader-koreksi-nik-info" class="mt-1 text-sm text-slate-700 dark:text-slate-300">
-                NIK pasien ini belum tercatat dengan benar. Isi bila Anda melihat KTP pasien.
+                Isi hanya bila Anda melihat KTP pasien dan NIK-nya berbeda dari data sekarang. Kosongkan bila tidak tahu.
               </p>
             </div>
             <div>

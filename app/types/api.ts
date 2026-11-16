@@ -482,6 +482,14 @@ export interface AddPasienBaruPayload {
   kecamatan?: string | null
   no_bpjs?: string | null
   jenis_prolanis?: 'DM' | 'HT' | 'DM_HT' | null
+  email?: string | null
+  agama?: string | null
+  status_perkawinan?: string | null
+  pekerjaan?: string | null
+  golongan_darah?: string | null
+  fktp?: string | null
+  ktp_scan_id?: number | null
+  konfirmasi_beda_nik?: boolean
 }
 
 // GET /pengiriman-sampel/patient-candidates.
@@ -1054,8 +1062,48 @@ export interface PatientFieldUpdates {
   no_bpjs?: string
   jenis_prolanis?: string
   jenis_perokok?: string
-  // Hanya untuk pasien ber-NIK kosong/"-"/berisi no. reg (nik_bisa_dikoreksi), 16 digit.
+  // Revisi 2026-11-16: NIK boleh diajukan untuk semua pasien, plus identitas lengkap.
   nik?: string
+  name?: string
+  tempat_lahir?: string
+  tgl_lahir?: string
+  gender?: 'L' | 'P' | ''
+  email?: string
+  fktp?: string
+  ktp_scan_id?: number
+  konfirmasi_beda_nik?: boolean
+}
+
+// POST /ktp-scans -- hasil baca KTP lewat OCR SiLAKES (kolom sama dengan tabel patients SiLAKES).
+export interface KtpOcrFields {
+  nik?: string | null
+  name?: string | null
+  tempat_lahir?: string | null
+  tgl_lahir?: string | null // YYYY-MM-DD
+  gender?: 'L' | 'P' | null
+  alamat?: string | null
+  rt_rw?: string | null
+  kel_desa?: string | null
+  kecamatan?: string | null
+  agama?: string | null
+  status_perkawinan?: string | null
+  pekerjaan?: string | null
+  golongan_darah?: string | null
+}
+
+export interface KtpOcrCheck {
+  field: string
+  level: 'error' | 'warn'
+  message: string
+}
+
+export interface KtpScanResult {
+  id: number
+  fields: KtpOcrFields | null
+  checks: KtpOcrCheck[]
+  ocr_error: string | null
+  // Pasien PRODULI yang NIK-nya sama dengan hasil scan (peringatan data ganda).
+  existing_patient_id: number | null
 }
 
 // GET /kader/update-requests -- riwayat pengajuan pembaruan data pasien milik KADER SENDIRI
