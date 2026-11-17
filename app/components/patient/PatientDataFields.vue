@@ -77,7 +77,10 @@ watch(() => form.value.nik, (nilai) => {
     if (!form.value.tgl_lahir && info.tglLahir) form.value.tgl_lahir = info.tglLahir
     if (!form.value.gender && info.gender) form.value.gender = info.gender
   }
-})
+// Mode baru: NIK bisa sudah terisi sebelum komponen tampil (dibawa dari kata kunci pencarian),
+// jadi diproses sekali saat mulai. Mode usulan TIDAK, supaya tanggal lahir/jenis kelamin yang
+// kosong di data lama tidak diam-diam ikut terkirim sebagai perubahan.
+}, { immediate: props.mode === 'baru' })
 
 const beda = computed(() => nikMismatches(form.value.nik, form.value.tgl_lahir, form.value.gender))
 const adaBeda = computed(() => Object.keys(beda.value).length > 0)

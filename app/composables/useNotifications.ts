@@ -10,7 +10,9 @@ import {
   LucideCalendarX,
   LucideCircleCheck,
   LucideTruck,
-  LucideNavigation
+  LucideNavigation,
+  LucideUserCheck,
+  LucideUserX
 } from '#components'
 import type { ApiSuccessEnvelope, AppNotification, PaginatedData } from '~/types/api'
 
@@ -175,6 +177,23 @@ export function useNotifications() {
           : `Rujukan pasien ${n.data.patient_nama ?? '-'} dibatalkan puskesmas.`
       }
     }
+    // Hasil verifikasi Labkesda (revisi 2026-11-17, SilakesEventService): backend menyimpan
+    // title/body siap pakai di data, jadi kalimatnya sama dengan push notification.
+    if (n.type === 'pasien_baru_terdaftar' || n.type === 'pasien_baru_ditolak' || n.type === 'usulan_pasien_diputuskan') {
+      const fallback: Record<string, string> = {
+        pasien_baru_terdaftar: 'Pasien baru terdaftar di Labkesda',
+        pasien_baru_ditolak: 'Pendaftaran pasien baru ditolak Labkesda',
+        usulan_pasien_diputuskan: 'Usulan data pasien diputuskan'
+      }
+      return {
+        title: typeof n.data.title === 'string' ? n.data.title : fallback[n.type]!,
+        desc: typeof n.data.body === 'string' ? n.data.body : `Pasien ${n.data.patient_nama ?? '-'}.`
+      }
+    }
+    // Type lain yang sudah membawa title/body sendiri tetap tampil rapi, bukan kode mentah.
+    if (typeof n.data?.title === 'string') {
+      return { title: n.data.title, desc: typeof n.data.body === 'string' ? n.data.body : '' }
+    }
     return { title: n.type ?? 'Notifikasi', desc: '' }
   }
 
@@ -200,6 +219,9 @@ export function useNotifications() {
     if (type === 'sampel_ditugaskan') return LucideTruck
     if (type === 'sampel_otw') return LucideNavigation
     if (type === 'sampel_tiba') return LucideCircleCheck
+    if (type === 'pasien_baru_terdaftar') return LucideUserCheck
+    if (type === 'pasien_baru_ditolak') return LucideUserX
+    if (type === 'usulan_pasien_diputuskan') return LucidePencil
     return LucideCalendarClock
   }
 

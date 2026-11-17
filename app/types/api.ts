@@ -1027,6 +1027,10 @@ export type NotificationType =
   | 'rujukan_dikonfirmasi'
   | 'visit_summary_tomorrow'
   | 'prolanis_schedule_reminder'
+  // Hasil verifikasi Labkesda (revisi 2026-11-17, SilakesEventService)
+  | 'pasien_baru_terdaftar'
+  | 'pasien_baru_ditolak'
+  | 'usulan_pasien_diputuskan'
   | string
 
 export interface AppNotification {
