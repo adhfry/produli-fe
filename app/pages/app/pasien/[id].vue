@@ -88,7 +88,7 @@ const getRiskLabel = (risk: string | null | undefined) => {
   if (risk === 'sedang') return 'Risiko Sedang'
   if (risk === 'ringan') return 'Risiko Ringan'
   if (risk === 'tidak_berisiko') return 'Tidak Berisiko'
-  return 'Belum Dihitung'
+  return 'Belum ada hasil lab'
 }
 
 function formatCriteriaDate(iso: string | null): string {

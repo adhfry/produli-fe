@@ -341,7 +341,8 @@ const getRiskLabel = (risk) => {
   if (risk === 'sedang') return 'Risiko Sedang'
   if (risk === 'ringan') return 'Risiko Ringan'
   if (risk === 'tidak_berisiko') return 'Tidak Berisiko'
-  return 'Belum Dihitung'
+  // Sejak semua pasien Prolanis ditarik (blueprint §9 no. 1), tanpa level = belum ada hasil lab.
+  return 'Belum ada hasil lab'
 }
 
 // Smart Early Detection (revisi Bu Kadis) -- cuma relevan saat risk_level='sedang', lihat
@@ -931,7 +932,19 @@ function formDariPasien(): PatientFormState {
   f.jenis_prolanis = p.jenis_prolanis ?? ''
   f.jenis_perokok = p.jenis_perokok ?? ''
   f.no_bpjs = p.no_bpjs ?? ''
-  f.is_bpjs = !!p.no_bpjs
+  f.is_bpjs = p.is_bpjs ?? !!p.no_bpjs
+  // Fase 2 (2026-11-17): data lengkap kini tersedia dari SiLAKES, jadi ikut terisi dan hanya
+  // perubahan sungguhan yang terkirim. Dinormalkan ke pilihan form supaya ejaan berbeda
+  // (mis. "Buddha") tidak terhitung sebagai perubahan.
+  f.tempat_lahir = p.tempat_lahir ?? ''
+  f.pekerjaan = p.pekerjaan ?? ''
+  f.email = p.email ?? ''
+  f.agama = normalizeAgama(p.agama ?? '')
+  f.status_perkawinan = normalizeStatusPerkawinan(p.status_perkawinan ?? '')
+  f.golongan_darah = (GOLONGAN_DARAH_OPTIONS as readonly string[]).includes(p.golongan_darah ?? '') ? p.golongan_darah! : ''
+  const fktp = parseFktpValue(p.fktp)
+  f.fktp_pilihan = fktp.pilihan
+  f.fktp_tambahan = fktp.namaTambahan
   // Sama di form & nilai awal -> tidak terhitung perubahan; backend (PatientController::
   // proposeUpdate) yang menyertakan FKTP pengirim ke setiap usulan pasien ini.
   if (fktpPengirimPasien.value) f.fktp_pilihan = fktpPengirimPasien.value

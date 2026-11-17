@@ -254,7 +254,8 @@ const getRiskLabel = (risk) => {
   if (risk === 'sedang') return 'Risiko Sedang'
   if (risk === 'ringan') return 'Risiko Ringan'
   if (risk === 'tidak_berisiko') return 'Tidak Berisiko'
-  return 'Belum Dihitung'
+  // Sejak semua pasien Prolanis ditarik (blueprint §9 no. 1), tanpa level = belum ada hasil lab.
+  return 'Belum ada hasil lab'
 }
 
 // Smart Early Detection (revisi Bu Kadis) -- cuma relevan saat risk_level='sedang', lihat

@@ -168,6 +168,17 @@ export interface Patient {
   jenis_prolanis: string | null
   is_perokok: boolean
   jenis_perokok: string | null
+  // Fase 2 blueprint docs/planning/16 (2026-11-17): identitas lengkap & domisili dari SiLAKES.
+  tempat_lahir?: string | null
+  golongan_darah?: string | null
+  agama?: string | null
+  status_perkawinan?: string | null
+  pekerjaan?: string | null
+  is_bpjs?: boolean | null
+  fktp?: string | null
+  email?: string | null
+  domisili?: { alamat: string | null, rt_rw: string | null, kel_desa: string | null, kecamatan: string | null, sumber: string | null, updated_at: string | null } | null
+  puskesmas_terkunci?: boolean
   wilayah_status: WilayahStatus
   puskesmas_resolution_method: 'desa' | 'kecamatan_fallback' | 'pengirim_matched' | 'pengirim_individual' | 'manual' | 'kader_verified' | 'unresolvable' | null
   // Teks asli `pengirim` (surat_hasil_labs SiLAKES) yang dipakai WilayahResolver (revisi Bu
@@ -196,6 +207,10 @@ export interface Patient {
   // daftar), lihat CareAssignmentResource sisi backend.
   care_assignments?: CareAssignmentPreview[]
   last_synced_at: string | null
+  // "Sinkron terakhir" (blueprint §4b): kapan & lewat jalur apa PRODULI terakhir menarik pasien ini.
+  refreshed_at?: string | null
+  refreshed_via?: 'harian' | 'manual' | 'realtime' | null
+  silakes_updated_at?: string | null
   // Ringkasan kunjungan (permintaan user, kolom "Nx dikunjungi" + tooltip) -- gabungan kader &
   // tenaga_kesehatan, SELALU terisi di GET /patients (bukan whenLoaded kondisional spt
   // care_assignments), lihat PatientController::index().
