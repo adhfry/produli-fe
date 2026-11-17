@@ -290,12 +290,22 @@ function formatLastSynced(iso: string | null): string {
 }
 const lastSyncedLabel = computed(() => formatLastSynced(lastSyncedAt.value))
 
+// Banner peringatan sinkron (blueprint docs/planning/16 §3c): percobaan terakhir gagal, atau
+// sinkron sukses terakhir lebih dari 26 jam lalu (jadwal harian 02:00 + jeda 2 jam).
+const lastAttemptFailed = ref(false)
+const sinkronBermasalah = computed(() => {
+  if (!isSuperAdmin.value) return false
+  if (lastAttemptFailed.value) return true
+  return lastSyncedAt.value !== null && Date.now() - new Date(lastSyncedAt.value).getTime() > 26 * 3600 * 1000
+})
+
 async function loadSyncStatus() {
   if (!isSuperAdmin.value) return
   try {
     const api = useApi()
-    const res = await api('/silakes/sync-status') as ApiSuccessEnvelope<{ last_synced_at: string | null }>
+    const res = await api('/silakes/sync-status') as ApiSuccessEnvelope<{ last_synced_at: string | null, last_attempt_status: 'success' | 'failed' | null }>
     lastSyncedAt.value = res.data.last_synced_at
+    lastAttemptFailed.value = res.data.last_attempt_status === 'failed'
   } catch (e) {
     console.error('Gagal memuat status sinkronisasi SiLAKES', e)
   }
@@ -317,6 +327,7 @@ async function triggerSilakesSync() {
     // pasien) untuk reload datanya sendiri -- tanpa ini angka di halaman tetap versi lama
     // sampai user refresh manual, padahal sync barusan sukses.
     signalSilakesSyncCompleted(res.data.last_synced_at)
+    lastAttemptFailed.value = false
   } catch (e) {
     toast.add({
       title: 'Sinkronisasi SiLAKES gagal',
@@ -606,6 +617,25 @@ onMounted(loadSyncStatus)
 
       <!-- Page Content -->
       <main class="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 bg-surface theme-transition">
+        <div
+          v-if="sinkronBermasalah"
+          role="alert"
+          class="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800"
+        >
+          <LucideAlertTriangle class="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span class="flex-1 font-semibold">
+            {{ lastAttemptFailed ? 'Sinkronisasi SiLAKES terakhir gagal.' : 'Sinkronisasi SiLAKES belum berhasil lebih dari 26 jam.' }}
+            Sukses terakhir: {{ lastSyncedLabel }}. Data pasien dan hasil lab bisa belum terbaru.
+          </span>
+          <button
+            type="button"
+            class="min-h-11 rounded-lg bg-white px-4 font-bold text-danger-700 border border-danger-200 hover:bg-danger-100 disabled:opacity-50"
+            :disabled="isSyncing"
+            @click="triggerSilakesSync"
+          >
+            {{ isSyncing ? 'Menyinkronkan...' : 'Sinkronkan sekarang' }}
+          </button>
+        </div>
         <slot />
       </main>
     </div>

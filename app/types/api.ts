@@ -210,6 +210,11 @@ export interface Patient {
   // "Sinkron terakhir" (blueprint §4b): kapan & lewat jalur apa PRODULI terakhir menarik pasien ini.
   refreshed_at?: string | null
   refreshed_via?: 'harian' | 'manual' | 'realtime' | null
+  // Fase 4: ?tanggal= (period_assessment_date) dan ?bandingkan= (compare_*, perubahan_risiko).
+  period_assessment_date?: string | null
+  compare_risk_level?: string | null
+  compare_assessment_date?: string | null
+  perubahan_risiko?: 'membaik' | 'memburuk' | 'tetap' | null
   silakes_updated_at?: string | null
   // Ringkasan kunjungan (permintaan user, kolom "Nx dikunjungi" + tooltip) -- gabungan kader &
   // tenaga_kesehatan, SELALU terisi di GET /patients (bukan whenLoaded kondisional spt

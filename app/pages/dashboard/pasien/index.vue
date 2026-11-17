@@ -1,10 +1,5 @@
 <script setup lang="ts">
 import type { ApiSuccessEnvelope, PaginatedData, Patient, SearchPatientByNikPayload, Kecamatan, Puskesmas } from '~/types/api'
-import flatpickr from 'flatpickr'
-import 'flatpickr/dist/flatpickr.css'
-import monthSelectPlugin from 'flatpickr/dist/plugins/monthSelect'
-import 'flatpickr/dist/plugins/monthSelect/style.css'
-import { Indonesian } from 'flatpickr/dist/l10n/id.js'
 
 definePageMeta({
   layout: 'dashboard',
@@ -46,37 +41,58 @@ const filterPuskesmasId = ref<number | null>(null)
 // (early_detection_flag di latestRiskClassification, sudah dipakai ikon peringatan di tabel
 // sebelumnya, sekarang jadi filter cepat juga).
 const filterEarlyDetectionOnly = ref(false)
-// Fitur periode bulanan (permintaan user) -- default bulan SAAT INI (format 'YYYY-MM'). Riwayat/
-// evaluasi lintas puskesmas: lihat kondisi pasien di bulan lalu/3 bulan lalu dibanding sekarang --
-// lihat badge risiko tabel & PatientController::index() sisi backend.
-// Y-m lokal (BUKAN toISOString -- itu UTC, bisa mundur ke bulan sebelumnya utk WIB di jam-jam
-// pertama tanggal 1, sama alasannya dgn useFlatpickr.ts::toYmd()).
-const nowLocal = new Date()
-const currentPeriod = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}`
-const filterPeriod = ref(currentPeriod)
-const isCurrentPeriod = computed(() => filterPeriod.value === currentPeriod)
-
-// flatpickr + plugin monthSelect (permintaan user, sebelumnya native <input type="month">) --
-// paket flatpickr yang sudah terpasang di app ini sudah menyertakan plugin ini, dipakai di sini
-// (bukan diintegrasikan ke useFlatpickr.ts yang dirancang utk granularitas HARI) supaya input
-// tanggal terasa konsisten dgn input tanggal lain di app tanpa mengubah composable bersama utk
-// kasus bulan-saja yang cuma dipakai di sini. maxDate dikunci ke bulan berjalan -- pola sama
-// dgn :max="currentPeriod" native sebelumnya, tidak boleh pilih periode masa depan (data
-// risiko/kunjungan belum ada).
-const filterPeriodInputRef = ref<HTMLInputElement | null>(null)
+// "Data per tanggal" (Fase 4 blueprint docs/planning/16, 2026-11-17) -- menggantikan pilihan
+// bulan: pilih hari apa pun (hari terakhir bulan = tampilan periode bulanan sebelumnya). Kosong =
+// Terkini. Kondisi dihitung dari pemeriksaan lab TERAKHIR sebelum tanggal itu (bukan tanggal
+// hitung ulang), lihat RiskClassificationHistoryService & PatientSnapshotService di backend.
+const filterTanggal = ref('')
+const isCurrentPeriod = computed(() => filterTanggal.value === '')
+// "Bandingkan dengan tanggal": kolom perubahan (Membaik/Memburuk/Tetap) + filter cepatnya.
+const filterBandingkan = ref('')
+const filterPerubahan = ref<'' | 'membaik' | 'memburuk' | 'tetap'>('')
+// Tinjau penetapan puskesmas (blueprint §9 no. 2): pasien yang puskesmasnya hasil tebakan kecamatan.
+const filterLewatKecamatan = ref(false)
+const tanggalInputRef = ref<HTMLInputElement | null>(null)
+const bandingkanInputRef = ref<HTMLInputElement | null>(null)
+let pickerTanggal: ReturnType<typeof initDatePicker> = null
+let pickerBandingkan: ReturnType<typeof initDatePicker> = null
 function initPeriodPicker() {
-  if (!filterPeriodInputRef.value) return
-  flatpickr(filterPeriodInputRef.value, {
-    locale: Indonesian,
-    plugins: [monthSelectPlugin({ shorthand: true, dateFormat: 'Y-m', theme: 'light' })],
-    maxDate: `${currentPeriod}-01`,
-    defaultDate: `${filterPeriod.value}-01`,
-    onChange: (selectedDates) => {
-      const d = selectedDates[0]
-      if (!d) return
-      filterPeriod.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    }
-  })
+  pickerTanggal = initDatePicker(tanggalInputRef.value, filterTanggal, { maxDate: 'today' })
+  pickerBandingkan = initDatePicker(bandingkanInputRef.value, filterBandingkan, { maxDate: 'today' })
+}
+function kembaliKeTerkini() {
+  pickerTanggal?.clear()
+  filterTanggal.value = ''
+}
+function hapusBandingkan() {
+  pickerBandingkan?.clear()
+  filterBandingkan.value = ''
+  filterPerubahan.value = ''
+}
+function tanggalTampil(ymd: string | null | undefined): string {
+  if (!ymd) return '-'
+  return new Date(`${ymd.slice(0, 10)}T00:00:00`).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+const PERUBAHAN_TAMPIL: Record<string, { label: string, kelas: string }> = {
+  membaik: { label: 'Membaik', kelas: 'bg-success-50 text-success-800 border border-success-200' },
+  memburuk: { label: 'Memburuk', kelas: 'bg-danger-50 text-danger-700 border border-danger-200' },
+  tetap: { label: 'Tetap', kelas: 'bg-slate-100 text-slate-700 border border-slate-200' }
+}
+// "Sinkron terakhir" (blueprint §4b): kapan PRODULI terakhir menarik data pasien ini & jalurnya.
+const SUMBER_SINKRON: Record<string, string> = { harian: 'Harian', manual: 'Manual', realtime: 'Real-time' }
+function sinkronTampil(patient: Patient): { waktu: string, sumber: string } | null {
+  if (!patient.refreshed_at) return null
+  const d = new Date(patient.refreshed_at)
+  return {
+    waktu: `${d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })} ${d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`,
+    sumber: SUMBER_SINKRON[patient.refreshed_via ?? ''] ?? '-'
+  }
+}
+
+// Filter risiko dipakai daftar & kedua ekspor; "belum_ada" = belum ada hasil lab (bukan level).
+function filterRisikoQuery(): Record<string, string | number> {
+  if (filterRisk.value === 'belum_ada') return { belum_ada_hasil_lab: 1 }
+  return filterRisk.value ? { risk_level: filterRisk.value } : {}
 }
 
 // Header tabel yang bisa diklik utk sort asc/desc (revisi Bu Kadis) -- 'nama' default asc (sama
@@ -138,8 +154,8 @@ if (typeof route.query.risk_level === 'string' && VALID_RISK_LEVELS.includes(rou
   filterRisk.value = route.query.risk_level
 }
 
-async function loadPatients(page = 1) {
-  isLoading.value = true
+async function loadPatients(page = 1, diam = false) {
+  if (!diam) isLoading.value = true
   loadError.value = ''
   try {
     const api = useApi()
@@ -147,18 +163,19 @@ async function loadPatients(page = 1) {
       query: {
         per_page: PER_PAGE,
         page,
-        ...(filterRisk.value ? { risk_level: filterRisk.value } : {}),
+        ...filterRisikoQuery(),
         ...(filterWilayahStatus.value ? { wilayah_status: filterWilayahStatus.value } : {}),
         ...(filterKecamatanId.value ? { kecamatan_id: filterKecamatanId.value } : {}),
         ...(filterPuskesmasId.value ? { puskesmas_id: filterPuskesmasId.value } : {}),
+        ...(filterLewatKecamatan.value ? { puskesmas_resolution_method: 'kecamatan_fallback' } : {}),
         // '1' (BUKAN boolean true) -- rule 'boolean' Laravel cuma terima true/false/1/0/"1"/"0",
         // BUKAN string "true" (yang dihasilkan query serializer kalau dikirim boolean literal).
         ...(filterEarlyDetectionOnly.value ? { early_detection_only: 1 } : {}),
         ...(searchQuery.value.trim() ? { search: searchQuery.value.trim() } : {}),
-        // Bulan SEKARANG sengaja TIDAK dikirim (perilaku sama seperti sebelum fitur periode ada
-        // -- period_risk_level di response toh identik dgn risk_level utk bulan berjalan, kirim
-        // param cuma menambah kerja server tanpa nilai tambah).
-        ...(!isCurrentPeriod.value ? { period: filterPeriod.value } : {}),
+        // Terkini (tanggal kosong) sengaja tidak dikirim: risk_level sudah status terkini.
+        ...(filterTanggal.value ? { tanggal: filterTanggal.value } : {}),
+        ...(filterBandingkan.value ? { bandingkan: filterBandingkan.value } : {}),
+        ...(filterBandingkan.value && filterPerubahan.value ? { perubahan: filterPerubahan.value } : {}),
         sort_by: sortBy.value,
         sort_direction: sortDirection.value
       }
@@ -193,6 +210,22 @@ const silakesSyncSignal = useSilakesSyncSignal()
 watch(silakesSyncSignal, () => {
   loadPatients(currentPage.value)
 })
+// Data pasien diperbarui dari SiLAKES (usulan disetujui, pendaftaran, gabung pasien): muat ulang
+// halaman yang sedang tampil tanpa layar memuat, dan beri tahu bila pasien itu sedang terlihat.
+let unsubscribePasienBerubah: (() => void) | null = null
+onMounted(async () => {
+  const { subscribe, dashboardTopic } = useRealtime()
+  const topic = dashboardTopic()
+  if (!topic) return
+  unsubscribePasienBerubah = await subscribe(topic, 'pasien.berubah', (payload) => {
+    const id = (payload as { patient_id?: number })?.patient_id
+    const terlihat = patients.value.find((p) => p.id === id)
+    loadPatients(currentPage.value, true)
+    if (terlihat) useToast().add({ title: `Data ${terlihat.nama} diperbarui dari SiLAKES`, color: 'info' })
+  })
+})
+onUnmounted(() => unsubscribePasienBerubah?.())
+
 // Ganti filter apa pun -> selalu balik ke halaman 1 (halaman 5 hasil filter lama biasanya
 // tidak nyambung sama sekali dengan hasil filter baru).
 watch(filterRisk, () => loadPatients(1))
@@ -200,7 +233,7 @@ watch(filterWilayahStatus, () => loadPatients(1))
 watch(filterKecamatanId, () => loadPatients(1))
 watch(filterPuskesmasId, () => loadPatients(1))
 watch(filterEarlyDetectionOnly, () => loadPatients(1))
-watch(filterPeriod, () => loadPatients(1))
+watch([filterTanggal, filterBandingkan, filterPerubahan, filterLewatKecamatan], () => loadPatients(1))
 watch([sortBy, sortDirection], () => loadPatients(1))
 
 // Debounce pencarian nama/no. registrasi -- SERVER-SIDE sekarang, jangan panggil API di setiap
@@ -359,7 +392,10 @@ const filterSummaryText = computed(() => {
   if (filterWilayahStatus.value && WILAYAH_STATUS_LABELS[filterWilayahStatus.value]) {
     qualifiers.push(WILAYAH_STATUS_LABELS[filterWilayahStatus.value])
   }
+  if (filterRisk.value === 'belum_ada') qualifiers.push('Belum Ada Hasil Lab')
   if (filterEarlyDetectionOnly.value) qualifiers.push('Deteksi Dini Aktif')
+  if (filterLewatKecamatan.value) qualifiers.push('Puskesmas Ditetapkan Lewat Kecamatan')
+  if (filterBandingkan.value && filterPerubahan.value) qualifiers.push(`kondisi ${PERUBAHAN_TAMPIL[filterPerubahan.value]!.label} sejak ${tanggalTampil(filterBandingkan.value)}`)
   if (searchQuery.value.trim()) qualifiers.push(`kata kunci "${searchQuery.value.trim()}"`)
 
   let sentence = `${formatId(totalCount.value)} Data Pasien`
@@ -377,6 +413,8 @@ const filterSummaryText = computed(() => {
   const puskesmasNama = puskesmasSelectItems.value.find((p) => p.value === filterPuskesmasId.value)?.label
   if (puskesmasNama) sentence += ` (${puskesmasNama})`
 
+  if (filterTanggal.value) sentence += `, data per ${tanggalTampil(filterTanggal.value)}`
+
   return sentence
 })
 
@@ -393,7 +431,7 @@ async function exportPdf() {
     const api = useApi()
     const blob = await api('/patients/export-pdf', {
       query: {
-        ...(filterRisk.value ? { risk_level: filterRisk.value } : {}),
+        ...filterRisikoQuery(),
         ...(filterWilayahStatus.value ? { wilayah_status: filterWilayahStatus.value } : {}),
         ...(filterKecamatanId.value ? { kecamatan_id: filterKecamatanId.value } : {}),
         ...(filterPuskesmasId.value ? { puskesmas_id: filterPuskesmasId.value } : {}),
@@ -429,7 +467,7 @@ const exportHasilError = ref('')
 
 function hasilExportQuery() {
   return {
-    ...(filterRisk.value ? { risk_level: filterRisk.value } : {}),
+    ...filterRisikoQuery(),
     ...(filterWilayahStatus.value ? { wilayah_status: filterWilayahStatus.value } : {}),
     ...(filterKecamatanId.value ? { kecamatan_id: filterKecamatanId.value } : {}),
     ...(filterPuskesmasId.value ? { puskesmas_id: filterPuskesmasId.value } : {}),
@@ -603,6 +641,7 @@ function closeNikNotFoundModal() {
             <option value="sedang">Risiko Sedang</option>
             <option value="ringan">Risiko Ringan</option>
             <option value="tidak_berisiko">Tidak Berisiko</option>
+            <option value="belum_ada">Belum ada hasil lab</option>
           </select>
           <select v-model="filterWilayahStatus" class="flex-1 md:w-48 py-2.5 px-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white">
             <option value="">Semua Status Wilayah</option>
@@ -635,17 +674,52 @@ function closeNikNotFoundModal() {
             <LucideAlertTriangle class="w-3.5 h-3.5 shrink-0" />
             Deteksi Dini Aktif
           </label>
-          <!-- Fitur periode bulanan (permintaan user) -- default bulan berjalan, badge risiko di
-               tabel otomatis pindah ke status HISTORIS begitu periode diganti (lihat
-               period_risk_level di komputasi tabel & PatientResource sisi backend). -->
           <label
-            class="flex items-center gap-2 py-2.5 px-3 rounded-xl border text-sm font-semibold shrink-0"
+            class="flex min-h-11 items-center gap-2 py-2 px-3 rounded-xl border text-sm font-semibold cursor-pointer transition-colors shrink-0"
+            :class="filterLewatKecamatan ? 'border-warning bg-warning/10 text-warning-800' : 'border-slate-200 text-slate-600 hover:border-slate-300'"
+            title="Pasien yang puskesmasnya hasil tebakan dari kecamatan. Tinjau dan klaim ke puskesmas yang benar bila perlu."
+          >
+            <input v-model="filterLewatKecamatan" type="checkbox" class="rounded border-slate-300 text-warning focus:ring-warning/30" />
+            Ditetapkan lewat kecamatan
+          </label>
+          <!-- Data per tanggal & bandingkan (Fase 4): badge risiko pindah ke kondisi pada tanggal itu. -->
+          <label
+            class="flex min-h-11 items-center gap-2 py-2 px-3 rounded-xl border text-sm font-semibold shrink-0"
             :class="!isCurrentPeriod ? 'border-info bg-info/10 text-info' : 'border-slate-200 text-slate-600'"
           >
-            <LucideCalendarClock class="w-3.5 h-3.5 shrink-0" />
-            <input ref="filterPeriodInputRef" type="text" readonly class="bg-transparent outline-none text-sm font-semibold w-24 cursor-pointer" />
+            <LucideCalendarClock class="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span class="text-xs font-semibold">Data per</span>
+            <input ref="tanggalInputRef" type="text" readonly placeholder="Terkini" aria-label="Data per tanggal" class="bg-transparent outline-none text-sm font-semibold w-28 cursor-pointer placeholder:text-slate-600" />
+          </label>
+          <label
+            class="flex min-h-11 items-center gap-2 py-2 px-3 rounded-xl border text-sm font-semibold shrink-0"
+            :class="filterBandingkan ? 'border-accent bg-accent/5 text-accent' : 'border-slate-200 text-slate-600'"
+          >
+            <LucideArrowLeftRight class="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span class="text-xs font-semibold">Bandingkan dengan</span>
+            <input ref="bandingkanInputRef" type="text" readonly placeholder="Pilih tanggal" aria-label="Bandingkan dengan tanggal" class="bg-transparent outline-none text-sm font-semibold w-28 cursor-pointer placeholder:text-slate-600" />
           </label>
         </div>
+
+        <div v-if="filterBandingkan" class="flex flex-wrap items-center gap-2" role="group" aria-label="Saring perubahan kondisi">
+          <span class="text-xs font-semibold text-slate-600">Kondisi sejak {{ tanggalTampil(filterBandingkan) }}:</span>
+          <button
+            v-for="opsi in [{ v: '', l: 'Semua' }, { v: 'membaik', l: 'Membaik' }, { v: 'memburuk', l: 'Memburuk' }, { v: 'tetap', l: 'Tetap' }]"
+            :key="opsi.v"
+            type="button"
+            class="min-h-9 rounded-lg px-3 text-xs font-bold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            :class="filterPerubahan === opsi.v ? 'bg-accent text-white' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'"
+            :aria-pressed="filterPerubahan === opsi.v"
+            @click="filterPerubahan = opsi.v as typeof filterPerubahan"
+          >
+            {{ opsi.l }}
+          </button>
+          <button type="button" class="min-h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100" @click="hapusBandingkan">
+            Hapus perbandingan
+          </button>
+        </div>
+
+        <div class="relative w-full">        </div>
 
         <div class="relative w-full">
           <LucideSearch class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -662,10 +736,11 @@ function closeNikNotFoundModal() {
           </p>
         </div>
 
-        <p v-if="!isCurrentPeriod" class="text-xs font-semibold text-info mt-2 flex items-center gap-1.5">
-          <LucideInfo class="w-3.5 h-3.5" />
-          Menampilkan status risiko pasien seperti kondisinya di bulan yang dipilih (data historis), bukan status terkini.
-        </p>
+        <div v-if="!isCurrentPeriod" class="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-info">
+          <LucideInfo class="w-3.5 h-3.5" aria-hidden="true" />
+          Menampilkan kondisi per {{ tanggalTampil(filterTanggal) }}, dari pemeriksaan lab terakhir sebelum tanggal itu.
+          <button type="button" class="min-h-9 rounded-lg px-2 underline underline-offset-2 hover:text-accent" @click="kembaliKeTerkini">Kembali ke data terkini</button>
+        </div>
       </div>
 
       <!-- Ringkasan hasil filter -- selalu tampil, kalimatnya menyesuaikan filter apa saja yang
@@ -686,7 +761,7 @@ function closeNikNotFoundModal() {
 
       <!-- Table -->
       <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse min-w-[1150px]">
+        <table class="w-full text-left border-collapse min-w-[1280px]">
           <thead>
             <tr class="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
               <th class="py-4 px-5 font-semibold">
@@ -713,12 +788,13 @@ function closeNikNotFoundModal() {
                 </button>
               </th>
               <th class="py-4 px-5 font-semibold text-center">Status Wilayah</th>
+              <th class="py-4 px-5 font-semibold">Sinkron Terakhir</th>
               <th class="py-4 px-5 font-semibold text-right">Aksi</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
             <tr v-if="isLoading">
-               <td colspan="11" class="py-12 text-center text-slate-400">
+               <td colspan="12" class="py-12 text-center text-slate-400">
                   <LucideLoader2 class="w-6 h-6 mx-auto mb-2 animate-spin" />
                   Memuat data pasien...
                </td>
@@ -781,8 +857,7 @@ function closeNikNotFoundModal() {
                </td>
                <td class="py-4 px-5">
                   <div class="flex items-center gap-1.5">
-                     <!-- period_risk_level (bukan risk_level) begitu periode BUKAN bulan berjalan --
-                          lihat filterPeriod di script, keduanya identik utk bulan ini. -->
+                     <!-- period_risk_level (bukan risk_level) saat "Data per" tanggal dipilih. -->
                      <span class="px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider" :class="getRiskColor(isCurrentPeriod ? patient.risk_level : patient.period_risk_level)">
                         {{ getRiskLabel(isCurrentPeriod ? patient.risk_level : patient.period_risk_level) }}
                      </span>
@@ -796,11 +871,25 @@ function closeNikNotFoundModal() {
                         <LucideAlertTriangle class="w-3.5 h-3.5 text-danger shrink-0" />
                      </AppTooltip>
                   </div>
+                  <div v-if="filterBandingkan" class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                     <span class="text-slate-600">dari {{ patient.compare_risk_level ? getRiskLabel(patient.compare_risk_level) : 'belum ada hasil lab' }}</span>
+                     <span v-if="patient.perubahan_risiko" class="rounded px-1.5 py-0.5 font-bold" :class="PERUBAHAN_TAMPIL[patient.perubahan_risiko]?.kelas">
+                        {{ PERUBAHAN_TAMPIL[patient.perubahan_risiko]?.label }}
+                     </span>
+                  </div>
+                  <p v-if="!isCurrentPeriod && patient.period_assessment_date" class="mt-1 text-[11px] text-slate-600">Pemeriksaan {{ tanggalTampil(patient.period_assessment_date) }}</p>
                </td>
                <td class="py-4 px-5 text-center">
                   <span class="px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider" :class="getWilayahColor(patient.wilayah_status)">
                      {{ getWilayahLabel(patient.wilayah_status) }}
                   </span>
+               </td>
+               <td class="py-4 px-5 whitespace-nowrap">
+                  <template v-if="sinkronTampil(patient)">
+                     <p class="text-sm font-semibold text-slate-700 tabular-nums">{{ sinkronTampil(patient)!.waktu }}</p>
+                     <p class="text-[11px] text-slate-600">{{ sinkronTampil(patient)!.sumber }}</p>
+                  </template>
+                  <span v-else class="text-sm text-slate-400">-</span>
                </td>
                <td class="py-4 px-5 text-right">
                   <NuxtLink :to="`/dashboard/pasien/${patient.id}`" class="inline-flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:text-primary hover:border-primary transition-colors p-2 rounded-xl shadow-sm">

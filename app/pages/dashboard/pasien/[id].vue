@@ -25,8 +25,8 @@ const patient = ref<Patient | null>(null)
 const isLoading = ref(false)
 const loadError = ref('')
 
-async function loadPatient() {
-  isLoading.value = true
+async function loadPatient(diam = false) {
+  if (!diam) isLoading.value = true
   loadError.value = ''
   try {
     const api = useApi()
@@ -312,6 +312,7 @@ const silakesSyncSignal = useSilakesSyncSignal()
 watch(silakesSyncSignal, () => {
   loadPatient()
   loadUpdateHistory()
+  loadSyncHistory()
   loadRiskHistory()
   loadLabResults()
   loadLabResultsHistory()
@@ -1083,6 +1084,86 @@ async function submitProposeUpdate() {
   }
 }
 
+// --- Riwayat Sinkron (Fase 4 blueprint docs/planning/16, GET /patients/{id}/sync-history) -----
+// Kapan PRODULI menarik data pasien ini dari SiLAKES dan kolom apa yang berubah. Dicatat sejak
+// 17 Nov 2026; isian awal kolom baru tidak dianggap perubahan.
+interface SyncHistoryItem {
+  id: number
+  synced_at: string
+  sumber: 'harian' | 'manual' | 'realtime' | 'override'
+  silakes_event: string | null
+  changed_fields: Record<string, { lama: unknown, baru: unknown, oleh?: string, alasan?: string | null }>
+}
+const syncHistory = ref<SyncHistoryItem[]>([])
+const syncHistoryPuskesmas = ref<Record<string, string>>({})
+const syncHistoryPage = ref(1)
+const syncHistoryLastPage = ref(1)
+const isLoadingSyncHistory = ref(false)
+const syncHistoryError = ref('')
+
+async function loadSyncHistory(page = 1) {
+  isLoadingSyncHistory.value = true
+  syncHistoryError.value = ''
+  try {
+    const res = await useApi()(`/patients/${route.params.id}/sync-history`, { query: { page, per_page: 20 } }) as ApiSuccessEnvelope<{
+      items: SyncHistoryItem[], puskesmas: Record<string, string>, pagination: { current_page: number, last_page: number }
+    }>
+    syncHistory.value = page === 1 ? res.data.items : [...syncHistory.value, ...res.data.items]
+    syncHistoryPuskesmas.value = { ...syncHistoryPuskesmas.value, ...res.data.puskesmas }
+    syncHistoryPage.value = res.data.pagination.current_page
+    syncHistoryLastPage.value = res.data.pagination.last_page
+  } catch (e) {
+    syncHistoryError.value = e instanceof ApiError ? e.message : 'Gagal memuat riwayat sinkron.'
+  } finally {
+    isLoadingSyncHistory.value = false
+  }
+}
+onMounted(() => loadSyncHistory())
+
+const SYNC_SUMBER_LABELS: Record<string, string> = { harian: 'Sinkron harian', manual: 'Sinkron manual', realtime: 'Real-time dari SiLAKES', override: 'Klaim puskesmas' }
+const SYNC_EVENT_LABELS: Record<string, string> = {
+  'patient_field_update.approved': 'usulan perubahan disetujui',
+  'patient_registration.approved': 'pendaftaran disetujui',
+  'patient.merged': 'pasien digabung di SiLAKES'
+}
+const SYNC_FIELD_LABELS: Record<string, string> = {
+  nama: 'Nama', no_reg: 'No. Registrasi', no_bpjs: 'No. BPJS', nik: 'NIK', gender: 'Jenis kelamin', tgl_lahir: 'Tanggal lahir',
+  tempat_lahir: 'Tempat lahir', golongan_darah: 'Golongan darah', agama: 'Agama', status_perkawinan: 'Status perkawinan',
+  pekerjaan: 'Pekerjaan', is_bpjs: 'Peserta BPJS', fktp: 'FKTP', phone: 'Nomor HP', email: 'Email', alamat: 'Alamat KTP',
+  rt_rw: 'RT/RW', kel_desa_raw: 'Kel/desa', kecamatan_raw: 'Kecamatan', is_prolanis: 'Prolanis', jenis_prolanis: 'Jenis Prolanis',
+  is_perokok: 'Perokok', jenis_perokok: 'Status merokok', domisili_alamat: 'Alamat domisili', domisili_rt_rw: 'RT/RW domisili',
+  domisili_kel_desa: 'Kel/desa domisili', domisili_kecamatan: 'Kecamatan domisili', puskesmas_id: 'Puskesmas',
+  external_patient_id: 'ID pasien SiLAKES'
+}
+function syncNilai(kolom: string, nilai: unknown): string {
+  if (nilai === null || nilai === undefined || nilai === '') return '(kosong)'
+  if (kolom === 'puskesmas_id') return syncHistoryPuskesmas.value[String(nilai)] ?? `Puskesmas #${nilai}`
+  if (typeof nilai === 'boolean') return nilai ? 'Ya' : 'Tidak'
+  if (kolom === 'gender') return nilai === 'L' ? 'Laki-laki' : nilai === 'P' ? 'Perempuan' : String(nilai)
+  return String(nilai)
+}
+function syncWaktu(iso: string): string {
+  const d = new Date(iso)
+  return `${d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}, ${d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`
+}
+
+// Data pasien diperbarui dari SiLAKES (usulan disetujui, gabung pasien): muat ulang tanpa layar
+// memuat, termasuk riwayat sinkron & status usulan (SilakesEventService -> 'pasien.berubah').
+let unsubscribePasienBerubah: (() => void) | null = null
+onMounted(async () => {
+  const { subscribe, dashboardTopic } = useRealtime()
+  const topic = dashboardTopic()
+  if (!topic) return
+  unsubscribePasienBerubah = await subscribe(topic, 'pasien.berubah', (payload) => {
+    if ((payload as { patient_id?: number })?.patient_id !== Number(route.params.id)) return
+    loadPatient(true)
+    loadSyncHistory()
+    loadUpdateHistory()
+    useToast().add({ title: 'Data pasien ini diperbarui dari SiLAKES', color: 'info' })
+  })
+})
+onUnmounted(() => unsubscribePasienBerubah?.())
+
 // --- Riwayat Pengajuan Perubahan Data (GET /patients/{id}/update-history) ------------------
 // Dibaca LIVE dari SiLAKES (patient_field_updates, sumber produli_*) -- PRODULI tidak menyimpan
 // salinan lokal status approval, SiLAKES tetap satu-satunya sumber kebenaran. Gerbang akses
@@ -1787,7 +1868,7 @@ async function triggerSyncFromHistory() {
           <p class="flex-1 text-sm font-semibold text-accent">
             Ada usulan yang <span class="text-success">disetujui SiLAKES</span> namun belum tercermin di data pasien ini.
             <template v-if="isSuperAdminForSync">Jalankan sinkronisasi untuk memperbarui.</template>
-            <template v-else>Hubungi super_admin untuk menjalankan sinkronisasi manual, atau tunggu jadwal otomatis (tiap 48 jam).</template>
+            <template v-else>Hubungi super_admin untuk menjalankan sinkronisasi manual, atau tunggu sinkron otomatis pukul 02:00.</template>
           </p>
           <button
             v-if="isSuperAdminForSync"
@@ -1843,6 +1924,60 @@ async function triggerSyncFromHistory() {
           </table>
         </div>
       </div>
+
+      <!-- Riwayat Sinkron (Fase 4): kapan data pasien ini ditarik dari SiLAKES & apa yang berubah. -->
+      <section class="bg-white rounded-2xl border border-slate-100 shadow-card p-5" aria-labelledby="judul-riwayat-sinkron">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-4 border-b border-slate-100 pb-4">
+          <h3 id="judul-riwayat-sinkron" class="font-bold text-accent text-base flex items-center gap-2">
+            <LucideRefreshCw class="w-4 h-4 text-secondary" aria-hidden="true" />
+            Riwayat Sinkron
+          </h3>
+          <p v-if="patient?.refreshed_at" class="text-xs text-slate-600">
+            Sinkron terakhir {{ syncWaktu(patient.refreshed_at) }} ({{ SYNC_SUMBER_LABELS[patient.refreshed_via ?? ''] ?? '-' }})
+          </p>
+        </div>
+
+        <div v-if="isLoadingSyncHistory && syncHistory.length === 0" class="py-8 text-center text-slate-500">
+          <LucideLoader2 class="w-5 h-5 mx-auto mb-2 animate-spin" aria-hidden="true" />
+          Memuat riwayat sinkron...
+        </div>
+        <p v-else-if="syncHistoryError" role="alert" class="text-sm font-semibold text-danger-700 bg-danger-50 border border-danger-200 rounded-xl px-3 py-2">
+          {{ syncHistoryError }}
+          <button type="button" class="ml-2 underline underline-offset-2" @click="loadSyncHistory()">Coba lagi</button>
+        </p>
+        <p v-else-if="syncHistory.length === 0" class="py-8 text-center text-sm text-slate-600">
+          Belum ada perubahan data dari SiLAKES sejak riwayat sinkron mulai dicatat (17 Nov 2026).
+        </p>
+        <ol v-else class="space-y-4">
+          <li v-for="h in syncHistory" :key="h.id" class="border-l-2 border-primary/30 pl-4">
+            <p class="text-sm font-semibold text-slate-800">
+              {{ syncWaktu(h.synced_at) }}
+              <span class="font-normal text-slate-600">
+                &middot; {{ SYNC_SUMBER_LABELS[h.sumber] ?? h.sumber }}<template v-if="h.silakes_event && SYNC_EVENT_LABELS[h.silakes_event]">, {{ SYNC_EVENT_LABELS[h.silakes_event] }}</template>
+              </span>
+            </p>
+            <ul class="mt-1.5 space-y-1">
+              <li v-for="(nilai, kolom) in h.changed_fields" :key="kolom" class="text-xs text-slate-700">
+                <span class="font-semibold">{{ SYNC_FIELD_LABELS[kolom] ?? kolom }}:</span>
+                <span class="text-slate-500 line-through">{{ syncNilai(String(kolom), nilai.lama) }}</span>
+                <span class="mx-1 text-slate-400" aria-hidden="true">&rarr;</span>
+                <span class="sr-only">menjadi</span>
+                <span class="font-semibold">{{ syncNilai(String(kolom), nilai.baru) }}</span>
+                <span v-if="nilai.oleh" class="text-slate-600"> (oleh {{ nilai.oleh }}<template v-if="nilai.alasan">: {{ nilai.alasan }}</template>)</span>
+              </li>
+            </ul>
+          </li>
+        </ol>
+        <button
+          v-if="syncHistoryPage < syncHistoryLastPage"
+          type="button"
+          class="mt-4 min-h-11 w-full rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          :disabled="isLoadingSyncHistory"
+          @click="loadSyncHistory(syncHistoryPage + 1)"
+        >
+          {{ isLoadingSyncHistory ? 'Memuat...' : 'Tampilkan riwayat lebih lama' }}
+        </button>
+      </section>
     </template>
 
     <!-- Modal Tugaskan Kader Multi-Tanggal (permintaan user) -- POST /visit-assignments/multi-dates,
