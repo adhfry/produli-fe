@@ -112,9 +112,24 @@ const puskesmasPerformanceRows = ref<any[]>([])
 // PuskesmasPerformanceScoringService di backend untuk arti tiap komponen.
 function formatPerformanceDetail(p: DashboardPuskesmasPerformance): string {
   return `Improvement Rate ${p.improvement_rate}% · Risk Reduction ${p.risk_reduction_score}% · `
-    + `Stability ${p.stability_rate}% · ${p.eligible_patients} pasien eligible, ${p.improved_patients} membaik, `
-    + `${p.validated_visits} kunjungan tervalidasi`
+    + `Stability ${p.stability_rate}% · ${p.eligible_patients} pasien dinilai, ${p.level_membaik_patients ?? p.improved_patients} membaik · `
+    + `${p.total_poin ?? p.total_improvement_points} poin (bonus kunjungan ${p.bonus_kunjungan ?? 0})`
 }
+
+// Kartu ringkasan kinerja (Fase 5 blueprint docs/planning/16 §5): pasien membaik 1/7/30 hari dan
+// peringkat + poin bulan berjalan. admin_puskesmas/pj_prolanis: puskesmas sendiri; super_admin:
+// se-kabupaten (tanpa peringkat). Gagal memuat cukup disembunyikan, bukan menutupi dashboard.
+const ringkasanKinerja = ref<{ membaik_1_hari: number, membaik_7_hari: number, membaik_30_hari: number,
+  bulan_ini: { peringkat: number | null, dari: number, total_poin: number | null } } | null>(null)
+async function loadRingkasanKinerja() {
+  try {
+    const res = await useApi()('/kinerja-puskesmas/ringkasan') as ApiSuccessEnvelope<NonNullable<typeof ringkasanKinerja.value>>
+    ringkasanKinerja.value = res.data
+  } catch {
+    ringkasanKinerja.value = null
+  }
+}
+onMounted(loadRingkasanKinerja)
 
 async function loadDashboardSummary() {
   summaryError.value = ''
@@ -357,7 +372,7 @@ const dateRangeLabel = computed(() => {
 // konteksnya konsisten (bukan reset ke "Semua Tanggal").
 const kinerjaPuskesmasLink = computed(() => ({
   path: '/dashboard/kinerja-puskesmas',
-  query: dateRangeFrom.value && dateRangeTo.value ? { date_from: dateRangeFrom.value, date_to: dateRangeTo.value } : {}
+  query: dateRangeFrom.value && dateRangeTo.value ? { date_from: dateRangeFrom.value, date_to: dateRangeTo.value } : { periode: 'semua' }
 }))
 
 function initDateRangePicker() {
@@ -1482,10 +1497,10 @@ async function subscribeCourierRealtime() {
       </div>
 
       <!-- Kanan: Top 5 Puskesmas Kinerja Terbaik -- skor gabungan (final_score, 0-100) dari
-           improvement rate + risk reduction + stability rate, HANYA dari transisi risiko yang
-           punya kunjungan TERVALIDASI sebagai bukti intervensi (bukan jumlah kunjungan mentah,
-           bukan pasien yang kebetulan membaik tanpa program PRODULI -- lihat App\Services\
-           Performance\PuskesmasPerformanceScoringService di backend). Leaderboard SE-KABUPATEN
+           improvement rate + risk reduction + stability rate atas transisi risiko karena
+           PEMERIKSAAN LAB BARU (aturan v2, Fase 5 blueprint docs/planning/16: kunjungan
+           tervalidasi kini bonus +5, bukan syarat; hitung ulang atas pemeriksaan yang sama tidak
+           dihitung -- lihat PuskesmasPerformanceScoringService di backend). Leaderboard SE-KABUPATEN
            untuk SEMUA role (super_admin/admin_puskesmas/pj_prolanis) -- super_admin bisa
            persempit lewat filter puskesmas di atas, role lain tetap melihat puskesmas lain
            sebagai pembanding. -->
@@ -1497,7 +1512,25 @@ async function subscribeCourierRealtime() {
           </h3>
           <span class="text-[11px] font-semibold text-slate-400">{{ dateRangeLabel }}</span>
         </div>
-        <p class="text-[11px] text-slate-400 mb-4">Skor kinerja (0-100) dari keberhasilan intervensi tervalidasi menurunkan risiko pasien</p>
+        <p class="text-[11px] text-slate-600 mb-3">Skor kinerja (0-100) dari perubahan kondisi pasien karena pemeriksaan lab baru</p>
+        <dl v-if="ringkasanKinerja" class="mb-3 grid grid-cols-2 gap-2 rounded-xl bg-slate-50 p-3 text-xs sm:grid-cols-4">
+          <div>
+            <dt class="text-slate-600">Membaik 1 hari</dt>
+            <dd class="text-base font-bold text-success-800 tabular-nums">{{ ringkasanKinerja.membaik_1_hari }}</dd>
+          </div>
+          <div>
+            <dt class="text-slate-600">7 hari</dt>
+            <dd class="text-base font-bold text-success-800 tabular-nums">{{ ringkasanKinerja.membaik_7_hari }}</dd>
+          </div>
+          <div>
+            <dt class="text-slate-600">30 hari</dt>
+            <dd class="text-base font-bold text-success-800 tabular-nums">{{ ringkasanKinerja.membaik_30_hari }}</dd>
+          </div>
+          <div v-if="ringkasanKinerja.bulan_ini.peringkat">
+            <dt class="text-slate-600">Peringkat bulan ini</dt>
+            <dd class="text-base font-bold text-accent tabular-nums">#{{ ringkasanKinerja.bulan_ini.peringkat }} <span class="text-xs font-semibold text-slate-600">({{ ringkasanKinerja.bulan_ini.total_poin }} poin)</span></dd>
+          </div>
+        </dl>
 
         <div class="space-y-3 flex-1 mt-2">
           <div v-for="(row, idx) in puskesmasPerformanceRows" :key="idx" class="flex items-center h-10">
@@ -1517,7 +1550,7 @@ async function subscribeCourierRealtime() {
                 </div>
              </div>
           </div>
-          <p v-if="!puskesmasPerformanceRows.length" class="text-sm text-slate-400 text-center py-6">Belum ada transisi risiko dengan kunjungan tervalidasi pada periode ini.</p>
+          <p v-if="!puskesmasPerformanceRows.length" class="text-sm text-slate-600 text-center py-6">Belum ada perubahan kondisi karena pemeriksaan lab baru pada periode ini.</p>
         </div>
 
         <NuxtLink :to="kinerjaPuskesmasLink" class="w-full text-center text-sm font-semibold text-primary hover:text-primary-600 mt-4 pt-4 border-t border-slate-100 flex items-center justify-center gap-1 transition-colors">

@@ -25,6 +25,7 @@ import {
   LucideStethoscope,
   LucideAmbulance,
   LucideCalendarClock,
+  LucideTrophy,
   LucideTruck,
   LucideSend
 } from "#components"
@@ -135,6 +136,8 @@ const menuGroups = ref([
       // Permintaan user -- kalender jadwal kegiatan Prolanis otomatis (ProlanisScheduleController),
       // gerbang sama dgn Rujukan (ProlanisSchedulePolicy::viewAny).
       { name: 'Jadwal Prolanis', icon: LucideCalendarClock, to: '/dashboard/jadwal-prolanis', roles: ['admin_puskesmas', 'pj_prolanis', 'super_admin'] },
+      // Fase 5 blueprint docs/planning/16 -- peringkat & poin kinerja (KinerjaPuskesmasController).
+      { name: 'Kinerja Puskesmas', icon: LucideTrophy, to: '/dashboard/kinerja-puskesmas', roles: ['admin_puskesmas', 'pj_prolanis', 'super_admin'] },
     ]
   },
   {

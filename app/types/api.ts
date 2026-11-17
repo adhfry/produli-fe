@@ -937,6 +937,14 @@ export interface DashboardPuskesmasPerformance {
   improved_patients: number
   validated_visits: number
   total_improvement_points: number
+  // Rincian poin aturan v2 (Fase 5 blueprint docs/planning/16).
+  worsened_patients?: number
+  level_membaik_patients?: number
+  poin_perbaikan?: number
+  poin_perburukan?: number
+  poin_retensi?: number
+  bonus_kunjungan?: number
+  total_poin?: number
 }
 
 export interface DashboardSummary {
