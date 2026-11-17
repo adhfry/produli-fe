@@ -12,6 +12,11 @@ const props = defineProps<{
   mode: 'usulan' | 'baru'
   errors?: Record<string, string[]>
   idPrefix: string
+  // Bila puskesmas pengirim jelas, FKTP terdaftar = puskesmas itu (permintaan user 2026-11-17):
+  // ditampilkan tetap, tidak bisa dipilih. Induk yang mengisi form.fktp_pilihan dengan nilai ini;
+  // backend juga memaksanya. null/undefined = pengirim tidak jelas, pilihan FKTP tetap terbuka.
+  fktpPengirim?: string | null
+  fktpPengirimKeterangan?: string
 }>()
 
 const wajib = computed(() => props.mode === 'baru')
@@ -275,14 +280,24 @@ const labelClass = 'mb-1.5 block text-sm font-semibold text-slate-700'
             <option v-for="o in opsiJenisPerokok" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
-        <div>
+        <div v-if="fktpPengirim">
+          <p :class="labelClass">FKTP terdaftar</p>
+          <p
+            :id="id('fktp')"
+            class="flex min-h-11 items-center rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-semibold text-slate-900"
+          >
+            {{ fktpPengirim }}
+          </p>
+          <p class="mt-1 text-xs text-slate-600">{{ fktpPengirimKeterangan ?? 'Otomatis: puskesmas pengirim.' }}</p>
+        </div>
+        <div v-else>
           <label :for="id('fktp')" :class="labelClass">FKTP terdaftar</label>
           <select :id="id('fktp')" v-model="form.fktp_pilihan" :class="inputClass">
             <option value="">Pilih</option>
             <option v-for="o in opsiFktp" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
-        <div v-if="fktpPerluNama">
+        <div v-if="!fktpPengirim && fktpPerluNama">
           <label :for="id('fktp_tambahan')" :class="labelClass">{{ form.fktp_pilihan === fktpDokterPribadi ? 'Nama dokter' : 'Nama FKTP' }}</label>
           <input :id="id('fktp_tambahan')" v-model="form.fktp_tambahan" type="text" :class="inputClass" />
         </div>

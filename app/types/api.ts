@@ -450,6 +450,11 @@ export interface PengirimanSampelPasien {
   jenis_prolanis_snapshot: 'DM' | 'HT' | 'DM_HT' | null
   is_pasien_baru: boolean
   registration_proposal_ref: number | null
+  // Pendaftaran langsung ke SiLAKES (revisi 2026-11-17); null = pasien dipilih dari daftar.
+  registrasi_status: 'mengirim' | 'menunggu_verifikasi' | 'terdaftar' | 'ditolak' | 'gagal_kirim' | null
+  registrasi_catatan: string | null
+  registrasi_no_reg: string | null
+  registrasi_diperbarui_at: string | null
 }
 
 export interface PengirimanSampel {
@@ -501,6 +506,17 @@ export interface PatientCandidate {
   kel_desa_raw: string | null
   kecamatan_raw: string | null
   tanggal_lab_terakhir: string | null
+}
+
+// GET /pengiriman-sampel/patient-search?q=&batch_id= (revisi 2026-11-17) -- maks 10 kandidat.
+export interface PatientSearchItem extends PatientCandidate {
+  nik: string
+  no_bpjs: string | null
+  no_reg: string | null
+  gender: 'L' | 'P' | null
+  tgl_lahir: string | null
+  is_prolanis: boolean
+  sudah_di_antrian: boolean
 }
 
 // --- Fase C (kurir, GPS, foto) ---

@@ -932,8 +932,20 @@ function formDariPasien(): PatientFormState {
   f.jenis_perokok = p.jenis_perokok ?? ''
   f.no_bpjs = p.no_bpjs ?? ''
   f.is_bpjs = !!p.no_bpjs
+  // Sama di form & nilai awal -> tidak terhitung perubahan; backend (PatientController::
+  // proposeUpdate) yang menyertakan FKTP pengirim ke setiap usulan pasien ini.
+  if (fktpPengirimPasien.value) f.fktp_pilihan = fktpPengirimPasien.value
   return f
 }
+
+// FKTP terdaftar = puskesmas pengirim sampel bila pengirimnya jelas (permintaan user 2026-11-17):
+// hanya bila puskesmas pasien dipetakan dari teks pengirim SiLAKES (pengirim_matched). Pasien
+// rujukan dokter perorangan atau yang dipetakan dari desa saja tetap memilih FKTP manual.
+const fktpPengirimPasien = computed(() => {
+  const p = patient.value
+  if (!p || p.puskesmas_resolution_method !== 'pengirim_matched') return null
+  return p.puskesmas?.nama?.trim() || null
+})
 
 async function openUpdateModal() {
   updateForm.value = formDariPasien()
@@ -1966,6 +1978,8 @@ async function triggerSyncFromHistory() {
             mode="usulan"
             id-prefix="usulan"
             :errors="updateFieldErrors"
+            :fktp-pengirim="fktpPengirimPasien"
+            fktp-pengirim-keterangan="Otomatis: puskesmas pengirim sampel pasien ini. Ikut terkirim bersama usulan."
           />
         </div>
 

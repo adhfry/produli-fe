@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { VueDraggable } from 'vue-draggable-plus'
 import type { PatientFormState } from '~/utils/patient-form'
-import type { AddPasienBaruPayload, ApiSuccessEnvelope, KtpScanResult, PatientCandidate, PengantarSampel, PengirimanSampel, PengirimanSampelPasien } from '~/types/api'
+import type { AddPasienBaruPayload, ApiSuccessEnvelope, KtpScanResult, PatientSearchItem, PengantarSampel, PengirimanSampel, PengirimanSampelPasien } from '~/types/api'
 
 definePageMeta({
   layout: 'dashboard',
@@ -33,8 +33,9 @@ const STATUS_LABELS: Record<string, string> = {
   dibatalkan: 'Dibatalkan'
 }
 
-async function loadBatch() {
-  isLoading.value = true
+// diam = penyegaran latar (setelah menambah pasien, realtime, cek berkala): daftar tetap terlihat.
+async function loadBatch(diam = false) {
+  if (!diam) isLoading.value = true
   loadError.value = ''
   try {
     const api = useApi()
@@ -48,7 +49,7 @@ async function loadBatch() {
   }
 }
 
-onMounted(loadBatch)
+onMounted(() => loadBatch())
 
 // --- Kunci / Edit / Batalkan ---
 const isTransitioning = ref(false)
@@ -167,77 +168,111 @@ async function printBatch() {
   }
 }
 
-// --- Pilih pasien yang sudah ada (checkbox + cari) ---
-// Pola sama persis modal "Buat Penugasan" di dashboard/kunjungan/index.vue.
-const showPickerModal = ref(false)
-const candidatePatients = ref<PatientCandidate[]>([])
-const isLoadingCandidates = ref(false)
-const candidateSearchQuery = ref('')
-const selectedCandidateIds = ref<number[]>([])
-const isAddingCandidates = ref(false)
-const addCandidatesError = ref('')
+// --- Tambah pasien ke antrian: cari sambil mengetik, atau daftarkan pasien baru ---
+// Revisi 2026-11-17: satu dialog, dua mode. Mode "cari": ketik nama/NIK/no. BPJS, muncul maks 10
+// kartu kandidat (GET /pengiriman-sampel/patient-search). Bila tidak ketemu, dialog menawarkan
+// "Daftarkan pasien baru" dan pindah ke mode "daftar" (isian lengkap + scan KTP) yang bisa kembali
+// ke mode cari kapan saja. Pasien baru langsung didaftarkan ke Labkesda (RegisterPasienBaruToSilakesJob);
+// hasil verifikasinya muncul di baris antrian tanpa memuat ulang halaman.
+type ModeTambah = 'cari' | 'daftar'
 
-const alreadyQueuedExternalIds = computed(
-  () => new Set((batch.value?.pasien ?? []).map((p) => p.external_patient_id).filter((id) => id != null))
+const showTambahModal = ref(false)
+const modeTambah = ref<ModeTambah>('cari')
+const kataKunci = ref('')
+const hasilCari = ref<PatientSearchItem[]>([])
+const kataKunciTerakhir = ref('')
+const isMencari = ref(false)
+const cariError = ref('')
+const menambahkanId = ref<number | null>(null)
+const tambahError = ref('')
+const searchInputRef = ref<HTMLInputElement | null>(null)
+
+const pencarianTerlaluPendek = computed(() => {
+  const q = kataKunci.value.trim()
+  const angka = q.replace(/[\s.-]/g, '')
+  return /^\d+$/.test(angka) ? angka.length < 4 : q.length < 2
+})
+const tidakDitemukan = computed(() =>
+  !isMencari.value && !cariError.value && !pencarianTerlaluPendek.value
+  && kataKunciTerakhir.value === kataKunci.value.trim() && hasilCari.value.length === 0
 )
 
-const filteredCandidates = computed(() => {
-  const q = candidateSearchQuery.value.toLowerCase()
-  return candidatePatients.value.filter((p) => {
-    if (alreadyQueuedExternalIds.value.has(p.external_patient_id)) return false
-    return q ? p.nama.toLowerCase().includes(q) : true
-  })
+let nomorPencarian = 0
+async function cariPasien() {
+  const q = kataKunci.value.trim()
+  cariError.value = ''
+  if (pencarianTerlaluPendek.value) {
+    hasilCari.value = []
+    kataKunciTerakhir.value = q
+    return
+  }
+  const nomor = ++nomorPencarian
+  isMencari.value = true
+  try {
+    const res = await useApi()('/pengiriman-sampel/patient-search', { query: { q, batch_id: batchId.value } }) as ApiSuccessEnvelope<{ items: PatientSearchItem[] }>
+    // Ketikan berikutnya sudah mengirim pencarian baru: hasil lama dibuang supaya kartu tidak "lompat".
+    if (nomor !== nomorPencarian) return
+    hasilCari.value = res.data.items
+    kataKunciTerakhir.value = q
+  } catch (e) {
+    if (nomor !== nomorPencarian) return
+    cariError.value = e instanceof ApiError ? e.message : 'Pencarian gagal. Periksa koneksi lalu coba lagi.'
+  } finally {
+    if (nomor === nomorPencarian) isMencari.value = false
+  }
+}
+const cariPasienTertunda = useDebounceFn(cariPasien, 300)
+watch(kataKunci, () => {
+  if (showTambahModal.value && modeTambah.value === 'cari') cariPasienTertunda()
 })
 
-async function openPickerModal() {
-  showPickerModal.value = true
-  selectedCandidateIds.value = []
-  addCandidatesError.value = ''
-  if (candidatePatients.value.length === 0) {
-    isLoadingCandidates.value = true
-    try {
-      const api = useApi()
-      candidatePatients.value = await fetchAllPages((page) => api('/pengiriman-sampel/patient-candidates', { query: { per_page: 100, page } }))
-    } catch (e) {
-      addCandidatesError.value = e instanceof ApiError ? e.message : 'Gagal memuat daftar pasien.'
-    } finally {
-      isLoadingCandidates.value = false
-    }
-  }
+async function openTambahModal() {
+  modeTambah.value = 'cari'
+  kataKunci.value = ''
+  hasilCari.value = []
+  kataKunciTerakhir.value = ''
+  cariError.value = ''
+  tambahError.value = ''
+  showTambahModal.value = true
+  await nextTick()
+  searchInputRef.value?.focus()
 }
 
-function toggleCandidateSelection(externalPatientId: number) {
-  const idx = selectedCandidateIds.value.indexOf(externalPatientId)
-  if (idx === -1) selectedCandidateIds.value.push(externalPatientId)
-  else selectedCandidateIds.value.splice(idx, 1)
+function closeTambahModal() {
+  if (isSavingNewPatient.value || menambahkanId.value !== null) return
+  showTambahModal.value = false
 }
 
-async function addSelectedCandidates() {
-  if (selectedCandidateIds.value.length === 0) return
-  isAddingCandidates.value = true
-  addCandidatesError.value = ''
+// Escape menutup dialog hanya di mode cari: di mode daftar isian panjang bisa hilang karena
+// satu tombol tak sengaja, jadi keluar dari sana lewat tombol yang jelas.
+onKeyStroke('Escape', () => {
+  if (showTambahModal.value && modeTambah.value === 'cari') closeTambahModal()
+})
+
+async function tambahkanKandidat(p: PatientSearchItem) {
+  if (p.sudah_di_antrian) return
+  menambahkanId.value = p.external_patient_id
+  tambahError.value = ''
   try {
-    const api = useApi()
-    // Berurutan (bukan Promise.all) -- urutan tambah SENGAJA jadi urutan antrian ("cari nama
-    // dari urutan pertama di daftar hadir, otomatis jadi urutan nomor 1, dst"), Promise.all
-    // tidak menjamin urutan penyelesaian request sama dengan urutan array.
-    for (const externalId of selectedCandidateIds.value) {
-      await api(`/pengiriman-sampel/${batchId.value}/pasien`, { method: 'POST', body: { external_patient_id: externalId } })
-    }
-    showPickerModal.value = false
-    await loadBatch()
-    useToast().add({ title: `${selectedCandidateIds.value.length} pasien ditambahkan ke antrian`, color: 'success' })
+    await useApi()(`/pengiriman-sampel/${batchId.value}/pasien`, { method: 'POST', body: { external_patient_id: p.external_patient_id } })
+    p.sudah_di_antrian = true
+    await loadBatch(true)
+    useToast().add({ title: `${p.nama} masuk antrian nomor ${orderedPasien.value.length}`, color: 'success' })
+    // Langsung siap untuk pasien berikutnya (urutan tambah = urutan antrian).
+    kataKunci.value = ''
+    hasilCari.value = []
+    kataKunciTerakhir.value = ''
+    await nextTick()
+    searchInputRef.value?.focus()
   } catch (e) {
-    addCandidatesError.value = e instanceof ApiError ? e.message : 'Gagal menambahkan pasien.'
+    tambahError.value = e instanceof ApiError ? e.message : 'Gagal menambahkan pasien.'
   } finally {
-    isAddingCandidates.value = false
+    menambahkanId.value = null
   }
 }
 
-// --- Tambah pasien baru (belum ada di SiLAKES sama sekali) ---
-// Revisi 2026-11-16: isian lengkap seperti registrasi SiLAKES + scan KTP + verifikasi NIK
-// (komponen PatientDataFields, aturan sama dengan backend AddPatientToPengirimanSampelRequest).
-const showNewPatientModal = ref(false)
+// --- Mode daftar: pasien baru (isian lengkap + scan KTP, aturan sama dengan backend
+// AddPatientToPengirimanSampelRequest) ---
 const isSavingNewPatient = ref(false)
 const newPatientError = ref('')
 const newPatientFieldErrors = ref<Record<string, string[]>>({})
@@ -246,29 +281,38 @@ const newPatientKtpScanId = ref<number | null>(null)
 const newPatientSudahTerdaftar = ref(false)
 const newPatientFieldsRef = ref<{ setWilayahDariTeks: (kec: string | null | undefined, desa: string | null | undefined) => Promise<void> } | null>(null)
 
-function formPasienBaruAwal(): PatientFormState {
+// FKTP terdaftar pasien baru = puskesmas pengirim batch ini (permintaan user 2026-11-17).
+// Backend (PengirimanSampelService::addPatient) memaksa nilai yang sama.
+const fktpPengirimBatch = computed(() => batch.value?.puskesmas?.nama?.trim() || null)
+
+// Kata kunci yang tidak ketemu dibawa ke form: 16 digit = NIK, 13 digit = no. BPJS, teks = nama.
+function formPasienBaruDari(q: string): PatientFormState {
   const f = emptyPatientForm()
-  // FKTP pasien yang dikirim puskesmas biasanya puskesmas itu sendiri -- tetap bisa diganti.
-  const namaPuskesmas = batch.value?.puskesmas?.nama ?? ''
-  if ((FKTP_PUSKESMAS as readonly string[]).includes(namaPuskesmas)) f.fktp_pilihan = namaPuskesmas
+  if (fktpPengirimBatch.value) f.fktp_pilihan = fktpPengirimBatch.value
+  const angka = q.replace(/[\s.-]/g, '')
+  if (/^\d{16}$/.test(angka)) f.nik = angka
+  else if (/^\d{13}$/.test(angka)) {
+    f.no_bpjs = angka
+    f.is_bpjs = true
+  } else if (!/^\d+$/.test(angka)) f.name = q.trim()
   return f
 }
 
-function openNewPatientModal() {
-  newPatientForm.value = formPasienBaruAwal()
+function keModeDaftar() {
+  newPatientForm.value = formPasienBaruDari(kataKunci.value)
   newPatientKtpScanId.value = null
   newPatientSudahTerdaftar.value = false
   newPatientError.value = ''
   newPatientFieldErrors.value = {}
-  showNewPatientModal.value = true
+  modeTambah.value = 'daftar'
 }
 
-function closeNewPatientModal() {
-  if (!isSavingNewPatient.value) showNewPatientModal.value = false
+async function keModeCari() {
+  if (isSavingNewPatient.value) return
+  modeTambah.value = 'cari'
+  await nextTick()
+  searchInputRef.value?.focus()
 }
-onKeyStroke('Escape', () => {
-  if (showNewPatientModal.value) closeNewPatientModal()
-})
 
 async function onNewPatientKtpScanned(result: KtpScanResult) {
   newPatientKtpScanId.value = result.id
@@ -283,6 +327,13 @@ async function onNewPatientKtpScanned(result: KtpScanResult) {
 function onNewPatientKtpRemoved() {
   newPatientKtpScanId.value = null
   newPatientSudahTerdaftar.value = false
+}
+
+// Pasien di KTP ternyata sudah terdaftar: kembali ke mode cari dengan NIK-nya.
+async function cariPasienDariKtp() {
+  const nik = newPatientForm.value.nik
+  await keModeCari()
+  kataKunci.value = nik
 }
 
 // Cek di browser dulu supaya petugas langsung tahu isian mana yang kurang, tanpa bolak-balik
@@ -318,7 +369,7 @@ async function saveNewPatient() {
     return
   }
   if (newPatientSudahTerdaftar.value) {
-    newPatientError.value = 'NIK ini sudah terdaftar. Tutup form ini, lalu tambahkan lewat daftar pasien terdaftar.'
+    newPatientError.value = 'NIK ini sudah terdaftar. Kembali ke cari pasien, lalu tambahkan pasien tersebut.'
     return
   }
   if (Object.keys(nikMismatches(f.nik, f.tgl_lahir, f.gender)).length > 0 && !f.konfirmasi_beda_nik) {
@@ -352,11 +403,18 @@ async function saveNewPatient() {
 
   isSavingNewPatient.value = true
   try {
-    const api = useApi()
-    await api(`/pengiriman-sampel/${batchId.value}/pasien`, { method: 'POST', body: payload })
-    showNewPatientModal.value = false
-    await loadBatch()
-    useToast().add({ title: 'Pasien baru ditambahkan ke antrian', color: 'success' })
+    await useApi()(`/pengiriman-sampel/${batchId.value}/pasien`, { method: 'POST', body: payload })
+    await loadBatch(true)
+    useToast().add({
+      title: `${payload.name} masuk antrian dan sedang didaftarkan ke Labkesda`,
+      description: 'Hasil verifikasi Labkesda muncul di baris antrian dan di notifikasi Anda.',
+      color: 'success'
+    })
+    kataKunci.value = ''
+    hasilCari.value = []
+    kataKunciTerakhir.value = ''
+    isSavingNewPatient.value = false
+    await keModeCari()
   } catch (e) {
     if (e instanceof ApiError) {
       newPatientFieldErrors.value = e.errors ?? {}
@@ -368,6 +426,48 @@ async function saveNewPatient() {
     isSavingNewPatient.value = false
   }
 }
+
+// --- Status pendaftaran pasien baru di baris antrian ---
+const REGISTRASI_TAMPIL: Record<string, { label: string, kelas: string }> = {
+  mengirim: { label: 'Mendaftarkan ke Labkesda', kelas: 'bg-slate-100 text-slate-700' },
+  menunggu_verifikasi: { label: 'Menunggu verifikasi Labkesda', kelas: 'bg-warning-50 text-warning-800' },
+  terdaftar: { label: 'Terdaftar', kelas: 'bg-success-50 text-success-800' },
+  ditolak: { label: 'Ditolak Labkesda', kelas: 'bg-danger-50 text-danger-700' },
+  gagal_kirim: { label: 'Belum terkirim', kelas: 'bg-slate-100 text-slate-700' }
+}
+function registrasiTampil(p: PengirimanSampelPasien) {
+  const meta = p.registrasi_status ? REGISTRASI_TAMPIL[p.registrasi_status] : null
+  if (!meta) return null
+  return {
+    ...meta,
+    label: p.registrasi_status === 'terdaftar' && p.registrasi_no_reg ? `${meta.label}, no. reg ${p.registrasi_no_reg}` : meta.label
+  }
+}
+
+// Hasil verifikasi datang lewat realtime (SilakesEventService -> 'pengiriman_sampel.berubah').
+// Selama masih ada pendaftaran yang belum diputuskan, halaman juga mengecek tiap 30 detik sebagai
+// jaring pengaman bila koneksi realtime terputus.
+const adaPendaftaranBerjalan = computed(() =>
+  orderedPasien.value.some((p) => p.registrasi_status === 'mengirim' || p.registrasi_status === 'menunggu_verifikasi')
+)
+let unsubscribeRealtime: (() => void) | null = null
+let pollPendaftaran: ReturnType<typeof setInterval> | null = null
+onMounted(async () => {
+  const { subscribe, dashboardTopic } = useRealtime()
+  const topic = dashboardTopic()
+  if (topic) {
+    unsubscribeRealtime = await subscribe(topic, 'pengiriman_sampel.berubah', (payload) => {
+      if ((payload as { pengiriman_sampel_id?: number })?.pengiriman_sampel_id === batchId.value) loadBatch(true)
+    })
+  }
+  pollPendaftaran = setInterval(() => {
+    if (adaPendaftaranBerjalan.value && !isLoading.value) loadBatch(true)
+  }, 30_000)
+})
+onUnmounted(() => {
+  unsubscribeRealtime?.()
+  if (pollPendaftaran) clearInterval(pollPendaftaran)
+})
 
 // --- Hapus pasien dari antrian ---
 const removingId = ref<number | null>(null)
@@ -439,11 +539,12 @@ async function persistOrder() {
       <!-- Aksi -->
       <div class="bg-white rounded-2xl border border-slate-100 shadow-card p-5 flex flex-wrap items-center gap-3">
         <template v-if="isDraft">
-          <button @click="openPickerModal" class="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-primary-600 transition-colors shadow-sm">
-            <LucideUserPlus class="w-4 h-4" /> Pilih Pasien
-          </button>
-          <button @click="openNewPatientModal" class="flex items-center gap-2 bg-white border border-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-slate-50 transition-colors">
-            <LucideUserRoundPlus class="w-4 h-4" /> Tambah Pasien Baru
+          <button
+            type="button"
+            class="flex min-h-11 items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2"
+            @click="openTambahModal"
+          >
+            <LucideUserPlus class="h-4 w-4" aria-hidden="true" /> Tambah Pasien
           </button>
           <button
             @click="lockBatch"
@@ -512,11 +613,24 @@ async function persistOrder() {
             </span>
             <div class="flex-1 min-w-0">
               <span class="font-bold text-slate-800 block">{{ pasien.nama_snapshot }}</span>
+              <span
+                v-if="pasien.registrasi_catatan && (pasien.registrasi_status === 'ditolak' || pasien.registrasi_status === 'gagal_kirim')"
+                class="block text-xs"
+                :class="pasien.registrasi_status === 'ditolak' ? 'text-danger-700' : 'text-slate-600'"
+              >{{ pasien.registrasi_catatan }}</span>
             </div>
             <span v-if="pasien.jenis_prolanis_snapshot" class="text-[10px] font-bold uppercase text-primary bg-primary/10 px-2 py-1 rounded-md">
               {{ pasien.jenis_prolanis_snapshot }}
             </span>
-            <span v-if="pasien.is_pasien_baru" class="text-[10px] font-bold uppercase text-warning bg-warning/10 px-2 py-1 rounded-md">
+            <span
+              v-if="registrasiTampil(pasien)"
+              class="rounded-md px-2 py-1 text-[11px] font-semibold"
+              :class="registrasiTampil(pasien)!.kelas"
+              :title="pasien.registrasi_catatan ?? undefined"
+            >
+              {{ registrasiTampil(pasien)!.label }}
+            </span>
+            <span v-else-if="pasien.is_pasien_baru" class="text-[10px] font-bold uppercase text-warning bg-warning/10 px-2 py-1 rounded-md">
               Pasien Baru
             </span>
             <button
@@ -534,108 +648,136 @@ async function persistOrder() {
       </div>
     </template>
 
-    <!-- Modal: Pilih Pasien -->
-    <div v-if="showPickerModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-      <div class="bg-white rounded-3xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200 max-h-[90vh] flex flex-col">
-        <div class="border-b border-slate-100 px-6 py-4 flex items-center justify-between shrink-0">
-          <h3 class="font-bold text-accent text-lg flex items-center gap-2">
-            <LucideUserPlus class="w-5 h-5 text-primary" /> Pilih Pasien Prolanis
-          </h3>
-          <button @click="showPickerModal = false" class="text-slate-400 hover:text-slate-600 p-1"><LucideX class="w-5 h-5" /></button>
-        </div>
-
-        <div class="p-6 space-y-4 overflow-y-auto">
-          <p v-if="addCandidatesError" class="text-sm font-semibold text-danger bg-danger/10 border border-danger/20 rounded-xl px-3 py-2">{{ addCandidatesError }}</p>
-
-          <input
-            v-model="candidateSearchQuery"
-            type="text"
-            placeholder="Cari nama pasien..."
-            class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-          />
-
-          <div class="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-72 overflow-y-auto">
-            <p v-if="isLoadingCandidates" class="py-8 text-center text-slate-400">
-              <LucideLoader2 class="w-5 h-5 mx-auto animate-spin" />
-            </p>
-            <label
-              v-for="p in filteredCandidates"
-              :key="p.id"
-              class="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-slate-50"
-            >
-              <input
-                type="checkbox"
-                :checked="selectedCandidateIds.includes(p.external_patient_id)"
-                @change="toggleCandidateSelection(p.external_patient_id)"
-                class="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary/30"
-              />
-              <div class="flex-1 min-w-0">
-                <span class="text-sm font-semibold text-slate-800 block">{{ p.nama }}</span>
-                <span class="text-[11px] text-slate-500">{{ p.kel_desa_raw }}, {{ p.kecamatan_raw }}</span>
-                <span v-if="p.tanggal_lab_terakhir" class="text-[11px] text-slate-400 italic block">
-                  Lab terakhir: {{ new Date(p.tanggal_lab_terakhir).toLocaleDateString('id-ID') }}
-                </span>
-              </div>
-              <span v-if="p.jenis_prolanis" class="text-[10px] font-bold uppercase text-primary bg-primary/10 px-2 py-1 rounded-md">{{ p.jenis_prolanis }}</span>
-            </label>
-            <p v-if="!isLoadingCandidates && filteredCandidates.length === 0" class="py-8 text-center text-slate-400 text-sm">Tidak ada kandidat pasien.</p>
-          </div>
-        </div>
-
-        <div class="px-6 py-5 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-3 shrink-0">
-          <span class="text-xs text-slate-500 font-semibold">{{ selectedCandidateIds.length }} dipilih</span>
-          <div class="flex items-center gap-3">
-            <button @click="showPickerModal = false" class="py-2.5 px-5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 transition-colors">Batal</button>
-            <button
-              @click="addSelectedCandidates"
-              :disabled="isAddingCandidates || selectedCandidateIds.length === 0"
-              class="py-2.5 px-6 rounded-xl font-bold text-white bg-primary hover:bg-primary-600 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm"
-            >
-              <LucideLoader2 v-if="isAddingCandidates" class="w-4 h-4 animate-spin" />
-              Tambahkan ke Antrian
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Modal: Tambah Pasien Baru -- isian lengkap + scan KTP (revisi 2026-11-16). -->
+    <!-- Modal: Tambah pasien ke antrian (revisi 2026-11-17): mode cari (ketik, maks 10 kartu) dan
+         mode daftar pasien baru (isian lengkap + scan KTP), bisa bolak-balik. -->
     <div
-      v-if="showNewPatientModal"
+      v-if="showTambahModal"
       class="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 sm:items-center sm:p-4"
-      @click.self="closeNewPatientModal"
+      @click.self="modeTambah === 'cari' && closeTambahModal()"
     >
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="judul-pasien-baru"
+        aria-labelledby="judul-tambah-pasien"
         class="flex max-h-[95vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-xl sm:rounded-3xl"
       >
         <div class="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 sm:px-6">
-          <h3 id="judul-pasien-baru" class="flex items-center gap-2 text-lg font-bold text-accent">
-            <LucideUserRoundPlus class="h-5 w-5 text-primary" aria-hidden="true" /> Tambah pasien baru
-          </h3>
+          <div class="min-w-0">
+            <h3 id="judul-tambah-pasien" class="flex items-center gap-2 text-lg font-bold text-accent">
+              <template v-if="modeTambah === 'cari'">
+                <LucideSearch class="h-5 w-5 text-primary" aria-hidden="true" /> Tambah pasien ke antrian
+              </template>
+              <template v-else>
+                <LucideUserRoundPlus class="h-5 w-5 text-primary" aria-hidden="true" /> Daftarkan pasien baru
+              </template>
+            </h3>
+            <p class="mt-0.5 text-sm text-slate-600">
+              {{ modeTambah === 'cari'
+                ? `Antrian berisi ${orderedPasien.length} pasien. Pasien yang ditambahkan masuk di urutan berikutnya.`
+                : 'Pasien langsung didaftarkan ke Labkesda. Isian bertanda * wajib.' }}
+            </p>
+          </div>
           <button
             type="button"
-            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
             aria-label="Tutup"
-            @click="closeNewPatientModal"
+            :disabled="isSavingNewPatient || menambahkanId !== null"
+            @click="closeTambahModal"
           >
             <LucideX class="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
 
-        <div class="space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
-          <p class="text-sm text-slate-600">
-            Untuk pasien yang belum terdaftar di Labkesda. Data diusulkan ke Labkesda dan resmi tersimpan setelah diverifikasi petugas saat sampel tiba. Isian bertanda * wajib.
+        <!-- Mode cari -->
+        <div v-if="modeTambah === 'cari'" class="space-y-4 overflow-y-auto px-5 py-5 sm:px-6">
+          <div>
+            <label for="cari-pasien-antrian" class="mb-1.5 block text-sm font-semibold text-slate-700">Cari nama, NIK, atau no. BPJS</label>
+            <div class="relative">
+              <LucideSearch class="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+              <input
+                id="cari-pasien-antrian"
+                ref="searchInputRef"
+                v-model="kataKunci"
+                type="search"
+                autocomplete="off"
+                placeholder="Contoh: Siti Aminah, 3529..., 0001..."
+                class="min-h-11 w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-10 pr-10 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                aria-describedby="cari-pasien-status"
+              />
+              <LucideLoader2 v-if="isMencari" class="absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400" aria-hidden="true" />
+            </div>
+            <p id="cari-pasien-status" class="mt-1.5 text-xs text-slate-600" aria-live="polite">
+              <template v-if="kataKunci.trim() === ''">Ketik minimal 2 huruf nama, atau 4 angka NIK/no. BPJS.</template>
+              <template v-else-if="pencarianTerlaluPendek">Lanjutkan mengetik...</template>
+              <template v-else-if="!isMencari && hasilCari.length > 0">{{ hasilCari.length }} pasien cocok{{ hasilCari.length === 10 ? ' (10 teratas, ketik lebih lengkap untuk mempersempit)' : '' }}.</template>
+            </p>
+          </div>
+
+          <p v-if="cariError || tambahError" role="alert" class="rounded-xl border border-danger-200 bg-danger-50 px-3 py-2 text-sm font-semibold text-danger-700">
+            {{ cariError || tambahError }}
           </p>
+
+          <ul v-if="hasilCari.length > 0" class="space-y-2">
+            <li v-for="p in hasilCari" :key="p.external_patient_id">
+              <div
+                class="flex items-center gap-3 rounded-2xl border p-3.5"
+                :class="p.sudah_di_antrian ? 'border-slate-100 bg-slate-50' : 'border-slate-200 bg-white'"
+              >
+                <div class="min-w-0 flex-1">
+                  <p class="flex flex-wrap items-center gap-x-2 gap-y-1 font-bold text-slate-900">
+                    {{ p.nama }}
+                    <span v-if="p.jenis_prolanis" class="rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-bold uppercase text-primary">{{ p.jenis_prolanis }}</span>
+                    <span v-else-if="!p.is_prolanis" class="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">Belum Prolanis</span>
+                  </p>
+                  <p class="mt-0.5 text-xs text-slate-700 tabular-nums">
+                    NIK {{ p.nik || '-' }}<template v-if="p.no_bpjs"> · BPJS {{ p.no_bpjs }}</template><template v-if="p.no_reg"> · No. reg {{ p.no_reg }}</template>
+                  </p>
+                  <p class="text-xs text-slate-600">
+                    {{ [p.kel_desa_raw, p.kecamatan_raw].filter(Boolean).join(', ') || 'Alamat belum tercatat' }}<template v-if="p.tanggal_lab_terakhir"> · Lab terakhir {{ new Date(p.tanggal_lab_terakhir).toLocaleDateString('id-ID') }}</template>
+                  </p>
+                </div>
+                <span v-if="p.sudah_di_antrian" class="flex min-h-11 shrink-0 items-center gap-1.5 px-2 text-sm font-semibold text-success-800">
+                  <LucideCheck class="h-4 w-4" aria-hidden="true" /> Di antrian
+                </span>
+                <button
+                  v-else
+                  type="button"
+                  class="flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl bg-primary px-4 text-sm font-bold text-white hover:bg-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 disabled:opacity-50"
+                  :disabled="menambahkanId !== null"
+                  :aria-label="`Tambahkan ${p.nama} ke antrian`"
+                  @click="tambahkanKandidat(p)"
+                >
+                  <LucideLoader2 v-if="menambahkanId === p.external_patient_id" class="h-4 w-4 animate-spin" aria-hidden="true" />
+                  <LucidePlus v-else class="h-4 w-4" aria-hidden="true" />
+                  Tambahkan
+                </button>
+              </div>
+            </li>
+          </ul>
+
+          <div v-if="tidakDitemukan" class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-center">
+            <p class="font-semibold text-slate-800">Tidak ada pasien "{{ kataKunciTerakhir }}" di puskesmas ini.</p>
+            <p class="mt-1 text-sm text-slate-600">Periksa ejaan atau cari dengan NIK. Bila memang belum terdaftar, daftarkan sekarang.</p>
+            <button
+              type="button"
+              class="mx-auto mt-4 flex min-h-11 items-center gap-2 rounded-xl bg-primary px-5 font-bold text-white hover:bg-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2"
+              @click="keModeDaftar"
+            >
+              <LucideUserRoundPlus class="h-4 w-4" aria-hidden="true" /> Daftarkan pasien baru
+            </button>
+          </div>
+        </div>
+
+        <!-- Mode daftar pasien baru -->
+        <div v-else class="space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
           <p v-if="newPatientError" role="alert" class="rounded-xl border border-danger-200 bg-danger-50 px-3 py-2 text-sm font-semibold text-danger-700">{{ newPatientError }}</p>
 
           <PatientKtpScanPanel @scanned="onNewPatientKtpScanned" @removed="onNewPatientKtpRemoved">
             <template #setelah-hasil>
-              <p v-if="newPatientSudahTerdaftar" class="mt-2 text-xs font-semibold text-danger-700">
-                NIK di KTP ini sudah terdaftar sebagai pasien. Tutup form ini, lalu tambahkan lewat daftar pasien terdaftar supaya riwayat lab pasien tidak terpecah.
-              </p>
+              <div v-if="newPatientSudahTerdaftar" class="mt-2 text-xs font-semibold text-danger-700">
+                NIK di KTP ini sudah terdaftar sebagai pasien.
+                <button type="button" class="ml-1 underline underline-offset-2 hover:text-danger-800" @click="cariPasienDariKtp">Cari pasien ini</button>
+              </div>
             </template>
           </PatientKtpScanPanel>
 
@@ -645,27 +787,49 @@ async function persistOrder() {
             mode="baru"
             id-prefix="pasien-baru"
             :errors="newPatientFieldErrors"
+            :fktp-pengirim="fktpPengirimBatch"
+            fktp-pengirim-keterangan="Otomatis: puskesmas pengirim sampel ini."
           />
         </div>
 
-        <div class="flex shrink-0 gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:justify-end sm:px-6">
-          <button
-            type="button"
-            class="min-h-11 flex-1 rounded-xl px-5 py-2.5 font-semibold text-slate-700 hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:flex-none"
-            :disabled="isSavingNewPatient"
-            @click="closeNewPatientModal"
-          >
-            Batal
-          </button>
-          <button
-            type="button"
-            class="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-6 py-2.5 font-bold text-white hover:bg-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 disabled:opacity-50 sm:flex-none"
-            :disabled="isSavingNewPatient"
-            @click="saveNewPatient"
-          >
-            <LucideLoader2 v-if="isSavingNewPatient" class="h-4 w-4 animate-spin" aria-hidden="true" />
-            Tambahkan ke antrian
-          </button>
+        <div class="flex shrink-0 flex-wrap items-center gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:px-6">
+          <template v-if="modeTambah === 'cari'">
+            <button
+              v-if="!tidakDitemukan"
+              type="button"
+              class="flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-primary hover:bg-primary/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              @click="keModeDaftar"
+            >
+              <LucideUserRoundPlus class="h-4 w-4" aria-hidden="true" /> Pasien belum terdaftar? Daftarkan
+            </button>
+            <button
+              type="button"
+              class="ml-auto min-h-11 rounded-xl bg-accent px-6 font-bold text-white hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 disabled:opacity-50"
+              :disabled="menambahkanId !== null"
+              @click="closeTambahModal"
+            >
+              Selesai
+            </button>
+          </template>
+          <template v-else>
+            <button
+              type="button"
+              class="flex min-h-11 items-center gap-2 rounded-xl px-4 font-semibold text-slate-700 hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
+              :disabled="isSavingNewPatient"
+              @click="keModeCari"
+            >
+              <LucideArrowLeft class="h-4 w-4" aria-hidden="true" /> Kembali ke cari pasien
+            </button>
+            <button
+              type="button"
+              class="ml-auto flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-6 font-bold text-white hover:bg-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 disabled:opacity-50"
+              :disabled="isSavingNewPatient"
+              @click="saveNewPatient"
+            >
+              <LucideLoader2 v-if="isSavingNewPatient" class="h-4 w-4 animate-spin" aria-hidden="true" />
+              Daftarkan &amp; masukkan antrian
+            </button>
+          </template>
         </div>
       </div>
     </div>
